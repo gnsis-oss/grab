@@ -1,5 +1,4 @@
-#ifndef CORE_PERMISSION_HPP
-#define CORE_PERMISSION_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -71,5 +70,3 @@ namespace grab::core
     };
 
 }    // namespace grab::core
-
-#endif    // CORE_PERMISSION_HPP

@@ -1,5 +1,4 @@
-#ifndef CORE_MONITOR_HPP
-#define CORE_MONITOR_HPP
+#pragma once
 
 #include "core/environment.hpp"
 
@@ -44,5 +43,3 @@ namespace grab::core
     };
 
 }    // namespace grab::core
-
-#endif    // CORE_MONITOR_HPP

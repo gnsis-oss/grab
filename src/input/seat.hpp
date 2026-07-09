@@ -1,5 +1,4 @@
-#ifndef GRAB_INPUT_SEAT_HPP
-#define GRAB_INPUT_SEAT_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -56,5 +55,3 @@ namespace grab::input
     };
 
 }    // namespace grab::input
-
-#endif    // GRAB_INPUT_SEAT_HPP

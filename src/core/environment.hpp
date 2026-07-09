@@ -1,5 +1,4 @@
-#ifndef CORE_ENVIRONMENT_HPP
-#define CORE_ENVIRONMENT_HPP
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -35,5 +34,3 @@ namespace grab::core
     };
 
 }    // namespace grab::core
-
-#endif    // CORE_ENVIRONMENT_HPP

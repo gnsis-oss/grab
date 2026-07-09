@@ -1,5 +1,4 @@
-#ifndef GRAB_SCREEN_X11_CAPTURE_HPP
-#define GRAB_SCREEN_X11_CAPTURE_HPP
+#pragma once
 
 #include "grab/image.hpp"
 #include "grab/result.hpp"
@@ -65,5 +64,3 @@ namespace grab::screen
     };
 
 }    // namespace grab::screen
-
-#endif    // GRAB_SCREEN_X11_CAPTURE_HPP

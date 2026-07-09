@@ -1,5 +1,4 @@
-#ifndef GRAB_INPUT_KEYMAP_HPP
-#define GRAB_INPUT_KEYMAP_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -63,5 +62,3 @@ namespace grab::input
     };
 
 }    // namespace grab::input
-
-#endif    // GRAB_INPUT_KEYMAP_HPP

@@ -1,5 +1,4 @@
-#ifndef GRAB_NOTIFY_NOTIFIER_HPP
-#define GRAB_NOTIFY_NOTIFIER_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -67,5 +66,3 @@ namespace grab::notify
     };
 
 }    // namespace grab::notify
-
-#endif    // GRAB_NOTIFY_NOTIFIER_HPP

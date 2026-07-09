@@ -1,5 +1,4 @@
-#ifndef GRAB_CAPABILITY_HPP
-#define GRAB_CAPABILITY_HPP
+#pragma once
 
 #include "grab/enum_table.hpp"
 
@@ -170,5 +169,3 @@ namespace grab
     };
 
 }    // namespace grab
-
-#endif    // GRAB_CAPABILITY_HPP

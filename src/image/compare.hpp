@@ -1,5 +1,4 @@
-#ifndef GRAB_IMAGE_COMPARE_HPP
-#define GRAB_IMAGE_COMPARE_HPP
+#pragma once
 
 #include "grab/image.hpp"
 #include "grab/result.hpp"
@@ -42,5 +41,3 @@ namespace grab::image
                 const grab::Image& b );
 
 }    // namespace grab::image
-
-#endif    // GRAB_IMAGE_COMPARE_HPP

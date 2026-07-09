@@ -1,5 +1,4 @@
-#ifndef CORE_POSIX_MKSTEMP_HPP
-#define CORE_POSIX_MKSTEMP_HPP
+#pragma once
 
 #include <stdlib.h>
 
@@ -14,5 +13,3 @@ namespace grab::core::posix
     }
 
 }    // namespace grab::core::posix
-
-#endif    // CORE_POSIX_MKSTEMP_HPP

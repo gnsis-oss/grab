@@ -1,5 +1,4 @@
-#ifndef TESTS_CORE_FAKE_PROVIDER_HPP
-#define TESTS_CORE_FAKE_PROVIDER_HPP
+#pragma once
 
 #include "core/provider.hpp"
 #include "grab/capability.hpp"
@@ -48,5 +47,3 @@ namespace grab::test
     };
 
 }    // namespace grab::test
-
-#endif    // TESTS_CORE_FAKE_PROVIDER_HPP

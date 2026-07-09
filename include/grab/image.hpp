@@ -1,5 +1,4 @@
-#ifndef GRAB_IMAGE_HPP
-#define GRAB_IMAGE_HPP
+#pragma once
 
 #include "grab/geometry/size.hpp"
 
@@ -151,5 +150,3 @@ namespace grab
     };
 
 }    // namespace grab
-
-#endif    // GRAB_IMAGE_HPP

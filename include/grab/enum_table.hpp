@@ -1,5 +1,4 @@
-#ifndef GRAB_ENUM_TABLE_HPP
-#define GRAB_ENUM_TABLE_HPP
+#pragma once
 
 #include <array>
 #include <cstddef>
@@ -103,5 +102,3 @@ namespace grab
     }
 
 }    // namespace grab
-
-#endif    // GRAB_ENUM_TABLE_HPP

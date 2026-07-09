@@ -1,5 +1,4 @@
-#ifndef GRAB_VERSION_HPP
-#define GRAB_VERSION_HPP
+#pragma once
 
 #include <string_view>
 
@@ -39,5 +38,3 @@ namespace grab
     inline constexpr std::string_view version = GRAB_VERSION_STRING;
 
 }    // namespace grab
-
-#endif

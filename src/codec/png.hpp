@@ -1,5 +1,4 @@
-#ifndef GRAB_CODEC_PNG_HPP
-#define GRAB_CODEC_PNG_HPP
+#pragma once
 
 #include "grab/image.hpp"
 #include "grab/result.hpp"
@@ -20,5 +19,3 @@ namespace grab::codec
     decode_png( std::span<const std::byte> bytes );
 
 }    // namespace grab::codec
-
-#endif    // GRAB_CODEC_PNG_HPP

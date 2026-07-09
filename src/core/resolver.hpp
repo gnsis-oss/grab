@@ -1,5 +1,4 @@
-#ifndef CORE_RESOLVER_HPP
-#define CORE_RESOLVER_HPP
+#pragma once
 
 #include "core/registry.hpp"
 #include "grab/capability.hpp"
@@ -66,5 +65,3 @@ namespace grab::core
     };
 
 }    // namespace grab::core
-
-#endif    // CORE_RESOLVER_HPP

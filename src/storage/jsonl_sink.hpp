@@ -1,5 +1,4 @@
-#ifndef STORAGE_JSONL_SINK_HPP
-#define STORAGE_JSONL_SINK_HPP
+#pragma once
 
 #include "grab/event.hpp"
 #include "grab/result.hpp"
@@ -57,5 +56,3 @@ namespace grab::storage
     };
 
 }    // namespace grab::storage
-
-#endif    // STORAGE_JSONL_SINK_HPP

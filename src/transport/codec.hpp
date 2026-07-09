@@ -1,5 +1,4 @@
-#ifndef GRAB_TRANSPORT_CODEC_HPP
-#define GRAB_TRANSPORT_CODEC_HPP
+#pragma once
 
 #include "eventgrab/v1/events.pb.h"
 #include "grab/event.hpp"
@@ -22,5 +21,3 @@ namespace grab::transport
     from_wire( const eventgrab::v1::Event& wire );
 
 }    // namespace grab::transport
-
-#endif    // GRAB_TRANSPORT_CODEC_HPP

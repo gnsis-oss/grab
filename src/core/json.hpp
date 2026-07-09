@@ -1,5 +1,4 @@
-#ifndef CORE_JSON_HPP
-#define CORE_JSON_HPP
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -200,5 +199,3 @@ namespace grab::core::json
     };
 
 }    // namespace grab::core::json
-
-#endif    // CORE_JSON_HPP

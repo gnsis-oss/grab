@@ -1,5 +1,4 @@
-#ifndef CORE_POSIX_OPEN_H
-#define CORE_POSIX_OPEN_H
+#pragma once
 
 #ifdef __cplusplus
 extern "C"
@@ -22,5 +21,3 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* CORE_POSIX_OPEN_H */

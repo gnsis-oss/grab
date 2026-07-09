@@ -1,5 +1,4 @@
-#ifndef GRAB_SCREEN_WORKFLOW_HPP
-#define GRAB_SCREEN_WORKFLOW_HPP
+#pragma once
 
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
@@ -45,5 +44,3 @@ namespace grab::screen
                    const std::function<bool()>&    should_stop );
 
 }    // namespace grab::screen
-
-#endif    // GRAB_SCREEN_WORKFLOW_HPP

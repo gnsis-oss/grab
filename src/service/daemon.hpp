@@ -1,5 +1,4 @@
-#ifndef GRAB_SERVICE_DAEMON_HPP
-#define GRAB_SERVICE_DAEMON_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -62,5 +61,3 @@ namespace grab::service
     };
 
 }    // namespace grab::service
-
-#endif    // GRAB_SERVICE_DAEMON_HPP

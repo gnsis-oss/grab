@@ -1,5 +1,4 @@
-#ifndef GRAB_EVENT_BROWSER_BRIDGE_HPP
-#define GRAB_EVENT_BROWSER_BRIDGE_HPP
+#pragma once
 
 #include "grab/event.hpp"
 #include "grab/result.hpp"
@@ -87,5 +86,3 @@ namespace grab::event
     };
 
 }    // namespace grab::event
-
-#endif    // GRAB_EVENT_BROWSER_BRIDGE_HPP

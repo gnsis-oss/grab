@@ -1,5 +1,4 @@
-#ifndef CORE_REACTOR_HPP
-#define CORE_REACTOR_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -55,5 +54,3 @@ namespace grab::core
     };
 
 }    // namespace grab::core
-
-#endif    // CORE_REACTOR_HPP

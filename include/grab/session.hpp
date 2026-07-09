@@ -1,5 +1,4 @@
-#ifndef GRAB_SESSION_HPP
-#define GRAB_SESSION_HPP
+#pragma once
 
 #include "grab/enum_table.hpp"
 #include "grab/geometry/size.hpp"
@@ -156,5 +155,3 @@ namespace grab
     }
 
 }    // namespace grab
-
-#endif    // GRAB_SESSION_HPP

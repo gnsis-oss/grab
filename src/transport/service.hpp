@@ -1,5 +1,4 @@
-#ifndef GRAB_TRANSPORT_SERVICE_HPP
-#define GRAB_TRANSPORT_SERVICE_HPP
+#pragma once
 
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "grab/event_bus.hpp"
@@ -42,5 +41,3 @@ namespace grab::transport
     };
 
 }    // namespace grab::transport
-
-#endif    // GRAB_TRANSPORT_SERVICE_HPP

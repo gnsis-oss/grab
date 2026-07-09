@@ -1,5 +1,4 @@
-#ifndef GRAB_SCREEN_VIRTUAL_DISPLAY_HPP
-#define GRAB_SCREEN_VIRTUAL_DISPLAY_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -46,5 +45,3 @@ namespace grab::screen
     };
 
 }    // namespace grab::screen
-
-#endif    // GRAB_SCREEN_VIRTUAL_DISPLAY_HPP

@@ -1,5 +1,4 @@
-#ifndef GRAB_SCREEN_RECORD_HPP
-#define GRAB_SCREEN_RECORD_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -57,5 +56,3 @@ namespace grab::screen
     };
 
 }    // namespace grab::screen
-
-#endif    // GRAB_SCREEN_RECORD_HPP

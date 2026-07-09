@@ -1,5 +1,4 @@
-#ifndef CORE_DOCTOR_HPP
-#define CORE_DOCTOR_HPP
+#pragma once
 
 #include "core/environment.hpp"
 #include "core/registry.hpp"
@@ -44,5 +43,3 @@ namespace grab::core
     doctor_exit_code( const DoctorReport& report );
 
 }    // namespace grab::core
-
-#endif    // CORE_DOCTOR_HPP

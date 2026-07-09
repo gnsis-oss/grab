@@ -1,5 +1,4 @@
-#ifndef GRAB_EVENT_BUS_HPP
-#define GRAB_EVENT_BUS_HPP
+#pragma once
 
 #include "grab/event.hpp"
 
@@ -95,5 +94,3 @@ namespace grab
     };
 
 }    // namespace grab
-
-#endif    // GRAB_EVENT_BUS_HPP

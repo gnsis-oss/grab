@@ -1,5 +1,4 @@
-#ifndef GRAB_SCREEN_ENUMERATE_HPP
-#define GRAB_SCREEN_ENUMERATE_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -39,5 +38,3 @@ namespace grab::screen
     list_outputs( const char* display = nullptr );
 
 }    // namespace grab::screen
-
-#endif    // GRAB_SCREEN_ENUMERATE_HPP

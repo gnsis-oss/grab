@@ -1,5 +1,4 @@
-#ifndef CORE_LOG_HPP
-#define CORE_LOG_HPP
+#pragma once
 
 #include <concepts>
 #include <cstdio>
@@ -203,5 +202,3 @@ namespace grab::log
     }
 
 }    // namespace grab::log
-
-#endif    // CORE_LOG_HPP

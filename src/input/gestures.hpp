@@ -1,5 +1,4 @@
-#ifndef GRAB_INPUT_GESTURES_HPP
-#define GRAB_INPUT_GESTURES_HPP
+#pragma once
 
 #include "grab/geometry/point.hpp"
 #include "grab/result.hpp"
@@ -35,5 +34,3 @@ namespace grab::input
                 Point item );
 
 }    // namespace grab::input
-
-#endif    // GRAB_INPUT_GESTURES_HPP

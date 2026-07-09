@@ -1,5 +1,4 @@
-#ifndef CORE_REGISTRY_HPP
-#define CORE_REGISTRY_HPP
+#pragma once
 
 #include "core/provider.hpp"
 
@@ -52,5 +51,3 @@ namespace grab::core
     builtin_registry();
 
 }    // namespace grab::core
-
-#endif    // CORE_REGISTRY_HPP

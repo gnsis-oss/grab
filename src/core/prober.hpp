@@ -1,5 +1,4 @@
-#ifndef CORE_PROBER_HPP
-#define CORE_PROBER_HPP
+#pragma once
 
 #include "core/environment.hpp"
 
@@ -29,5 +28,3 @@ namespace grab::core
     real_system_facts();
 
 }    // namespace grab::core
-
-#endif    // CORE_PROBER_HPP

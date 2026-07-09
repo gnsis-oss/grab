@@ -1,5 +1,4 @@
-#ifndef GRAB_EVENT_HPP
-#define GRAB_EVENT_HPP
+#pragma once
 
 #include <algorithm>
 #include <cstdint>
@@ -193,5 +192,3 @@ namespace grab
     };
 
 }    // namespace grab
-
-#endif    // GRAB_EVENT_HPP

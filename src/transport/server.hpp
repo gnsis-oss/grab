@@ -1,5 +1,4 @@
-#ifndef GRAB_TRANSPORT_SERVER_HPP
-#define GRAB_TRANSPORT_SERVER_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -62,5 +61,3 @@ namespace grab::transport
     };
 
 }    // namespace grab::transport
-
-#endif    // GRAB_TRANSPORT_SERVER_HPP

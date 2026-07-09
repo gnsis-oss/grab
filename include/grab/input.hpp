@@ -1,5 +1,4 @@
-#ifndef GRAB_INPUT_HPP
-#define GRAB_INPUT_HPP
+#pragma once
 
 #include "grab/result.hpp"
 #include "input/gestures.hpp"
@@ -81,5 +80,3 @@ namespace grab
     };
 
 }    // namespace grab
-
-#endif    // GRAB_INPUT_HPP

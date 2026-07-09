@@ -1,5 +1,4 @@
-#ifndef GRAB_SCREEN_HPP
-#define GRAB_SCREEN_HPP
+#pragma once
 
 #include "grab/image.hpp"
 #include "grab/result.hpp"
@@ -62,5 +61,3 @@ namespace grab
     };
 
 }    // namespace grab
-
-#endif    // GRAB_SCREEN_HPP

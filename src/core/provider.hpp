@@ -1,5 +1,4 @@
-#ifndef CORE_PROVIDER_HPP
-#define CORE_PROVIDER_HPP
+#pragma once
 
 #include "core/environment.hpp"
 #include "grab/capability.hpp"
@@ -40,5 +39,3 @@ namespace grab::core
     };
 
 }    // namespace grab::core
-
-#endif    // CORE_PROVIDER_HPP

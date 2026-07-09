@@ -1,5 +1,4 @@
-#ifndef GRAB_EVENT_EVDEV_HPP
-#define GRAB_EVENT_EVDEV_HPP
+#pragma once
 
 #include "grab/result.hpp"
 
@@ -70,5 +69,3 @@ namespace grab::event
     };
 
 }    // namespace grab::event
-
-#endif    // GRAB_EVENT_EVDEV_HPP
