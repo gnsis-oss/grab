@@ -1,8 +1,8 @@
 #pragma once
 
+#include "grab/keymap.hpp"
 #include "grab/result.hpp"
 #include "input/gestures.hpp"
-#include "input/keymap.hpp"
 #include "input/locator.hpp"
 #include "input/seat.hpp"
 
@@ -71,11 +71,11 @@ namespace grab
         private:
 
             Input( grab::input::Seat          seat,
-                   grab::input::Keymap        keymap,
+                   grab::Keymap               keymap,
                    grab::input::WindowLocator locator ) noexcept;
 
             grab::input::Seat          seat_;
-            grab::input::Keymap        keymap_;
+            grab::Keymap               keymap_;
             grab::input::WindowLocator locator_;
     };
 

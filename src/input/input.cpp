@@ -1,9 +1,10 @@
 #include "grab/input.hpp"
+#include "grab/keymap.hpp"
 #include "grab/result.hpp"
 #include "input/gestures.hpp"
-#include "input/keymap.hpp"
 #include "input/locator.hpp"
 #include "input/seat.hpp"
+#include "platform/x11/xkb_keymap.hpp"
 
 #include <array>
 #include <cmath>
@@ -58,6 +59,23 @@ namespace grab
         }
 
         [[nodiscard]]
+        grab::Result<std::uint8_t>
+        xtest_keycode( std::uint32_t keycode )
+        {
+            if( keycode == 0U )
+            {
+                return grab::fail( grab::ErrorCode::invalid_argument,
+                                   "XTEST keycode must be nonzero" );
+            }
+            if( keycode > std::numeric_limits<std::uint8_t>::max() )
+            {
+                return grab::fail( grab::ErrorCode::invalid_argument,
+                                   "XTEST keycode is out of range" );
+            }
+            return static_cast<std::uint8_t>( keycode );
+        }
+
+        [[nodiscard]]
         grab::Result<void>
         press_modifier( grab::input::Seat&                 seat,
                         std::uint8_t                       keycode,
@@ -81,13 +99,19 @@ namespace grab
 
         [[nodiscard]]
         grab::Result<void>
-        synthesize_keystroke( grab::input::Seat&            seat,
-                              const grab::input::Keystroke& keystroke,
-                              std::uint8_t                  shift_keycode,
-                              std::uint8_t                  level3_keycode )
+        synthesize_keystroke( grab::input::Seat&     seat,
+                              const grab::Keystroke& keystroke,
+                              std::uint8_t           shift_keycode,
+                              std::uint8_t           altgr_keycode )
         {
             std::array<std::uint8_t, kMaximumModifierCount> modifiers{};
             std::size_t                                     modifier_count = 0U;
+
+            auto base_keycode = xtest_keycode( keystroke.keycode );
+            if( !base_keycode.has_value() )
+            {
+                return std::unexpected( std::move( base_keycode.error() ) );
+            }
 
             if( keystroke.shift )
             {
@@ -98,17 +122,17 @@ namespace grab
                     return press_result;
                 }
             }
-            if( keystroke.level3 )
+            if( keystroke.altgr )
             {
                 auto press_result =
-                    press_modifier( seat, level3_keycode, modifiers, modifier_count );
+                    press_modifier( seat, altgr_keycode, modifiers, modifier_count );
                 if( !press_result.has_value() )
                 {
                     return press_result;
                 }
             }
 
-            auto base_press = seat.key( keystroke.keycode, true );
+            auto base_press = seat.key( *base_keycode, true );
             if( !base_press.has_value() )
             {
                 auto cleanup_result =
@@ -117,7 +141,7 @@ namespace grab
                 return error_from( base_press );
             }
 
-            auto base_release = seat.key( keystroke.keycode, false );
+            auto base_release = seat.key( *base_keycode, false );
             if( !base_release.has_value() )
             {
                 auto cleanup_result =
@@ -160,7 +184,7 @@ namespace grab
     }    // namespace
 
     Input::Input( grab::input::Seat          seat,
-                  grab::input::Keymap        keymap,
+                  grab::Keymap               keymap,
                   grab::input::WindowLocator locator ) noexcept :
         seat_( std::move( seat ) ),
         keymap_( std::move( keymap ) ),
@@ -199,7 +223,7 @@ namespace grab
             return std::unexpected( std::move( seat.error() ) );
         }
 
-        auto keymap = grab::input::Keymap::open_layout( layout );
+        auto keymap = grab::platform::x11::make_keymap_from_layout( layout );
         if( !keymap.has_value() )
         {
             return std::unexpected( std::move( keymap.error() ) );
@@ -280,12 +304,22 @@ namespace grab
             return std::unexpected( std::move( keystrokes.error() ) );
         }
 
-        const std::uint8_t shift_keycode  = keymap_.shift_keycode();
-        const std::uint8_t level3_keycode = keymap_.level3_keycode();
-        for( const grab::input::Keystroke& keystroke : *keystrokes )
+        auto shift_keycode = xtest_keycode( keymap_.shift_keycode() );
+        if( !shift_keycode.has_value() )
+        {
+            return std::unexpected( std::move( shift_keycode.error() ) );
+        }
+
+        auto altgr_keycode = xtest_keycode( keymap_.altgr_keycode() );
+        if( !altgr_keycode.has_value() )
+        {
+            return std::unexpected( std::move( altgr_keycode.error() ) );
+        }
+
+        for( const grab::Keystroke& keystroke : *keystrokes )
         {
             auto key_result =
-                synthesize_keystroke( seat_, keystroke, shift_keycode, level3_keycode );
+                synthesize_keystroke( seat_, keystroke, *shift_keycode, *altgr_keycode );
             if( !key_result.has_value() )
             {
                 return key_result;

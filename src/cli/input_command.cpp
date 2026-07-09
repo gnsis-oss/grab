@@ -1,5 +1,6 @@
 #include "cli/input_command.hpp"
 #include "core/checked.hpp"
+#include "grab/keymap.hpp"
 #include "grab/result.hpp"
 #include "grab/window.hpp"
 #include "input/gesture.hpp"
@@ -16,6 +17,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <xkbcommon/xkbcommon.h>
 
 namespace grab::cli
 {
@@ -37,6 +39,7 @@ namespace grab::cli
         constexpr std::string_view keysym_flag       = "--keysym";
         constexpr std::string_view src_flag          = "--src";
         constexpr std::string_view dst_flag          = "--dst";
+        constexpr xkb_keysym_t     no_symbol         = 0U;
 
         struct FlagValue
         {
@@ -89,7 +92,7 @@ namespace grab::cli
                 grab::platform::x11::XcbConnection connection;
                 WindowRef                          window;
                 WindowRect                         rect;
-                grab::platform::x11::XkbKeymap     keymap;
+                grab::Keymap                       keymap;
         };
 
         [[nodiscard]]
@@ -173,6 +176,16 @@ namespace grab::cli
                 return grab::fail( button.error().code, button.error().message );
             }
             return *button;
+        }
+
+        [[nodiscard]]
+        bool
+        is_known_keysym_name( std::string_view name )
+        {
+            const std::string  name_storage{ name };
+            const xkb_keysym_t keysym =
+                xkb_keysym_from_name( name_storage.c_str(), XKB_KEYSYM_NO_FLAGS );
+            return keysym != no_symbol;
         }
 
         [[nodiscard]]
@@ -475,7 +488,8 @@ namespace grab::cli
                 return grab::fail( rect.error().code, rect.error().message );
             }
 
-            auto keymap = grab::platform::x11::XkbKeymap::from_connection( *connection );
+            auto keymap =
+                grab::platform::x11::make_keymap_from_connection( *connection );
             if( !keymap.has_value() )
             {
                 return grab::fail( keymap.error().code, keymap.error().message );
@@ -491,10 +505,10 @@ namespace grab::cli
 
         [[nodiscard]]
         grab::Result<void>
-        validate_text( const grab::platform::x11::XkbKeymap& keymap,
-                       std::string_view                      text )
+        validate_text( const grab::Keymap& keymap,
+                       std::string_view    text )
         {
-            auto strokes = keymap.strokes_for_text( text );
+            auto strokes = keymap.text_to_keystrokes( text );
             if( !strokes.has_value() )
             {
                 return grab::fail( strokes.error().code, strokes.error().message );
@@ -504,22 +518,20 @@ namespace grab::cli
 
         [[nodiscard]]
         grab::Result<void>
-        validate_keysym( const grab::platform::x11::XkbKeymap& keymap,
-                         std::string_view                      name )
+        validate_keysym( const grab::Keymap& keymap,
+                         std::string_view    name )
         {
-            auto keysym = grab::platform::x11::XkbKeymap::keysym_from_name( name );
-            if( !keysym.has_value() )
-            {
-                return grab::fail( grab::ErrorCode::invalid_argument,
-                                   "unknown keysym: " + std::string{ name } );
-            }
-
-            auto stroke = keymap.stroke_for_keysym( *keysym );
+            auto stroke = keymap.keystroke_for_key( name );
             if( !stroke.has_value() )
             {
-                return grab::fail( grab::ErrorCode::unsupported_character,
-                                   "keysym is not present in keymap: " +
-                                       std::string{ name } );
+                if( is_known_keysym_name( name ) )
+                {
+                    return grab::fail( grab::ErrorCode::unsupported_character,
+                                       "keysym is not present in keymap: " +
+                                           std::string{ name } );
+                }
+                return grab::fail( grab::ErrorCode::invalid_argument,
+                                   "unknown keysym: " + std::string{ name } );
             }
             return {};
         }

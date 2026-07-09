@@ -98,11 +98,10 @@ target_compile_features(grab_image PUBLIC cxx_std_23)
 add_library(grab_input STATIC
     src/input/gestures.cpp
     src/input/input.cpp
-    src/input/keymap.cpp
     src/input/locator.cpp
     src/input/seat.cpp
 )
-target_link_libraries(grab_input PUBLIC grab_core PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XTEST PkgConfig::GRAB_XKBCOMMON)
+target_link_libraries(grab_input PUBLIC grab_core grab_input_x11 PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XTEST)
 target_include_directories(grab_input PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_input PUBLIC cxx_std_23)
 
@@ -187,21 +186,6 @@ target_link_libraries(grab_input_x11 PUBLIC grab_input_sink grab_platform_x11
 target_include_directories(grab_input_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_input_x11 PUBLIC cxx_std_23)
 
-add_library(grab_inventory STATIC
-    src/inventory/appimage.cpp
-    src/inventory/environment_merge.cpp
-    src/inventory/manifest.cpp
-    src/inventory/process.cpp
-    src/inventory/run.cpp
-    src/inventory/sample.cpp
-    src/inventory/step_runner.cpp
-    src/inventory/surface_registry.cpp
-)
-target_link_libraries(grab_inventory PUBLIC grab_input_sink grab_input_x11 grab_platform_x11 grab_codec_png)
-target_include_directories(grab_inventory PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
-target_include_directories(grab_inventory PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-target_compile_features(grab_inventory PUBLIC cxx_std_23)
-
 add_library(grab_transport STATIC
     src/transport/codec.cpp
     src/transport/service.cpp
@@ -228,12 +212,11 @@ target_compile_features(grab_service PUBLIC cxx_std_23)
 add_executable(grab_cli
     src/cli/main.cpp
     src/cli/input_command.cpp
-    src/cli/inventory_command.cpp
     src/cli/session_command.cpp
 )
 set_target_properties(grab_cli PROPERTIES OUTPUT_NAME grab)
 target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_service
-    grab_inventory grab_input_sink grab_input_x11 grab_platform_x11 grab_session grab_codec_png)
+    grab_input_sink grab_input_x11 grab_platform_x11 grab_session grab_codec_png)
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 

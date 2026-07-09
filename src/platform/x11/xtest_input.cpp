@@ -1,16 +1,15 @@
+#include "grab/keymap.hpp"
 #include "grab/window.hpp"
 #include "input/input_sink.hpp"
 #include "platform/x11/xcb_atom.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "platform/x11/xcb_reply.hpp"
-#include "platform/x11/xkb_keymap.hpp"
 #include "platform/x11/xtest_input.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <limits>
-#include <optional>
 #include <string_view>
 #include <thread>
 #include <xcb/xcb.h>
@@ -33,7 +32,6 @@ namespace grab::platform::x11
         constexpr std::uint32_t    activate_source_normal    = 1U;
         constexpr std::uint32_t    activate_no_current_event = 0U;
         constexpr std::string_view active_window_atom_name   = "_NET_ACTIVE_WINDOW";
-        constexpr std::string_view shift_left_keysym         = "Shift_L";
 
         constexpr std::uint32_t    activate_event_mask =
             static_cast<std::uint32_t>( XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY ) |
@@ -88,7 +86,7 @@ namespace grab::platform::x11
     }    // namespace
 
     XtestInputSink::XtestInputSink( const XcbConnection& conn,
-                                    const XkbKeymap&     keymap,
+                                    const grab::Keymap&  keymap,
                                     grab::WindowRef      target ) noexcept :
         conn( conn ),
         keymap( keymap ),
@@ -141,7 +139,7 @@ namespace grab::platform::x11
     void
     XtestInputSink::type_text( std::string_view utf8 )
     {
-        auto strokes = keymap.strokes_for_text( utf8 );
+        auto strokes = keymap.text_to_keystrokes( utf8 );
         if( !strokes.has_value() )
         {
             return;
@@ -157,13 +155,7 @@ namespace grab::platform::x11
     void
     XtestInputSink::key( std::string_view keysym )
     {
-        auto resolved = XkbKeymap::keysym_from_name( keysym );
-        if( !resolved.has_value() )
-        {
-            return;
-        }
-
-        auto stroke = keymap.stroke_for_keysym( *resolved );
+        auto stroke = keymap.keystroke_for_key( keysym );
         if( !stroke.has_value() )
         {
             return;
@@ -263,24 +255,27 @@ namespace grab::platform::x11
     }
 
     void
-    XtestInputSink::press_stroke( const XkbKeymap::KeyStroke& stroke )
+    XtestInputSink::press_stroke( const grab::Keystroke& stroke )
     {
-        std::optional<XkbKeymap::KeyStroke> shift;
-        if( stroke.needs_shift )
+        if( stroke.shift )
         {
-            shift = shift_stroke();
-            if( shift.has_value() )
-            {
-                press_modifier( shift->keycode );
-            }
+            press_modifier( static_cast<xkb_keycode_t>( keymap.shift_keycode() ) );
+        }
+        if( stroke.altgr )
+        {
+            press_modifier( static_cast<xkb_keycode_t>( keymap.altgr_keycode() ) );
         }
 
-        emit_key( XCB_KEY_PRESS, stroke.keycode );
-        emit_key( XCB_KEY_RELEASE, stroke.keycode );
+        emit_key( XCB_KEY_PRESS, static_cast<xkb_keycode_t>( stroke.keycode ) );
+        emit_key( XCB_KEY_RELEASE, static_cast<xkb_keycode_t>( stroke.keycode ) );
 
-        if( shift.has_value() )
+        if( stroke.altgr )
         {
-            release_modifier( shift->keycode );
+            release_modifier( static_cast<xkb_keycode_t>( keymap.altgr_keycode() ) );
+        }
+        if( stroke.shift )
+        {
+            release_modifier( static_cast<xkb_keycode_t>( keymap.shift_keycode() ) );
         }
     }
 
@@ -288,17 +283,6 @@ namespace grab::platform::x11
     XtestInputSink::flush()
     {
         ( void )xcb_flush( conn.get() );
-    }
-
-    std::optional<XkbKeymap::KeyStroke>
-    XtestInputSink::shift_stroke() const
-    {
-        auto shift = XkbKeymap::keysym_from_name( shift_left_keysym );
-        if( !shift.has_value() )
-        {
-            return std::nullopt;
-        }
-        return keymap.stroke_for_keysym( *shift );
     }
 
 }    // namespace grab::platform::x11

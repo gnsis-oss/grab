@@ -1,11 +1,10 @@
 #pragma once
 
+#include "grab/keymap.hpp"
 #include "grab/window.hpp"
 #include "input/input_sink.hpp"
-#include "platform/x11/xkb_keymap.hpp"
 
 #include <cstdint>
-#include <optional>
 #include <string_view>
 #include <vector>
 #include <xkbcommon/xkbcommon.h>
@@ -20,7 +19,7 @@ namespace grab::platform::x11
         public:
 
             XtestInputSink( const XcbConnection& conn,
-                            const XkbKeymap&     keymap,
+                            const grab::Keymap&  keymap,
                             grab::WindowRef      target ) noexcept;
 
             void
@@ -66,17 +65,13 @@ namespace grab::platform::x11
             release_held_modifiers();
 
             void
-            press_stroke( const XkbKeymap::KeyStroke& stroke );
+            press_stroke( const grab::Keystroke& stroke );
 
             void
-            flush();
-
-            [[nodiscard]]
-            std::optional<XkbKeymap::KeyStroke>
-                                       shift_stroke() const;
+                                       flush();
 
             const XcbConnection&       conn;
-            const XkbKeymap&           keymap;
+            const grab::Keymap&        keymap;
             grab::WindowRef            target;
             std::vector<xkb_keycode_t> held_modifiers;
     };
