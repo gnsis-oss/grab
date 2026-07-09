@@ -2,15 +2,43 @@
   <img src=".art/grab_banner.png" alt="grab" width="760">
 </p>
 
-# grab
 
-A single C++ library and `grab` CLI for OS-level desktop automation on X11/Linux —
-**observe** input, **capture** output, and **synthesize** input.
+Grab is a library and CLI tool for interacting with a PC
 
-- **Observe** — global keyboard/mouse (XInput2), window & focus tracking, AT-SPI, evdev.
-- **Capture** — focus-safe window / region / display screenshots (XComposite + XShm),
-  an in-tree PNG encoder, and X11 video recording.
-- **Synthesize** — mouse move & click, typing, and drag gestures (XTest + xkbcommon).
+Its very useful if you want to :
+
+* Automate clicks for App navigation
+* Control your mouse via coordinates and paths 
+* Harness AI to grab screenshots of your project
+* Visual Testing Automation
+
+
+## Support
+
+### Operating systems
+
+| OS               | Status        | Backend                        |
+| ---------------- | ------------- | ------------------------------ |
+| Linux · X11      | ✅ Supported  | XCB / XInput2 / XTest          |
+| Linux · Wayland  | 🚧 Planned    | —                              |
+| Windows          | 🚧 Planned    | —                              |
+| macOS            | 🚧 Planned    | —                              |
+
+### Technologies
+
+| Capability          | Technology                          |
+| ------------------- | ----------------------------------- |
+| Screen capture      | XComposite + XShm, XFixes cursor    |
+| Screenshots (PNG)   | in-tree encoder + zlib              |
+| Video recording     | libavcodec (FFmpeg)                 |
+| Input synthesis     | XTest + xkbcommon                   |
+| Input observation   | XInput2, evdev                      |
+| Windows & focus     | XCB / EWMH                          |
+| Accessibility       | AT-SPI over D-Bus                   |
+| Event daemon        | gRPC + Protobuf                     |
+| Notifications       | D-Bus                               |
+
+
 
 ## Build
 
@@ -21,14 +49,3 @@ ctest --test-dir build
 ```
 
 Requires X11. Toolchain: C++23, Clang, CMake + Ninja.
-
-## Usage
-
-```sh
-grab capture --display --out shot.png          # whole display
-grab capture --window <WM_CLASS> --out win.png # a single window
-grab capture --region X,Y,WxH --out region.png # a region
-grab click --at X,Y                            # synthesize a click
-grab type  --text "hello"                      # synthesize typing
-grab doctor                                    # environment & capability report
-```
