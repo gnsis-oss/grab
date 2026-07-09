@@ -337,19 +337,19 @@ TEST( Enumerate,
     ASSERT_NE( first, listed->end() );
     EXPECT_EQ( first->id, static_cast<std::uint32_t>( first_window ) );
     EXPECT_EQ( first->title, kFirstTitle );
-    EXPECT_EQ( first->x, kFirstWindowX );
-    EXPECT_EQ( first->y, kFirstWindowY );
-    EXPECT_EQ( first->width, kWindowWidth );
-    EXPECT_EQ( first->height, kWindowHeight );
+    EXPECT_EQ( first->bounds.x, kFirstWindowX );
+    EXPECT_EQ( first->bounds.y, kFirstWindowY );
+    EXPECT_EQ( first->bounds.width, kWindowWidth );
+    EXPECT_EQ( first->bounds.height, kWindowHeight );
 
     const auto second = find_by_class( *listed, kSecondClass );
     ASSERT_NE( second, listed->end() );
     EXPECT_EQ( second->id, static_cast<std::uint32_t>( second_window ) );
     EXPECT_EQ( second->title, kSecondTitle );
-    EXPECT_EQ( second->x, kSecondWindowX );
-    EXPECT_EQ( second->y, kSecondWindowY );
-    EXPECT_EQ( second->width, kWindowWidth );
-    EXPECT_EQ( second->height, kWindowHeight );
+    EXPECT_EQ( second->bounds.x, kSecondWindowX );
+    EXPECT_EQ( second->bounds.y, kSecondWindowY );
+    EXPECT_EQ( second->bounds.width, kWindowWidth );
+    EXPECT_EQ( second->bounds.height, kWindowHeight );
 }
 
 TEST( Enumerate,
@@ -363,9 +363,9 @@ TEST( Enumerate,
         std::ranges::find_if( *outputs,
                               []( const grab::screen::OutputInfo& output )
                               {
-                                  return output.width ==
+                                  return output.bounds.width ==
                                          kXvfbWidth &&
-                                         output.height == kXvfbHeight;
+                                         output.bounds.height == kXvfbHeight;
                               } );
     EXPECT_NE( matching_screen, outputs->end() );
 }

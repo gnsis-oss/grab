@@ -5,20 +5,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <span>
 #include <string_view>
 
 namespace grab::cli
 {
 
-    struct Geometry
-    {
-            std::uint16_t width  = 0U;
-            std::uint16_t height = 0U;
-            std::int16_t  x      = 0;
-            std::int16_t  y      = 0;
-    };
-
+    // Shared geometry-string parsing helpers (used by the session command).
+    // Rectangles are represented by grab::geometry::Rectangle elsewhere; these
+    // routines only validate and extract the X11 int16/uint16 numeric fields.
     namespace detail
     {
 
@@ -143,68 +137,4 @@ namespace grab::cli
         }
 
     }    // namespace detail
-
-    [[nodiscard]]
-    inline grab::Result<Geometry>
-    parse_geometry( std::string_view input )
-    {
-        const std::size_t dimension = input.find( detail::dimension_marker );
-        if( dimension == std::string_view::npos )
-        {
-            return grab::fail( grab::ErrorCode::invalid_argument,
-                               "geometry must match WxH+X+Y" );
-        }
-
-        const std::size_t first_offset =
-            input.find( detail::offset_marker, dimension + 1U );
-        if( first_offset == std::string_view::npos )
-        {
-            return grab::fail( grab::ErrorCode::invalid_argument,
-                               "geometry must match WxH+X+Y" );
-        }
-
-        const std::size_t second_offset =
-            input.find( detail::offset_marker, first_offset + 1U );
-        if( second_offset == std::string_view::npos )
-        {
-            return grab::fail( grab::ErrorCode::invalid_argument,
-                               "geometry must match WxH+X+Y" );
-        }
-
-        auto width = detail::parse_nonzero_u16( input.substr( 0U, dimension ) );
-        auto height =
-            detail::parse_nonzero_u16( input.substr( dimension + 1U,
-                                                     first_offset - dimension - 1U ) );
-        auto x = detail::parse_signed_i16(
-            input.substr( first_offset + 1U, second_offset - first_offset - 1U )
-        );
-        auto y = detail::parse_signed_i16( input.substr( second_offset + 1U ) );
-        if( !width.has_value() )
-        {
-            return grab::fail( width.error().code, width.error().message );
-        }
-        if( !height.has_value() )
-        {
-            return grab::fail( height.error().code, height.error().message );
-        }
-        if( !x.has_value() )
-        {
-            return grab::fail( x.error().code, x.error().message );
-        }
-        if( !y.has_value() )
-        {
-            return grab::fail( y.error().code, y.error().message );
-        }
-
-        return Geometry{
-            .width  = *width,
-            .height = *height,
-            .x      = *x,
-            .y      = *y,
-        };
-    }
-
-    int
-    run_capture_command( std::span<char* const> args );
-
 }    // namespace grab::cli

@@ -521,14 +521,8 @@ namespace grab::input
                           xcb_window_t      root,
                           xcb_window_t      window )
         {
-            LocatedWindow located{
-                .window = window,
-                .x      = 0,
-                .y      = 0,
-                .width  = 0U,
-                .height = 0U,
-                .trust  = GeometryTrust::unavailable,
-            };
+            LocatedWindow located{};
+            located.window                          = window;
 
             xcb_generic_error_t* raw_geometry_error = nullptr;
             const auto           geometry           = take_xcb_owned(
@@ -542,10 +536,10 @@ namespace grab::input
                 return located;
             }
 
-            located.x                                = geometry->x;
-            located.y                                = geometry->y;
-            located.width                            = geometry->width;
-            located.height                           = geometry->height;
+            located.bounds.x                         = geometry->x;
+            located.bounds.y                         = geometry->y;
+            located.bounds.width                     = geometry->width;
+            located.bounds.height                    = geometry->height;
             located.trust                            = GeometryTrust::estimated;
 
             xcb_generic_error_t* raw_translate_error = nullptr;
@@ -560,9 +554,9 @@ namespace grab::input
                 return located;
             }
 
-            located.x     = translation->dst_x;
-            located.y     = translation->dst_y;
-            located.trust = GeometryTrust::trusted;
+            located.bounds.x = translation->dst_x;
+            located.bounds.y = translation->dst_y;
+            located.trust    = GeometryTrust::trusted;
             return located;
         }
 

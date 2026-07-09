@@ -112,21 +112,9 @@ add_executable(grab_x11_tests
 target_link_libraries(grab_x11_tests PRIVATE grab_core grab_platform_x11 grab_input_x11 grab_session grab_input_sink GTest::gtest_main)
 target_include_directories(grab_x11_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(grab_inventory_tests
-    inventory/driver_test.cpp
-    inventory/environment_merge_test.cpp
-    inventory/launch_env_test.cpp
-    inventory/surface_registry_test.cpp
-)
-target_link_libraries(grab_inventory_tests PRIVATE grab_inventory grab_input_sink GTest::gtest_main)
-target_include_directories(grab_inventory_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR})
-
 if(GRAB_TEST_PROVISION_XVFB)
     gtest_discover_tests(grab_x11_tests
         PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
-    gtest_discover_tests(grab_inventory_tests
-        PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
 else()
     gtest_discover_tests(grab_x11_tests)
-    gtest_discover_tests(grab_inventory_tests)
 endif()

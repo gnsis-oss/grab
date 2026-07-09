@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/geometry/rectangle.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 
@@ -9,13 +10,7 @@
 namespace grab::image
 {
 
-    struct Rect
-    {
-            std::int32_t  x      = 0;
-            std::int32_t  y      = 0;
-            std::uint32_t width  = 0U;
-            std::uint32_t height = 0U;
-    };
+    using Rect = grab::geometry::Rectangle;
 
     struct CompareOptions
     {

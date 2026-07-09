@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/geometry/rectangle.hpp"
 #include "grab/result.hpp"
 
 #include <cstdint>
@@ -21,12 +22,9 @@ namespace grab::input
 
     struct LocatedWindow
     {
-            std::uint32_t window = 0U;
-            std::int16_t  x      = 0;
-            std::int16_t  y      = 0;
-            std::uint16_t width  = 0U;
-            std::uint16_t height = 0U;
-            GeometryTrust trust  = GeometryTrust::unavailable;
+            std::uint32_t             window = 0U;
+            grab::geometry::Rectangle bounds;
+            GeometryTrust             trust = GeometryTrust::unavailable;
     };
 
     class WindowLocator

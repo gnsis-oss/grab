@@ -1,3 +1,4 @@
+#include "grab/geometry/rectangle.hpp"
 #include "grab/result.hpp"
 #include "screen/enumerate.hpp"
 
@@ -74,13 +75,7 @@ namespace grab::screen
                 std::vector<std::byte> bytes;
         };
 
-        struct Geometry
-        {
-                std::int16_t  x      = 0;
-                std::int16_t  y      = 0;
-                std::uint16_t width  = 0U;
-                std::uint16_t height = 0U;
-        };
+        using Geometry = grab::geometry::Rectangle;
 
         template<typename T>
         [[nodiscard]]
@@ -572,12 +567,15 @@ namespace grab::screen
         OutputInfo
         fallback_output( const ScreenInfo& screen )
         {
-            return OutputInfo{
-                .name   = std::string{ kFallbackOutputName },
+            const Geometry bounds{
                 .x      = 0,
                 .y      = 0,
                 .width  = screen.width,
                 .height = screen.height,
+            };
+            return OutputInfo{
+                .name   = std::string{ kFallbackOutputName },
+                .bounds = bounds,
             };
         }
 
@@ -684,12 +682,15 @@ namespace grab::screen
                                        "RandR CRTC info query failed" );
                 }
 
-                result.push_back( OutputInfo{
-                    .name   = output_name( *output_info, output ),
+                const Geometry bounds{
                     .x      = crtc_info->x,
                     .y      = crtc_info->y,
                     .width  = crtc_info->width,
                     .height = crtc_info->height,
+                };
+                result.push_back( OutputInfo{
+                    .name   = output_name( *output_info, output ),
+                    .bounds = bounds,
                 } );
             }
 
@@ -757,10 +758,7 @@ namespace grab::screen
                 .id       = static_cast<std::uint32_t>( window ),
                 .wm_class = std::move( *wm_class ),
                 .title    = std::move( *title ),
-                .x        = ( *geometry )->x,
-                .y        = ( *geometry )->y,
-                .width    = ( *geometry )->width,
-                .height   = ( *geometry )->height,
+                .bounds   = **geometry,
             } );
         }
 

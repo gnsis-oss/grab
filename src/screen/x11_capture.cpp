@@ -1,3 +1,4 @@
+#include "grab/geometry/rectangle.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 #include "screen/x11_capture.hpp"
@@ -84,12 +85,9 @@ namespace grab::screen
 
         struct CaptureSpec
         {
-                std::uint32_t drawable = 0U;
-                std::int16_t  x        = 0;
-                std::int16_t  y        = 0;
-                std::uint16_t width    = 0U;
-                std::uint16_t height   = 0U;
-                std::uint8_t  depth    = 0U;
+                std::uint32_t             drawable = 0U;
+                grab::geometry::Rectangle bounds;
+                std::uint8_t              depth = 0U;
         };
 
         struct CapturedBuffer
@@ -758,7 +756,10 @@ namespace grab::screen
                           const CaptureSpec&  spec,
                           const PixmapFormat& format )
         {
-            auto size = capture_size_bytes( spec.width, spec.height, format );
+            auto size =
+                capture_size_bytes( static_cast<std::uint16_t>( spec.bounds.width ),
+                                    static_cast<std::uint16_t>( spec.bounds.height ),
+                                    format );
             if( !size.has_value() )
             {
                 return std::unexpected( std::move( size.error() ) );
@@ -771,21 +772,21 @@ namespace grab::screen
             }
 
             xcb_generic_error_t* raw_error = nullptr;
-            const auto           reply     = take_xcb_owned(
-                xcb_shm_get_image_reply( connection,
-                                         xcb_shm_get_image( connection,
-                                                            spec.drawable,
-                                                            spec.x,
-                                                            spec.y,
-                                                            spec.width,
-                                                            spec.height,
-                                                            kAllPlanes,
-                                                            XCB_IMAGE_FORMAT_Z_PIXMAP,
-                                                            segment->segment(),
-                                                            kNoOffset ),
-                                         &raw_error )
-            );
-            const auto error = take_xcb_owned( raw_error );
+            const auto           reply     = take_xcb_owned( xcb_shm_get_image_reply(
+                connection,
+                xcb_shm_get_image( connection,
+                                   spec.drawable,
+                                   static_cast<std::int16_t>( spec.bounds.x ),
+                                   static_cast<std::int16_t>( spec.bounds.y ),
+                                   static_cast<std::uint16_t>( spec.bounds.width ),
+                                   static_cast<std::uint16_t>( spec.bounds.height ),
+                                   kAllPlanes,
+                                   XCB_IMAGE_FORMAT_Z_PIXMAP,
+                                   segment->segment(),
+                                   kNoOffset ),
+                &raw_error
+            ) );
+            const auto           error     = take_xcb_owned( raw_error );
             if( error != nullptr )
             {
                 return grab::fail( window_error_code( *error ),
@@ -817,19 +818,19 @@ namespace grab::screen
                              const CaptureSpec& spec )
         {
             xcb_generic_error_t* raw_error = nullptr;
-            const auto           reply     = take_xcb_owned(
-                xcb_get_image_reply( connection,
-                                     xcb_get_image( connection,
-                                                    XCB_IMAGE_FORMAT_Z_PIXMAP,
-                                                    spec.drawable,
-                                                    spec.x,
-                                                    spec.y,
-                                                    spec.width,
-                                                    spec.height,
-                                                    kAllPlanes ),
-                                     &raw_error )
-            );
-            const auto error = take_xcb_owned( raw_error );
+            const auto           reply     = take_xcb_owned( xcb_get_image_reply(
+                connection,
+                xcb_get_image( connection,
+                               XCB_IMAGE_FORMAT_Z_PIXMAP,
+                               spec.drawable,
+                               static_cast<std::int16_t>( spec.bounds.x ),
+                               static_cast<std::int16_t>( spec.bounds.y ),
+                               static_cast<std::uint16_t>( spec.bounds.width ),
+                               static_cast<std::uint16_t>( spec.bounds.height ),
+                               kAllPlanes ),
+                &raw_error
+            ) );
+            const auto           error     = take_xcb_owned( raw_error );
             if( error != nullptr )
             {
                 return grab::fail( window_error_code( *error ),
@@ -896,8 +897,8 @@ namespace grab::screen
             }
 
             return convert_image( connection,
-                                  spec.width,
-                                  spec.height,
+                                  static_cast<std::uint16_t>( spec.bounds.width ),
+                                  static_cast<std::uint16_t>( spec.bounds.height ),
                                   format->bits_per_pixel,
                                   format->scanline_pad,
                                   image_byte_order,
@@ -1112,14 +1113,17 @@ namespace grab::screen
                                "X11 capture target window has empty geometry" );
         }
 
+        const grab::geometry::Rectangle bounds{
+            .x      = 0,
+            .y      = 0,
+            .width  = geometry->width,
+            .height = geometry->height,
+        };
         return capture_drawable( connection_,
                                  image_byte_order_,
                                  CaptureSpec{
                                      .drawable = window,
-                                     .x        = 0,
-                                     .y        = 0,
-                                     .width    = geometry->width,
-                                     .height   = geometry->height,
+                                     .bounds   = bounds,
                                      .depth    = geometry->depth,
                                  } );
     }
@@ -1133,14 +1137,17 @@ namespace grab::screen
             return std::unexpected( std::move( open_result.error() ) );
         }
 
+        const grab::geometry::Rectangle bounds{
+            .x      = 0,
+            .y      = 0,
+            .width  = screen_width_,
+            .height = screen_height_,
+        };
         return capture_drawable( connection_,
                                  image_byte_order_,
                                  CaptureSpec{
                                      .drawable = root_,
-                                     .x        = 0,
-                                     .y        = 0,
-                                     .width    = screen_width_,
-                                     .height   = screen_height_,
+                                     .bounds   = bounds,
                                      .depth    = root_depth_,
                                  } );
     }
@@ -1164,14 +1171,17 @@ namespace grab::screen
             return std::unexpected( std::move( region.error() ) );
         }
 
+        const grab::geometry::Rectangle bounds{
+            .x      = x,
+            .y      = y,
+            .width  = width,
+            .height = height,
+        };
         return capture_drawable( connection_,
                                  image_byte_order_,
                                  CaptureSpec{
                                      .drawable = root_,
-                                     .x        = x,
-                                     .y        = y,
-                                     .width    = width,
-                                     .height   = height,
+                                     .bounds   = bounds,
                                      .depth    = root_depth_,
                                  } );
     }

@@ -314,13 +314,21 @@ namespace grab
                                "window geometry is unavailable" );
         }
 
-        auto x = coordinate_from_fraction( win.x, win.width, frac_x, "x" );
+        auto x =
+            coordinate_from_fraction( static_cast<std::int16_t>( win.bounds.x ),
+                                      static_cast<std::uint16_t>( win.bounds.width ),
+                                      frac_x,
+                                      "x" );
         if( !x.has_value() )
         {
             return std::unexpected( std::move( x.error() ) );
         }
 
-        auto y = coordinate_from_fraction( win.y, win.height, frac_y, "y" );
+        auto y =
+            coordinate_from_fraction( static_cast<std::int16_t>( win.bounds.y ),
+                                      static_cast<std::uint16_t>( win.bounds.height ),
+                                      frac_y,
+                                      "y" );
         if( !y.has_value() )
         {
             return std::unexpected( std::move( y.error() ) );

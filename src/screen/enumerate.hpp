@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/geometry/rectangle.hpp"
 #include "grab/result.hpp"
 
 #include <cstdint>
@@ -11,13 +12,10 @@ namespace grab::screen
 
     struct WindowInfo
     {
-            std::uint32_t id = 0U;
-            std::string   wm_class;
-            std::string   title;
-            std::int16_t  x      = 0;
-            std::int16_t  y      = 0;
-            std::uint16_t width  = 0U;
-            std::uint16_t height = 0U;
+            std::uint32_t             id = 0U;
+            std::string               wm_class;
+            std::string               title;
+            grab::geometry::Rectangle bounds;
     };
 
     [[nodiscard]]
@@ -26,11 +24,8 @@ namespace grab::screen
 
     struct OutputInfo
     {
-            std::string   name;
-            std::int16_t  x      = 0;
-            std::int16_t  y      = 0;
-            std::uint16_t width  = 0U;
-            std::uint16_t height = 0U;
+            std::string               name;
+            grab::geometry::Rectangle bounds;
     };
 
     [[nodiscard]]

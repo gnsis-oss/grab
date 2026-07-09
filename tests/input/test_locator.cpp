@@ -352,10 +352,10 @@ TEST( Locator,
 
     ASSERT_TRUE( located.has_value() ) << located.error().message;
     EXPECT_EQ( located->window, window );
-    EXPECT_EQ( located->x, kFirstWindowX );
-    EXPECT_EQ( located->y, kFirstWindowY );
-    EXPECT_EQ( located->width, kWindowWidth );
-    EXPECT_EQ( located->height, kWindowHeight );
+    EXPECT_EQ( located->bounds.x, kFirstWindowX );
+    EXPECT_EQ( located->bounds.y, kFirstWindowY );
+    EXPECT_EQ( located->bounds.width, kWindowWidth );
+    EXPECT_EQ( located->bounds.height, kWindowHeight );
     EXPECT_EQ( located->trust, grab::input::GeometryTrust::trusted );
 }
 
@@ -394,10 +394,10 @@ TEST( Locator,
 
     ASSERT_TRUE( located.has_value() ) << located.error().message;
     EXPECT_EQ( located->window, target );
-    EXPECT_EQ( located->x, kSecondWindowX );
-    EXPECT_EQ( located->y, kSecondWindowY );
-    EXPECT_EQ( located->width, kWindowWidth );
-    EXPECT_EQ( located->height, kWindowHeight );
+    EXPECT_EQ( located->bounds.x, kSecondWindowX );
+    EXPECT_EQ( located->bounds.y, kSecondWindowY );
+    EXPECT_EQ( located->bounds.width, kWindowWidth );
+    EXPECT_EQ( located->bounds.height, kWindowHeight );
     EXPECT_EQ( located->trust, grab::input::GeometryTrust::trusted );
 }
 

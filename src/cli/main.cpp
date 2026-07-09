@@ -1,10 +1,10 @@
 #include "cli/input_command.hpp"
-#include "cli/inventory_command.hpp"
 #include "cli/session_command.hpp"
 #include "codec/png.hpp"
 #include "core/doctor.hpp"
 #include "core/prober.hpp"
 #include "core/registry.hpp"
+#include "grab/geometry/rectangle.hpp"
 #include "grab/image.hpp"
 #include "grab/input.hpp"
 #include "grab/result.hpp"
@@ -62,13 +62,7 @@ namespace
         region,
     };
 
-    struct CaptureRegion
-    {
-            std::int16_t  x      = 0;
-            std::int16_t  y      = 0;
-            std::uint16_t width  = 0U;
-            std::uint16_t height = 0U;
-    };
+    using CaptureRegion = grab::geometry::Rectangle;
 
     struct CaptureOptions
     {
@@ -1002,10 +996,12 @@ namespace
             case CaptureTarget::display :
                 return screen.display();
             case CaptureTarget::region :
-                return screen.region( options.region.x,
-                                      options.region.y,
-                                      options.region.width,
-                                      options.region.height );
+                return screen.region(
+                    static_cast<std::int16_t>( options.region.x ),
+                    static_cast<std::int16_t>( options.region.y ),
+                    static_cast<std::uint16_t>( options.region.width ),
+                    static_cast<std::uint16_t>( options.region.height )
+                );
             case CaptureTarget::none :
                 return grab::fail( grab::ErrorCode::invalid_argument,
                                    "capture target is missing" );
@@ -1425,7 +1421,6 @@ namespace
         constexpr std::string_view kWatchCommand{ "watch" };
         constexpr std::string_view kKeyCommand{ "key" };
         constexpr std::string_view kDragCurveCommand{ "drag-curve" };
-        constexpr std::string_view kInventoryCommand{ "inventory" };
         constexpr std::string_view kSessionCommand{ "session" };
         constexpr std::string_view kJsonFlag{ "--json" };
 
@@ -1495,11 +1490,6 @@ namespace
         if( command == kDragCurveCommand )
         {
             return grab::cli::run_drag_curve_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == kInventoryCommand )
-        {
-            return grab::cli::run_inventory_command( cli_args.subspan( 1 ) );
         }
 
         if( command == kSessionCommand )

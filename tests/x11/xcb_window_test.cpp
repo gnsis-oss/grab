@@ -16,7 +16,7 @@ namespace
 
     constexpr std::string_view expected_instance  = "exampleapp1";
     constexpr std::string_view expected_class     = "ExampleApp1";
-    constexpr std::string_view sample_app    = "exampleapp";
+    constexpr std::string_view sample_app         = "exampleapp";
     constexpr std::string_view missing_app        = "foo";
     constexpr std::string_view other_instance     = "launcher";
     constexpr std::string_view other_class        = "Viewer";
