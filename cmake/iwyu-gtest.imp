@@ -1,0 +1,25 @@
+[
+    # GoogleTest IWYU mapping.
+    #
+    # The project uniformly uses `#include <gtest/gtest.h>` (angle form) as
+    # the single entry point. IWYU's symbol tracing otherwise recommends:
+    #   - quote-form `"gtest/gtest.h"` (the same header, different syntax)
+    #   - internal headers like `"gtest/internal/gtest-internal.h"`
+    #   - sub-headers like `"gtest/gtest-message.h"`,
+    #     `"gtest/gtest-test-part.h"`, `"gtest/gtest_pred_impl.h"`
+    # which would create duplicate includes (clang-tidy
+    # `readability-duplicate-include` -> -Werror) or churn.
+    #
+    # Mapping format: each entry says
+    #   "code that needs <src> with <src-visibility> may satisfy it by
+    #    including <dst> with <dst-visibility>"
+    # so we route every gtest header — quote or angle, public or internal —
+    # to the public <gtest/gtest.h>.
+
+    { include: ["@\"gtest/.*\\.h\"",        "private", "<gtest/gtest.h>", "public"] },
+    { include: ["@<gtest/.*\\.h>",          "private", "<gtest/gtest.h>", "public"] },
+    { include: ["\"gtest/gtest.h\"",        "public",  "<gtest/gtest.h>", "public"] },
+    { include: ["\"gtest/gtest-message.h\"",   "public", "<gtest/gtest.h>", "public"] },
+    { include: ["\"gtest/gtest-test-part.h\"", "public", "<gtest/gtest.h>", "public"] },
+    { include: ["\"gtest/gtest_pred_impl.h\"", "public", "<gtest/gtest.h>", "public"] }
+]

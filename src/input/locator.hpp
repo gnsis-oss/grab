@@ -1,0 +1,66 @@
+#ifndef GRAB_INPUT_LOCATOR_HPP
+#define GRAB_INPUT_LOCATOR_HPP
+
+#include "grab/result.hpp"
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
+
+struct xcb_connection_t;
+
+namespace grab::input
+{
+
+    enum class GeometryTrust : std::uint8_t
+    {
+        trusted,
+        estimated,
+        unavailable,
+    };
+
+    struct LocatedWindow
+    {
+            std::uint32_t window = 0U;
+            std::int16_t  x      = 0;
+            std::int16_t  y      = 0;
+            std::uint16_t width  = 0U;
+            std::uint16_t height = 0U;
+            GeometryTrust trust  = GeometryTrust::unavailable;
+    };
+
+    class WindowLocator
+    {
+        public:
+
+            [[nodiscard]]
+            static grab::Result<WindowLocator>
+            open( const char* display = nullptr );
+
+            ~WindowLocator();
+
+            WindowLocator( const WindowLocator& ) = delete;
+            WindowLocator&
+            operator=( const WindowLocator& ) = delete;
+            WindowLocator( WindowLocator&& other ) noexcept;
+            WindowLocator&
+            operator=( WindowLocator&& other ) noexcept;
+
+            [[nodiscard]]
+            grab::Result<LocatedWindow>
+            locate( const std::vector<std::string>& wm_class_candidates,
+                    std::string_view                title = {} );
+
+        private:
+
+            WindowLocator( xcb_connection_t* connection,
+                           std::uint32_t     root ) noexcept;
+
+            xcb_connection_t* connection_ = nullptr;
+            std::uint32_t     root_       = 0U;
+    };
+
+}    // namespace grab::input
+
+#endif    // GRAB_INPUT_LOCATOR_HPP

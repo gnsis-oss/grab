@@ -1,0 +1,40 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "default",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "iwyu",
+      "inherits": "default",
+      "cacheVariables": {
+        "WITH_IWYU": "ON"
+      }
+    },
+    {
+      "name": "gcc",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_C_COMPILER": "gcc",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "default",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ]
+}

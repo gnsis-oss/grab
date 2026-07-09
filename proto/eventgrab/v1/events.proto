@@ -1,0 +1,64 @@
+syntax = "proto3";
+package eventgrab.v1;
+
+enum EventCategory {
+  EVENT_CATEGORY_UNSPECIFIED = 0;
+  EVENT_CATEGORY_INPUT       = 1;
+  EVENT_CATEGORY_WINDOW      = 2;
+  EVENT_CATEGORY_ACCESSIBILITY = 3;
+  EVENT_CATEGORY_INTEGRATION = 4;
+  EVENT_CATEGORY_BROWSER     = 5;
+  EVENT_CATEGORY_STATE       = 6;
+}
+
+// Mirrors the Python StrEnum event types.
+// New event types are added here as they are implemented.
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED      = 0;
+  // Input (tier 0)
+  INPUT_KEY_DOWN              = 100;
+  INPUT_KEY_UP                = 101;
+  INPUT_KEY_COMBO             = 102;  // reserved: producer TBD
+  INPUT_MOUSE_CLICK           = 103;  // reserved: producer TBD
+  INPUT_MOUSE_MOVE            = 104;
+  INPUT_IDLE_START            = 105;
+  INPUT_IDLE_END              = 106;
+  // Window (tier 1)
+  WINDOW_FOCUS_CHANGED        = 200;
+  WINDOW_TITLE_CHANGED        = 201;
+  WINDOW_CREATED              = 202;
+  WINDOW_CLOSED               = 203;
+  // Accessibility (tier 2)
+  A11Y_BUTTON_CLICKED         = 300;
+  A11Y_MENU_OPENED            = 301;  // reserved: producer TBD
+  A11Y_MENU_CLOSED            = 302;  // reserved: producer TBD
+  A11Y_FOCUS_CHANGED          = 303;
+  A11Y_TEXT_CHANGED           = 304;  // reserved: producer TBD
+  A11Y_STATE_CHANGED          = 305;
+  // Integration (tier 3)
+  APP_TAB_CHANGED             = 400;  // reserved: producer TBD
+  APP_CONTEXT_UPDATE          = 401;  // reserved: producer TBD
+  // Browser (tier 3)
+  BROWSER_TAB_SWITCHED        = 500;
+  // State (tier 3)
+  STATE_SNAPSHOT              = 600;
+}
+
+message Event {
+  EventKind kind              = 1;
+  EventCategory category      = 2;
+  double timestamp             = 3;  // Unix epoch seconds with fractional ms
+  map<string, string> data     = 4;  // Freeform key-value metadata
+}
+
+message EventFilter {
+  repeated EventKind kinds     = 1;  // Empty = all events
+  repeated EventCategory categories = 2;  // Empty = all categories
+}
+
+message EventTypeInfo {
+  EventKind kind               = 1;
+  EventCategory category       = 2;
+  string name                  = 3;  // Human-readable, e.g., "input.key_down"
+  bool active                  = 4;  // Whether a source is currently producing this type
+}

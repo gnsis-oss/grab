@@ -1,0 +1,1034 @@
+#include "core/reactor.hpp"
+#include "event/atspi.hpp"
+#include "grab/event.hpp"
+#include "grab/event_bus.hpp"
+#include "grab/result.hpp"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <dbus/dbus.h>
+#include <expected>
+#include <iterator>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <sys/epoll.h>    // IWYU pragma: keep
+#include <utility>
+#include <vector>
+
+namespace grab::event
+{
+    namespace
+    {
+
+        constexpr int           kDbusNoWait        = 0;
+        constexpr int           kDbusCallTimeoutMs = 1'000;
+        constexpr int           kInvalidFd         = -1;
+        constexpr std::uint64_t kNoToken           = 0U;
+        constexpr std::uint32_t kNoEvents          = 0U;
+        constexpr std::uint32_t kReadableEvents =
+            static_cast<std::uint32_t>( EPOLLIN ) |
+            static_cast<std::uint32_t>( EPOLLERR ) |
+            static_cast<std::uint32_t>( EPOLLHUP );
+        constexpr std::uint32_t kWritableEvents =
+            static_cast<std::uint32_t>( EPOLLOUT ) |
+            static_cast<std::uint32_t>( EPOLLERR ) |
+            static_cast<std::uint32_t>( EPOLLHUP );
+        constexpr const char* kA11yBusName          = "org.a11y.Bus";
+        constexpr const char* kA11yBusPath          = "/org/a11y/bus";
+        constexpr const char* kA11yBusInterface     = "org.a11y.Bus";
+        constexpr const char* kGetAddressMethod     = "GetAddress";
+        constexpr const char* kRegistryName         = "org.a11y.atspi.Registry";
+        constexpr const char* kRegistryPath         = "/org/a11y/atspi/registry";
+        constexpr const char* kRegistryInterface    = "org.a11y.atspi.Registry";
+        constexpr const char* kRegisterEventMethod  = "RegisterEvent";
+        constexpr const char* kObjectEventInterface = "org.a11y.atspi.Event.Object";
+        constexpr const char* kObjectEventMatch =
+            "type='signal',interface='org.a11y.atspi.Event.Object'";
+        constexpr std::string_view                 kStateChangedMember = "StateChanged";
+        constexpr std::string_view                 kTextChangedMember  = "TextChanged";
+        constexpr std::string_view                 kActionMember       = "Action";
+        constexpr std::string_view                 kClickedMember      = "Clicked";
+        constexpr std::string_view                 kFocusedDetail      = "focused";
+        constexpr std::string_view                 kPressedDetail      = "pressed";
+        constexpr std::string_view                 kClickedDetail      = "clicked";
+        constexpr std::string_view                 kClickDetail        = "click";
+        constexpr std::string_view                 kActivateDetail     = "activate";
+        constexpr std::string_view                 kActionDetail       = "action";
+        constexpr std::string_view                 kMenuOpenedDetail   = "menu-opened";
+        constexpr std::string_view                 kMenuClosedDetail   = "menu-closed";
+        constexpr std::string_view                 kShowingDetail      = "showing";
+        constexpr std::string_view                 kVisibleDetail      = "visible";
+        constexpr std::string_view                 kHiddenDetail       = "hidden";
+        constexpr std::string_view                 kCollapsedDetail    = "collapsed";
+        constexpr std::string_view                 kMenuRoleNeedle     = "menu";
+        constexpr std::string_view                 kButtonRoleNeedle   = "button";
+        constexpr std::string_view                 kPushRoleNeedle     = "push";
+        constexpr std::string_view                 kTextChangedPrefix  = "text-changed";
+
+        constexpr std::array<std::string_view, 6U> kRegisteredEvents{
+            "object:state-changed:focused",
+            "object:state-changed:pressed",
+            "object:state-changed:checked",
+            "object:state-changed:showing",
+            "object:state-changed:visible",
+            "object:text-changed",
+        };
+
+        struct WatchRegistration
+        {
+                DBusWatch*    watch = nullptr;
+                std::uint64_t token = kNoToken;
+        };
+
+        struct DbusError
+        {
+                DbusError()
+                {
+                    dbus_error_init( &value );
+                }
+
+                ~DbusError()
+                {
+                    if( dbus_error_is_set( &value ) != 0 )
+                    {
+                        dbus_error_free( &value );
+                    }
+                }
+
+                DbusError( const DbusError& ) = delete;
+                DbusError&
+                operator=( const DbusError& ) = delete;
+                DbusError( DbusError&& )      = delete;
+                DbusError&
+                operator=( DbusError&& ) = delete;
+
+                [[nodiscard]]
+                std::string
+                message_or( std::string_view fallback ) const
+                {
+                    if( dbus_error_is_set( &value ) == 0 || value.message == nullptr )
+                    {
+                        return std::string{ fallback };
+                    }
+                    return value.message;
+                }
+
+                DBusError value{};
+        };
+
+        struct DbusConnectionDeleter
+        {
+                void
+                operator()( DBusConnection* connection ) const noexcept
+                {
+                    if( connection == nullptr )
+                    {
+                        return;
+                    }
+                    dbus_connection_close( connection );
+                    dbus_connection_unref( connection );
+                }
+        };
+
+        struct DbusMessageDeleter
+        {
+                void
+                operator()( DBusMessage* message ) const noexcept
+                {
+                    if( message != nullptr )
+                    {
+                        dbus_message_unref( message );
+                    }
+                }
+        };
+
+        using DbusConnection = std::unique_ptr<DBusConnection, DbusConnectionDeleter>;
+        using DbusMessage    = std::unique_ptr<DBusMessage, DbusMessageDeleter>;
+
+        [[nodiscard]]
+        std::string
+        dbus_text( const char* value )
+        {
+            if( value == nullptr )
+            {
+                return {};
+            }
+            return value;
+        }
+
+        [[nodiscard]]
+        std::string
+        lower_ascii( std::string_view value )
+        {
+            std::string lowered{ value };
+            std::ranges::transform( lowered,
+                                    lowered.begin(),
+                                    []( unsigned char character )
+                                    {
+                                        if( character >= 'A' && character <= 'Z' )
+                                        {
+                                            return static_cast<char>( character +
+                                                                      ( 'a' - 'A' ) );
+                                        }
+                                        return static_cast<char>( character );
+                                    } );
+            return lowered;
+        }
+
+        [[nodiscard]]
+        bool
+        contains_ascii( std::string_view haystack,
+                        std::string_view needle )
+        {
+            const auto lowered_haystack = lower_ascii( haystack );
+            const auto lowered_needle   = lower_ascii( needle );
+            return lowered_haystack.contains( lowered_needle );
+        }
+
+        [[nodiscard]]
+        bool
+        starts_with_ascii( std::string_view value,
+                           std::string_view prefix )
+        {
+            const auto lowered_value  = lower_ascii( value );
+            const auto lowered_prefix = lower_ascii( prefix );
+            return lowered_value.starts_with( lowered_prefix );
+        }
+
+        [[nodiscard]]
+        bool
+        is_button_signal( const AtspiSignal& signal )
+        {
+            return contains_ascii( signal.role, kButtonRoleNeedle ) ||
+                   contains_ascii( signal.role, kPushRoleNeedle ) ||
+                   contains_ascii( signal.detail, kClickedDetail ) ||
+                   contains_ascii( signal.detail, kClickDetail ) ||
+                   contains_ascii( signal.detail, kActivateDetail ) ||
+                   contains_ascii( signal.detail, kActionDetail );
+        }
+
+        [[nodiscard]]
+        bool
+        is_menu_signal( const AtspiSignal& signal )
+        {
+            return contains_ascii( signal.role, kMenuRoleNeedle );
+        }
+
+        [[nodiscard]]
+        grab::Event
+        make_a11y_event( grab::EventKind    kind,
+                         const AtspiSignal& signal,
+                         double             timestamp )
+        {
+            return grab::Event{
+                .timestamp = timestamp,
+                .sequence  = 0U,
+                .kind      = kind,
+                .category  = grab::category_of( kind ),
+                .payload   = grab::Payload{ grab::A11yEvent{
+                    .app    = signal.app,
+                    .role   = signal.role,
+                    .name   = signal.name,
+                    .detail = signal.detail,
+                } },
+            };
+        }
+
+        [[nodiscard]]
+        std::optional<grab::EventKind>
+        mapped_kind( const AtspiSignal& signal )
+        {
+            if( signal.interface != kObjectEventInterface )
+            {
+                return std::nullopt;
+            }
+
+            if( signal.member ==
+                kTextChangedMember ||
+                starts_with_ascii( signal.detail, kTextChangedPrefix ) )
+            {
+                return grab::EventKind::a11y_text_changed;
+            }
+
+            if( signal.detail ==
+                kMenuOpenedDetail ||
+                ( signal.member ==
+                  kStateChangedMember &&
+                  is_menu_signal( signal ) &&
+                  ( signal.detail ==
+                    kShowingDetail ||
+                    signal.detail == kVisibleDetail ) ) )
+            {
+                return grab::EventKind::a11y_menu_opened;
+            }
+
+            if( signal.detail ==
+                kMenuClosedDetail ||
+                ( signal.member ==
+                  kStateChangedMember &&
+                  is_menu_signal( signal ) &&
+                  ( signal.detail ==
+                    kHiddenDetail ||
+                    signal.detail == kCollapsedDetail ) ) )
+            {
+                return grab::EventKind::a11y_menu_closed;
+            }
+
+            if( signal.member == kStateChangedMember && signal.detail == kFocusedDetail )
+            {
+                return grab::EventKind::a11y_focus_changed;
+            }
+
+            if( ( signal.member ==
+                  kStateChangedMember &&
+                  signal.detail ==
+                  kPressedDetail &&
+                  is_button_signal( signal ) ) ||
+                signal.member ==
+                kActionMember ||
+                signal.member == kClickedMember )
+            {
+                return grab::EventKind::a11y_button_clicked;
+            }
+
+            if( signal.member == kStateChangedMember )
+            {
+                return grab::EventKind::a11y_state_changed;
+            }
+
+            return std::nullopt;
+        }
+
+        [[nodiscard]]
+        double
+        current_timestamp()
+        {
+            const auto now = std::chrono::system_clock::now().time_since_epoch();
+            return std::chrono::duration<double>{ now }.count();
+        }
+
+        [[nodiscard]]
+        std::uint32_t
+        epoll_events_for_watch( DBusWatch* watch )
+        {
+            std::uint32_t      events = static_cast<std::uint32_t>( EPOLLERR ) |
+                                        static_cast<std::uint32_t>( EPOLLHUP );
+            const unsigned int flags  = dbus_watch_get_flags( watch );
+            if( ( flags & DBUS_WATCH_READABLE ) != 0U )
+            {
+                events |= static_cast<std::uint32_t>( EPOLLIN );
+            }
+            if( ( flags & DBUS_WATCH_WRITABLE ) != 0U )
+            {
+                events |= static_cast<std::uint32_t>( EPOLLOUT );
+            }
+            return events;
+        }
+
+        [[nodiscard]]
+        unsigned int
+        dbus_flags_for_epoll( std::uint32_t events )
+        {
+            unsigned int flags = 0U;
+            if( ( events & static_cast<std::uint32_t>( EPOLLIN ) ) != 0U )
+            {
+                flags |= DBUS_WATCH_READABLE;
+            }
+            if( ( events & static_cast<std::uint32_t>( EPOLLOUT ) ) != 0U )
+            {
+                flags |= DBUS_WATCH_WRITABLE;
+            }
+            if( ( events & static_cast<std::uint32_t>( EPOLLERR ) ) != 0U )
+            {
+                flags |= DBUS_WATCH_ERROR;
+            }
+            if( ( events & static_cast<std::uint32_t>( EPOLLHUP ) ) != 0U )
+            {
+                flags |= DBUS_WATCH_HANGUP;
+            }
+            return flags;
+        }
+
+    }    // namespace
+
+    struct AtspiMonitor::State : std::enable_shared_from_this<State>
+    {
+            std::mutex                     mutex;
+            grab::core::Reactor*           reactor    = nullptr;
+            DBusConnection*                connection = nullptr;
+            grab::EventBus*                bus        = nullptr;
+            bool                           active     = true;
+            std::vector<WatchRegistration> watches;
+    };
+
+    namespace
+    {
+
+        [[nodiscard]]
+        std::vector<grab::Event>
+        take_events_from_message( DBusMessage* message )
+        {
+            std::vector<grab::Event> events;
+            AtspiSignal              signal{
+                .interface = dbus_text( dbus_message_get_interface( message ) ),
+                .member    = dbus_text( dbus_message_get_member( message ) ),
+                .detail    = {},
+                .app       = dbus_text( dbus_message_get_sender( message ) ),
+                .role      = {},
+                .name      = {},
+            };
+
+            if( signal.interface != kObjectEventInterface )
+            {
+                return events;
+            }
+
+            DBusMessageIter iterator{};
+            if( dbus_message_iter_init( message, &iterator ) !=
+                0 &&
+                dbus_message_iter_get_arg_type( &iterator ) == DBUS_TYPE_STRING )
+            {
+                const char* detail = nullptr;
+                dbus_message_iter_get_basic( &iterator, static_cast<void*>( &detail ) );
+                signal.detail = dbus_text( detail );
+            }
+
+            auto decoded = decode_atspi_signal( signal, current_timestamp() );
+            if( decoded.has_value() )
+            {
+                events.push_back( std::move( *decoded ) );
+            }
+            return events;
+        }
+
+        void
+        append_pending_events( DBusConnection*           connection,
+                               std::vector<grab::Event>& pending_events )
+        {
+            while( true )
+            {
+                const DbusMessage message{ dbus_connection_pop_message( connection ) };
+                if( message == nullptr )
+                {
+                    break;
+                }
+
+                auto decoded = take_events_from_message( message.get() );
+                pending_events.insert( pending_events.end(),
+                                       std::make_move_iterator( decoded.begin() ),
+                                       std::make_move_iterator( decoded.end() ) );
+            }
+        }
+
+        void
+        publish_pending_events( grab::EventBus&           bus,
+                                std::vector<grab::Event>& events ) noexcept
+        {
+            for( auto& event : events )
+            {
+                bus.publish( std::move( event ) );
+            }
+        }
+
+        void
+        remove_fd_noexcept( grab::core::Reactor* reactor,
+                            std::uint64_t        token ) noexcept
+        {
+            if( reactor == nullptr || token == kNoToken )
+            {
+                return;
+            }
+
+            bool remove_failed = false;
+            try
+            {
+                reactor->remove_fd( token );
+            }
+            catch( ... )
+            {
+                remove_failed = true;
+            }
+            static_cast<void>( remove_failed );
+        }
+
+        [[nodiscard]]
+        grab::Error
+        dbus_device_error( std::string_view step,
+                           const DbusError& error )
+        {
+            return grab::Error{
+                .code       = grab::ErrorCode::device_inaccessible,
+                .message    = std::string{ step } +
+                              ": " +
+                              error.message_or( "D-Bus operation failed" ),
+                .capability = {},
+                .target     = {},
+                .attempts   = {},
+            };
+        }
+
+        [[nodiscard]]
+        grab::Result<std::string>
+        resolve_a11y_bus_address()
+        {
+            DbusError            connection_error;
+            const DbusConnection session{
+                dbus_bus_get_private( DBUS_BUS_SESSION, &connection_error.value )
+            };
+            if( session == nullptr )
+            {
+                return std::unexpected( dbus_device_error( "AT-SPI session bus lookup",
+                                                           connection_error ) );
+            }
+            dbus_connection_set_exit_on_disconnect( session.get(), 0 );
+
+            const DbusMessage request{
+                dbus_message_new_method_call( kA11yBusName,
+                                              kA11yBusPath,
+                                              kA11yBusInterface,
+                                              kGetAddressMethod )
+            };
+            if( request == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::internal_fault,
+                                   "AT-SPI GetAddress request allocation failed" );
+            }
+
+            DbusError         reply_error;
+            const DbusMessage reply{
+                dbus_connection_send_with_reply_and_block( session.get(),
+                                                           request.get(),
+                                                           kDbusCallTimeoutMs,
+                                                           &reply_error.value )
+            };
+            if( reply == nullptr )
+            {
+                return std::unexpected( dbus_device_error( "AT-SPI bus address request",
+                                                           reply_error ) );
+            }
+
+            DBusMessageIter iterator{};
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
+                dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_STRING )
+            {
+                return grab::fail( grab::ErrorCode::device_inaccessible,
+                                   "AT-SPI bus address response: missing address" );
+            }
+
+            const char* address = nullptr;
+            dbus_message_iter_get_basic( &iterator, static_cast<void*>( &address ) );
+            if( address == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::device_inaccessible,
+                                   "AT-SPI bus address response: null address" );
+            }
+
+            return std::string{ address };
+        }
+
+        [[nodiscard]]
+        grab::Result<DbusConnection>
+        open_a11y_connection( const std::string& address )
+        {
+            DbusError      open_error;
+            DbusConnection connection{
+                dbus_connection_open_private( address.c_str(), &open_error.value )
+            };
+            if( connection == nullptr )
+            {
+                return std::unexpected( dbus_device_error( "AT-SPI bus connection",
+                                                           open_error ) );
+            }
+            dbus_connection_set_exit_on_disconnect( connection.get(), 0 );
+
+            DbusError register_error;
+            if( dbus_bus_register( connection.get(), &register_error.value ) == 0 )
+            {
+                return std::unexpected( dbus_device_error( "AT-SPI bus registration",
+                                                           register_error ) );
+            }
+
+            return connection;
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        register_event( DBusConnection*  connection,
+                        std::string_view event_name )
+        {
+            const DbusMessage request{
+                dbus_message_new_method_call( kRegistryName,
+                                              kRegistryPath,
+                                              kRegistryInterface,
+                                              kRegisterEventMethod )
+            };
+            if( request == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::internal_fault,
+                                   "AT-SPI RegisterEvent request allocation failed" );
+            }
+
+            DBusMessageIter iterator{};
+            dbus_message_iter_init_append( request.get(), &iterator );
+            const std::string event_string{ event_name };
+            const char*       event_text = event_string.c_str();
+            if( dbus_message_iter_append_basic(
+                    &iterator,
+                    DBUS_TYPE_STRING,
+                    static_cast<const void*>( &event_text )
+                ) == 0 )
+            {
+                return grab::fail( grab::ErrorCode::internal_fault,
+                                   "AT-SPI RegisterEvent argument allocation failed" );
+            }
+
+            DbusError         reply_error;
+            const DbusMessage reply{
+                dbus_connection_send_with_reply_and_block( connection,
+                                                           request.get(),
+                                                           kDbusCallTimeoutMs,
+                                                           &reply_error.value )
+            };
+            if( reply == nullptr )
+            {
+                return std::unexpected( dbus_device_error( "AT-SPI RegisterEvent",
+                                                           reply_error ) );
+            }
+
+            return {};
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        register_events( DBusConnection* connection )
+        {
+            for( const std::string_view event_name : kRegisteredEvents )
+            {
+                auto registered = register_event( connection, event_name );
+                if( !registered.has_value() )
+                {
+                    return registered;
+                }
+            }
+            return {};
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        add_object_event_match( DBusConnection* connection )
+        {
+            DbusError match_error;
+            dbus_bus_add_match( connection, kObjectEventMatch, &match_error.value );
+            if( dbus_error_is_set( &match_error.value ) != 0 )
+            {
+                return std::unexpected( dbus_device_error( "AT-SPI signal match",
+                                                           match_error ) );
+            }
+
+            dbus_connection_flush( connection );
+            return {};
+        }
+
+    }    // namespace
+
+    std::optional<grab::Event>
+    decode_atspi_signal( const AtspiSignal& signal,
+                         double             timestamp )
+    {
+        const auto kind = mapped_kind( signal );
+        if( !kind.has_value() )
+        {
+            return std::nullopt;
+        }
+
+        return make_a11y_event( *kind, signal, timestamp );
+    }
+
+    AtspiMonitor::AtspiMonitor( grab::core::Reactor&   reactor,
+                                std::shared_ptr<State> state ) noexcept :
+        reactor_( &reactor ),
+        state_( std::move( state ) )
+    {
+    }
+
+    AtspiMonitor::~AtspiMonitor()
+    {
+        stop();
+    }
+
+    AtspiMonitor::AtspiMonitor( AtspiMonitor&& other ) noexcept :
+        reactor_( std::exchange( other.reactor_,
+                                 nullptr ) ),
+        state_( std::move( other.state_ ) )
+    {
+    }
+
+    AtspiMonitor&
+    AtspiMonitor::operator=( AtspiMonitor&& other ) noexcept
+    {
+        if( this != &other )
+        {
+            stop();
+            reactor_ = std::exchange( other.reactor_, nullptr );
+            state_   = std::move( other.state_ );
+        }
+        return *this;
+    }
+
+    std::uint64_t
+    AtspiMonitor::register_watch_locked( State&     state,
+                                         DBusWatch* watch )
+    {
+        if( !state.active ||
+            state.reactor ==
+            nullptr ||
+            dbus_watch_get_enabled( watch ) == 0 )
+        {
+            return kNoToken;
+        }
+
+        const int fd = dbus_watch_get_unix_fd( watch );
+        if( fd == kInvalidFd )
+        {
+            return kNoToken;
+        }
+
+        const auto shared_state = state.shared_from_this();
+        return state.reactor->add_fd( fd,
+                                      epoll_events_for_watch( watch ),
+                                      [shared_state, watch]( std::uint32_t event_mask )
+                                      {
+                                          AtspiMonitor::handle_watch( shared_state,
+                                                                      watch,
+                                                                      event_mask );
+                                      } );
+    }
+
+    bool
+    AtspiMonitor::has_registered_watch_locked( const State& state,
+                                               DBusWatch*   watch ) noexcept
+    {
+        return std::ranges::find_if( state.watches,
+                                     [watch]( const WatchRegistration& candidate )
+                                     {
+                                         return candidate.watch ==
+                                                watch &&
+                                                candidate.token != kNoToken;
+                                     } ) != state.watches.end();
+    }
+
+    dbus_bool_t
+    AtspiMonitor::add_watch( DBusWatch* watch,
+                             void*      data )
+    {
+        auto* const state = static_cast<State*>( data );
+        if( state == nullptr || watch == nullptr )
+        {
+            return 0;
+        }
+
+        try
+        {
+            const std::scoped_lock lock( state->mutex );
+            const std::uint64_t    token = register_watch_locked( *state, watch );
+            state->watches.push_back( WatchRegistration{
+                .watch = watch,
+                .token = token,
+            } );
+            return 1;
+        }
+        catch( ... )
+        {
+            return 0;
+        }
+    }
+
+    void
+    AtspiMonitor::remove_watch( DBusWatch* watch,
+                                void*      data ) noexcept
+    {
+        auto* const state = static_cast<State*>( data );
+        if( state == nullptr || watch == nullptr )
+        {
+            return;
+        }
+
+        grab::core::Reactor* reactor = nullptr;
+        std::uint64_t        token   = kNoToken;
+        try
+        {
+            const std::scoped_lock lock( state->mutex );
+            reactor = state->reactor;
+            const auto registration =
+                std::ranges::find_if( state->watches,
+                                      [watch]( const WatchRegistration& candidate )
+                                      {
+                                          return candidate.watch == watch;
+                                      } );
+            if( registration == state->watches.end() )
+            {
+                return;
+            }
+
+            token = registration->token;
+            state->watches.erase( registration );
+        }
+        catch( ... )
+        {
+            return;
+        }
+
+        remove_fd_noexcept( reactor, token );
+    }
+
+    void
+    AtspiMonitor::toggle_watch( DBusWatch* watch,
+                                void*      data ) noexcept
+    {
+        auto* const state = static_cast<State*>( data );
+        if( state == nullptr || watch == nullptr )
+        {
+            return;
+        }
+
+        grab::core::Reactor* reactor      = nullptr;
+        std::uint64_t        remove_token = kNoToken;
+        try
+        {
+            const std::scoped_lock lock( state->mutex );
+            const auto             registration =
+                std::ranges::find_if( state->watches,
+                                      [watch]( const WatchRegistration& candidate )
+                                      {
+                                          return candidate.watch == watch;
+                                      } );
+            if( registration == state->watches.end() )
+            {
+                const std::uint64_t token = register_watch_locked( *state, watch );
+                state->watches.push_back( WatchRegistration{
+                    .watch = watch,
+                    .token = token,
+                } );
+                return;
+            }
+
+            if( dbus_watch_get_enabled( watch ) != 0 )
+            {
+                if( registration->token == kNoToken )
+                {
+                    registration->token = register_watch_locked( *state, watch );
+                }
+                return;
+            }
+
+            reactor             = state->reactor;
+            remove_token        = registration->token;
+            registration->token = kNoToken;
+        }
+        catch( ... )
+        {
+            return;
+        }
+
+        remove_fd_noexcept( reactor, remove_token );
+    }
+
+    grab::Result<AtspiMonitor>
+    AtspiMonitor::start( grab::core::Reactor& reactor,
+                         grab::EventBus&      bus )
+    {
+        if( dbus_threads_init_default() == 0 )
+        {
+            return grab::fail( grab::ErrorCode::internal_fault,
+                               "libdbus thread support initialization failed" );
+        }
+
+        auto address = resolve_a11y_bus_address();
+        if( !address.has_value() )
+        {
+            return std::unexpected( std::move( address.error() ) );
+        }
+
+        auto connection = open_a11y_connection( *address );
+        if( !connection.has_value() )
+        {
+            return std::unexpected( std::move( connection.error() ) );
+        }
+
+        auto registered = register_events( connection->get() );
+        if( !registered.has_value() )
+        {
+            return std::unexpected( std::move( registered.error() ) );
+        }
+
+        auto matched = add_object_event_match( connection->get() );
+        if( !matched.has_value() )
+        {
+            return std::unexpected( std::move( matched.error() ) );
+        }
+
+        auto state        = std::make_shared<State>();
+        state->reactor    = &reactor;
+        state->connection = connection->get();
+        state->bus        = &bus;
+
+        if( dbus_connection_set_watch_functions( connection->get(),
+                                                 &AtspiMonitor::add_watch,
+                                                 &AtspiMonitor::remove_watch,
+                                                 &AtspiMonitor::toggle_watch,
+                                                 state.get(),
+                                                 nullptr ) == 0 )
+        {
+            std::vector<std::uint64_t> tokens;
+            {
+                const std::scoped_lock lock( state->mutex );
+                state->active  = false;
+                state->bus     = nullptr;
+                state->reactor = nullptr;
+                for( const auto& watch : state->watches )
+                {
+                    if( watch.token != kNoToken )
+                    {
+                        tokens.push_back( watch.token );
+                    }
+                }
+                state->watches.clear();
+            }
+            for( const std::uint64_t token : tokens )
+            {
+                remove_fd_noexcept( &reactor, token );
+            }
+            return grab::fail( grab::ErrorCode::device_inaccessible,
+                               "AT-SPI D-Bus watch registration failed" );
+        }
+
+        state->connection = connection->release();
+        return AtspiMonitor{ reactor, std::move( state ) };
+    }
+
+    void
+    AtspiMonitor::handle_watch( const std::shared_ptr<State>& state,
+                                DBusWatch*                    watch,
+                                std::uint32_t                 events )
+    {
+        if( state ==
+            nullptr ||
+            watch ==
+            nullptr ||
+            ( events & ( kReadableEvents | kWritableEvents ) ) == kNoEvents )
+        {
+            return;
+        }
+
+        try
+        {
+            std::vector<grab::Event> pending_events;
+            grab::EventBus*          bus = nullptr;
+            {
+                const std::scoped_lock lock( state->mutex );
+                if( !state->active ||
+                    state->connection ==
+                    nullptr ||
+                    state->bus ==
+                    nullptr ||
+                    !has_registered_watch_locked( *state, watch ) )
+                {
+                    return;
+                }
+
+                const unsigned int dbus_flags = dbus_flags_for_epoll( events );
+                if( dbus_flags == 0U )
+                {
+                    return;
+                }
+
+                if( dbus_watch_handle( watch, dbus_flags ) == 0 )
+                {
+                    state->active = false;
+                    return;
+                }
+
+                bus = state->bus;
+                if( dbus_connection_read_write( state->connection, kDbusNoWait ) == 0 )
+                {
+                    state->active = false;
+                    return;
+                }
+
+                append_pending_events( state->connection, pending_events );
+                if( dbus_connection_get_is_connected( state->connection ) == 0 )
+                {
+                    state->active = false;
+                }
+            }
+
+            if( bus != nullptr )
+            {
+                publish_pending_events( *bus, pending_events );
+            }
+        }
+        catch( ... )
+        {
+            // A reactor fd callback must never let an exception reach the
+            // reactor: that would end run() and take down every other backend.
+            // An unexpected dispatch failure deactivates this monitor (fail-safe)
+            // rather than spinning on a message that keeps throwing.
+            const std::scoped_lock lock( state->mutex );
+            state->active = false;
+        }
+    }
+
+    void
+    AtspiMonitor::stop() noexcept
+    {
+        grab::core::Reactor* const reactor = std::exchange( reactor_, nullptr );
+        auto                       state   = std::move( state_ );
+        if( state == nullptr )
+        {
+            return;
+        }
+
+        DBusConnection* connection = nullptr;
+        {
+            std::vector<std::uint64_t> tokens;
+            try
+            {
+                const std::scoped_lock lock( state->mutex );
+                state->active  = false;
+                state->bus     = nullptr;
+                state->reactor = nullptr;
+                connection     = std::exchange( state->connection, nullptr );
+                for( const auto& watch : state->watches )
+                {
+                    if( watch.token != kNoToken )
+                    {
+                        tokens.push_back( watch.token );
+                    }
+                }
+                state->watches.clear();
+            }
+            catch( ... )
+            {
+                return;
+            }
+
+            for( const std::uint64_t token : tokens )
+            {
+                remove_fd_noexcept( reactor, token );
+            }
+        }
+
+        if( connection != nullptr )
+        {
+            dbus_connection_close( connection );
+            dbus_connection_unref( connection );
+        }
+    }
+
+}    // namespace grab::event

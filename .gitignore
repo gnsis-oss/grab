@@ -1,0 +1,14 @@
+build/
+.worktrees/
+__pycache__/
+*.pyc
+
+# AI-assistant tooling and residuals — not part of the shipped project
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.claude/
+.cursor/
+.aider*
+.github/copilot-instructions.md
+docs/

@@ -1,0 +1,692 @@
+#include "core/reactor.hpp"
+#include "grab/result.hpp"
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <expected>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <system_error>
+#include <unistd.h>
+#include <utility>
+#include <vector>
+
+namespace grab::core
+{
+    namespace
+    {
+
+        constexpr int           kInvalidFd         = -1;
+        constexpr int           kPosixFailure      = -1;
+        constexpr int           kPosixSuccess      = 0;
+        constexpr int           kInfiniteWait      = -1;
+        constexpr int           kNoWait            = 0;
+        constexpr int           kFirstReadyIndex   = 0;
+        constexpr std::uint32_t kNoFdEvents        = 0U;
+        constexpr std::uint64_t kWakeToken         = 0U;
+        constexpr std::uint64_t kFirstToken        = 1U;
+        constexpr std::uint64_t kTokenStep         = 1U;
+        constexpr std::size_t   kMaxReadyEvents    = 64U;
+        constexpr eventfd_t     kEmptyEventfdValue = 0U;
+        constexpr eventfd_t     kWakeEventfdValue  = 1U;
+
+        [[nodiscard]]
+        constexpr int
+        eventfd_flags() noexcept
+        {
+            return static_cast<int>( static_cast<unsigned int>( EFD_CLOEXEC ) |
+                                     static_cast<unsigned int>( EFD_NONBLOCK ) );
+        }
+
+        [[nodiscard]]
+        grab::Error
+        posix_error( std::string_view step,
+                     int              error_number )
+        {
+            return grab::Error{
+                .code = grab::ErrorCode::internal_fault,
+                .message =
+                    std::string{ step }
+                    +
+                    ": " +
+                    std::error_code{ error_number, std::generic_category() }
+                    .message(),
+                .capability = {},
+                .target     = {},
+                .attempts   = {},
+            };
+        }
+
+        [[nodiscard]]
+        grab::Error
+        message_error( std::string message )
+        {
+            return grab::Error{
+                .code       = grab::ErrorCode::internal_fault,
+                .message    = std::move( message ),
+                .capability = {},
+                .target     = {},
+                .attempts   = {},
+            };
+        }
+
+        [[nodiscard]]
+        grab::Error
+        callback_error( std::string_view      step,
+                        const std::exception& exception )
+        {
+            return message_error( std::string{ step } + ": " + exception.what() );
+        }
+
+    }    // namespace
+
+    class Reactor::Impl
+    {
+        public:
+
+            Impl();
+            ~Impl() noexcept;
+
+            Impl( const Impl& ) = delete;
+            Impl&
+            operator=( const Impl& ) = delete;
+            Impl( Impl&& )           = delete;
+            Impl&
+            operator=( Impl&& ) = delete;
+
+            [[nodiscard]]
+            grab::Result<void>
+            run();
+
+            void
+            stop() noexcept;
+
+            [[nodiscard]]
+            std::uint64_t
+            add_fd( int                                  fd,
+                    std::uint32_t                        events,
+                    std::function<void( std::uint32_t )> cb );
+
+            void
+            remove_fd( std::uint64_t token );
+
+            [[nodiscard]]
+            std::uint64_t
+            add_timer( std::chrono::nanoseconds delay,
+                       std::function<void()>    cb );
+
+            void
+            post( std::function<void()> fn );
+
+        private:
+
+            enum class PendingKind : std::uint8_t
+            {
+                add_fd,
+                remove_fd,
+                add_timer,
+                task,
+            };
+
+            struct PendingOp
+            {
+                    PendingKind                          kind   = PendingKind::task;
+                    std::uint64_t                        token  = kWakeToken;
+                    int                                  fd     = kInvalidFd;
+                    std::uint32_t                        events = kNoFdEvents;
+                    std::chrono::nanoseconds             delay{};
+                    std::function<void( std::uint32_t )> fd_callback;
+                    std::function<void()>                void_callback;
+            };
+
+            struct FdRegistration
+            {
+                    std::uint64_t                        token = kWakeToken;
+                    int                                  fd    = kInvalidFd;
+                    std::function<void( std::uint32_t )> callback;
+            };
+
+            struct TimerRegistration
+            {
+                    using TimePoint = std::chrono::steady_clock::time_point;
+
+                    std::uint64_t         token;
+                    TimePoint             deadline;
+                    std::function<void()> callback;
+            };
+
+            struct TimerLater
+            {
+                    [[nodiscard]]
+                    bool
+                    operator()( const TimerRegistration& lhs,
+                                const TimerRegistration& rhs ) const noexcept
+                    {
+                        return lhs.deadline > rhs.deadline;
+                    }
+            };
+
+            void
+            enqueue( PendingOp op );
+
+            void
+            wake() const noexcept;
+
+            void
+            drain_wake_fd() const noexcept;
+
+            [[nodiscard]]
+            grab::Result<void>
+            drain_pending_ops();
+
+            [[nodiscard]]
+            grab::Result<void>
+            add_fd_on_reactor( PendingOp& op );
+
+            [[nodiscard]]
+            grab::Result<void>
+            remove_fd_on_reactor( std::uint64_t token );
+
+            void
+            add_timer_on_reactor( PendingOp op );
+
+            void
+            dispatch_expired_timers();
+
+            void
+            dispatch_ready_event( const epoll_event& event );
+
+            [[nodiscard]]
+            int
+            epoll_timeout() const;
+
+            [[nodiscard]]
+            bool
+                                        consume_cancelled_token( std::uint64_t token );
+
+            int                         epoll_fd_ = kInvalidFd;
+            int                         wake_fd_  = kInvalidFd;
+            std::mutex                  mutex_;
+            std::vector<PendingOp>      pending_ops_;
+            std::vector<FdRegistration> fds_;
+            std::vector<TimerRegistration>           timers_;
+            std::vector<std::uint64_t>               cancelled_tokens_;
+            std::atomic_bool                         stop_requested_{ false };
+            std::atomic<std::uint64_t>               next_token_{ kFirstToken };
+            std::optional<grab::Error>               startup_error_;
+            std::array<epoll_event, kMaxReadyEvents> ready_events_{};
+    };
+
+    Reactor::Impl::Impl() :
+        epoll_fd_( ::epoll_create1( EPOLL_CLOEXEC ) ),
+        wake_fd_( ::eventfd( kEmptyEventfdValue,
+                             eventfd_flags() ) )
+    {
+        if( epoll_fd_ == kPosixFailure )
+        {
+            startup_error_ = posix_error( "epoll_create1", errno );
+            return;
+        }
+
+        if( wake_fd_ == kPosixFailure )
+        {
+            startup_error_ = posix_error( "eventfd", errno );
+            return;
+        }
+
+        epoll_event event{};
+        event.events   = EPOLLIN;
+        event.data.u64 = kWakeToken;
+        if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_ADD, wake_fd_, &event ) == kPosixFailure )
+        {
+            startup_error_ = posix_error( "epoll_ctl wake add", errno );
+        }
+    }
+
+    Reactor::Impl::~Impl() noexcept
+    {
+        stop();
+        if( wake_fd_ != kInvalidFd )
+        {
+            const auto close_result = ::close( wake_fd_ );
+            static_cast<void>( close_result );
+            wake_fd_ = kInvalidFd;
+        }
+        if( epoll_fd_ != kInvalidFd )
+        {
+            const auto close_result = ::close( epoll_fd_ );
+            static_cast<void>( close_result );
+            epoll_fd_ = kInvalidFd;
+        }
+    }
+
+    grab::Result<void>
+    Reactor::Impl::run()
+    {
+        if( startup_error_.has_value() )
+        {
+            return std::unexpected( *startup_error_ );
+        }
+
+        try
+        {
+            while( true )
+            {
+                if( auto result = drain_pending_ops(); !result.has_value() )
+                {
+                    return result;
+                }
+                if( stop_requested_.load( std::memory_order_acquire ) )
+                {
+                    return {};
+                }
+
+                dispatch_expired_timers();
+                if( stop_requested_.load( std::memory_order_acquire ) )
+                {
+                    return {};
+                }
+
+                const int timeout = epoll_timeout();
+                const int ready_count =
+                    ::epoll_wait( epoll_fd_,
+                                  ready_events_.data(),
+                                  static_cast<int>( ready_events_.size() ),
+                                  timeout );
+                if( ready_count == kPosixFailure )
+                {
+                    const int error_number = errno;
+                    if( error_number == EINTR )
+                    {
+                        continue;
+                    }
+                    return std::unexpected( posix_error( "epoll_wait", error_number ) );
+                }
+
+                for( int index = kFirstReadyIndex; index < ready_count; ++index )
+                {
+                    dispatch_ready_event(
+                        ready_events_.at( static_cast<std::size_t>( index ) )
+                    );
+                }
+            }
+        }
+        catch( const std::exception& exception )
+        {
+            return std::unexpected( callback_error( "reactor callback", exception ) );
+        }
+        catch( ... )
+        {
+            return std::unexpected(
+                message_error( "reactor callback: unknown exception" )
+            );
+        }
+    }
+
+    void
+    Reactor::Impl::stop() noexcept
+    {
+        bool expected = false;
+        if( stop_requested_.compare_exchange_strong( expected,
+                                                     true,
+                                                     std::memory_order_acq_rel ) )
+        {
+            wake();
+        }
+    }
+
+    std::uint64_t
+    Reactor::Impl::add_fd( int                                  fd,
+                           std::uint32_t                        events,
+                           std::function<void( std::uint32_t )> cb )
+    {
+        const auto token =
+            next_token_.fetch_add( kTokenStep, std::memory_order_relaxed );
+        enqueue( PendingOp{
+            .kind          = PendingKind::add_fd,
+            .token         = token,
+            .fd            = fd,
+            .events        = events,
+            .delay         = {},
+            .fd_callback   = std::move( cb ),
+            .void_callback = {},
+        } );
+        return token;
+    }
+
+    void
+    Reactor::Impl::remove_fd( std::uint64_t token )
+    {
+        enqueue( PendingOp{
+            .kind          = PendingKind::remove_fd,
+            .token         = token,
+            .fd            = kInvalidFd,
+            .events        = kNoFdEvents,
+            .delay         = {},
+            .fd_callback   = {},
+            .void_callback = {},
+        } );
+    }
+
+    std::uint64_t
+    Reactor::Impl::add_timer( std::chrono::nanoseconds delay,
+                              std::function<void()>    cb )
+    {
+        const auto token =
+            next_token_.fetch_add( kTokenStep, std::memory_order_relaxed );
+        enqueue( PendingOp{
+            .kind          = PendingKind::add_timer,
+            .token         = token,
+            .fd            = kInvalidFd,
+            .events        = kNoFdEvents,
+            .delay         = delay,
+            .fd_callback   = {},
+            .void_callback = std::move( cb ),
+        } );
+        return token;
+    }
+
+    void
+    Reactor::Impl::post( std::function<void()> fn )
+    {
+        enqueue( PendingOp{
+            .kind          = PendingKind::task,
+            .token         = kWakeToken,
+            .fd            = kInvalidFd,
+            .events        = kNoFdEvents,
+            .delay         = {},
+            .fd_callback   = {},
+            .void_callback = std::move( fn ),
+        } );
+    }
+
+    void
+    Reactor::Impl::enqueue( PendingOp op )
+    {
+        {
+            const std::scoped_lock lock( mutex_ );
+            pending_ops_.push_back( std::move( op ) );
+        }
+        wake();
+    }
+
+    void
+    Reactor::Impl::wake() const noexcept
+    {
+        if( wake_fd_ == kInvalidFd )
+        {
+            return;
+        }
+
+        while( true )
+        {
+            if( ::eventfd_write( wake_fd_, kWakeEventfdValue ) == kPosixSuccess )
+            {
+                return;
+            }
+            const int error_number = errno;
+            if( error_number == EINTR )
+            {
+                continue;
+            }
+            return;
+        }
+    }
+
+    void
+    Reactor::Impl::drain_wake_fd() const noexcept
+    {
+        while( true )
+        {
+            eventfd_t value = kEmptyEventfdValue;
+            if( ::eventfd_read( wake_fd_, &value ) == kPosixSuccess )
+            {
+                continue;
+            }
+
+            const int error_number = errno;
+            if( error_number == EINTR )
+            {
+                continue;
+            }
+            return;
+        }
+    }
+
+    grab::Result<void>
+    Reactor::Impl::drain_pending_ops()
+    {
+        std::vector<PendingOp> ops;
+        {
+            const std::scoped_lock lock( mutex_ );
+            ops.swap( pending_ops_ );
+        }
+
+        for( auto& op : ops )
+        {
+            switch( op.kind )
+            {
+                case PendingKind::add_fd :
+                    {
+                        if( auto result = add_fd_on_reactor( op ); !result.has_value() )
+                        {
+                            return result;
+                        }
+                        break;
+                    }
+                case PendingKind::remove_fd :
+                    {
+                        if( auto result = remove_fd_on_reactor( op.token );
+                            !result.has_value() )
+                        {
+                            return result;
+                        }
+                        break;
+                    }
+                case PendingKind::add_timer :
+                    add_timer_on_reactor( std::move( op ) );
+                    break;
+                case PendingKind::task :
+                    op.void_callback();
+                    break;
+            }
+        }
+        return {};
+    }
+
+    grab::Result<void>
+    Reactor::Impl::add_fd_on_reactor( PendingOp& op )
+    {
+        if( consume_cancelled_token( op.token ) )
+        {
+            return {};
+        }
+
+        epoll_event event{};
+        event.events   = op.events;
+        event.data.u64 = op.token;
+        if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_ADD, op.fd, &event ) == kPosixFailure )
+        {
+            return std::unexpected( posix_error( "epoll_ctl add", errno ) );
+        }
+        fds_.push_back( FdRegistration{
+            .token    = op.token,
+            .fd       = op.fd,
+            .callback = std::move( op.fd_callback ),
+        } );
+        return {};
+    }
+
+    grab::Result<void>
+    Reactor::Impl::remove_fd_on_reactor( std::uint64_t token )
+    {
+        const auto registration =
+            std::ranges::find_if( fds_,
+                                  [token]( const FdRegistration& candidate )
+                                  {
+                                      return candidate.token == token;
+                                  } );
+        if( registration == fds_.end() )
+        {
+            cancelled_tokens_.push_back( token );
+            return {};
+        }
+
+        if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_DEL, registration->fd, nullptr ) ==
+            kPosixFailure )
+        {
+            const int error_number = errno;
+            if( error_number != EBADF && error_number != ENOENT )
+            {
+                return std::unexpected( posix_error( "epoll_ctl del", error_number ) );
+            }
+        }
+        fds_.erase( registration );
+        return {};
+    }
+
+    void
+    Reactor::Impl::add_timer_on_reactor( PendingOp op )
+    {
+        timers_.push_back( TimerRegistration{
+            .token    = op.token,
+            .deadline = std::chrono::steady_clock::now() + op.delay,
+            .callback = std::move( op.void_callback ),
+        } );
+        std::ranges::push_heap( timers_, TimerLater{} );
+    }
+
+    void
+    Reactor::Impl::dispatch_expired_timers()
+    {
+        const auto now = std::chrono::steady_clock::now();
+        while( !timers_.empty() && timers_.front().deadline <= now )
+        {
+            std::ranges::pop_heap( timers_, TimerLater{} );
+            auto timer = std::move( timers_.back() );
+            timers_.pop_back();
+            timer.callback();
+            if( stop_requested_.load( std::memory_order_acquire ) )
+            {
+                return;
+            }
+        }
+    }
+
+    void
+    Reactor::Impl::dispatch_ready_event( const epoll_event& event )
+    {
+        if( event.data.u64 == kWakeToken )
+        {
+            drain_wake_fd();
+            return;
+        }
+
+        const auto registration =
+            std::ranges::find_if( fds_,
+                                  [&event]( const FdRegistration& candidate )
+                                  {
+                                      return candidate.token == event.data.u64;
+                                  } );
+        if( registration == fds_.end() )
+        {
+            return;
+        }
+        registration->callback( event.events );
+    }
+
+    int
+    Reactor::Impl::epoll_timeout() const
+    {
+        if( timers_.empty() )
+        {
+            return kInfiniteWait;
+        }
+
+        const auto now      = std::chrono::steady_clock::now();
+        const auto deadline = timers_.front().deadline;
+        if( deadline <= now )
+        {
+            return kNoWait;
+        }
+
+        const auto remaining = deadline - now;
+        const auto millis    = std::chrono::ceil<std::chrono::milliseconds>( remaining );
+        const auto capped =
+            std::min<std::chrono::milliseconds::rep>( millis.count(),
+                                                      std::numeric_limits<int>::max() );
+        return static_cast<int>( capped );
+    }
+
+    bool
+    Reactor::Impl::consume_cancelled_token( std::uint64_t token )
+    {
+        const auto cancelled = std::ranges::find( cancelled_tokens_, token );
+        if( cancelled == cancelled_tokens_.end() )
+        {
+            return false;
+        }
+        cancelled_tokens_.erase( cancelled );
+        return true;
+    }
+
+    Reactor::Reactor() :
+        impl_( std::make_unique<Impl>() )
+    {
+    }
+
+    Reactor::~Reactor() = default;
+
+    grab::Result<void>
+    Reactor::run()
+    {
+        return impl_->run();
+    }
+
+    void
+    Reactor::stop() noexcept
+    {
+        impl_->stop();
+    }
+
+    std::uint64_t
+    Reactor::add_fd( int                                  fd,
+                     std::uint32_t                        events,
+                     std::function<void( std::uint32_t )> cb )
+    {
+        return impl_->add_fd( fd, events, std::move( cb ) );
+    }
+
+    void
+    Reactor::remove_fd( std::uint64_t token )
+    {
+        impl_->remove_fd( token );
+    }
+
+    std::uint64_t
+    Reactor::add_timer( std::chrono::nanoseconds delay,
+                        std::function<void()>    cb )
+    {
+        return impl_->add_timer( delay, std::move( cb ) );
+    }
+
+    void
+    Reactor::post( std::function<void()> fn )
+    {
+        impl_->post( std::move( fn ) );
+    }
+
+}    // namespace grab::core

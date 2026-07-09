@@ -1,0 +1,26 @@
+syntax = "proto3";
+package eventgrab.v1;
+
+import "eventgrab/v1/events.proto";
+
+service EventGrabService {
+  // Server-streaming: client subscribes with a filter, receives matching events.
+  rpc Subscribe(EventFilter) returns (stream Event);
+
+  // Returns all known event types and whether they are currently active.
+  rpc ListEventTypes(ListEventTypesRequest) returns (ListEventTypesResponse);
+
+  // Bridge: app extensions push events to the daemon.
+  rpc PushEvent(PushEventRequest) returns (PushEventResponse);
+}
+
+message ListEventTypesRequest {}
+message ListEventTypesResponse {
+  repeated EventTypeInfo types = 1;
+}
+
+message PushEventRequest {
+  Event event = 1;
+}
+
+message PushEventResponse {}
