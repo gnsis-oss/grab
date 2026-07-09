@@ -19,18 +19,18 @@ TEST( Version,
 {
     // Source of truth is `project(grab VERSION x.y.z)`; these must track it.
     EXPECT_EQ( grab::version, kExpectedVersion );
-    EXPECT_EQ( grab::version_major, kExpectedMajor );
-    EXPECT_EQ( grab::version_minor, kExpectedMinor );
-    EXPECT_EQ( grab::version_patch, kExpectedPatch );
+    EXPECT_EQ( grab::majorVersion, kExpectedMajor );
+    EXPECT_EQ( grab::minorVersion, kExpectedMinor );
+    EXPECT_EQ( grab::patchVersion, kExpectedPatch );
 }
 
 TEST( Version,
       StringMatchesComponents )
 {
-    const std::string expected = std::to_string( grab::version_major ) +
+    const std::string expected = std::to_string( grab::majorVersion ) +
                                  "." +
-                                 std::to_string( grab::version_minor ) +
+                                 std::to_string( grab::minorVersion ) +
                                  "." +
-                                 std::to_string( grab::version_patch );
+                                 std::to_string( grab::patchVersion );
     EXPECT_EQ( grab::version, expected );
 }

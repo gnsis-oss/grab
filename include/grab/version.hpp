@@ -28,11 +28,11 @@
 namespace grab
 {
 
-    // Numeric components (named to avoid the glibc <sys/sysmacros.h>
-    // `major`/`minor` function-like macros).
-    inline constexpr int              version_major = GRAB_VERSION_MAJOR;
-    inline constexpr int              version_minor = GRAB_VERSION_MINOR;
-    inline constexpr int              version_patch = GRAB_VERSION_PATCH;
+    // Numeric semantic-version components (the camelCase names dodge the glibc
+    // <sys/sysmacros.h> `major`/`minor` function-like macros).
+    inline constexpr int              majorVersion = GRAB_VERSION_MAJOR;
+    inline constexpr int              minorVersion = GRAB_VERSION_MINOR;
+    inline constexpr int              patchVersion = GRAB_VERSION_PATCH;
 
     // Single source-of-truth semantic version, e.g. "0.0.1", derived from
     // CMake's project version.
