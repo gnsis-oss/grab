@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
-project(grab LANGUAGES CXX C)
+# Single source of truth for the project's semantic version.
+project(grab VERSION 0.0.1 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,11 +44,16 @@ add_library(grab_core STATIC
     src/core/registry.cpp
     src/core/resolver.cpp
     src/core/session.cpp
-    src/core/version.cpp
 )
 target_include_directories(grab_core PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_core PUBLIC cxx_std_23)
+# Feed the project's semantic version (source of truth: project(... VERSION))
+# into the code so grab/version.hpp reflects it with no duplicated constant.
+target_compile_definitions(grab_core PUBLIC
+    GRAB_VERSION_MAJOR=${grab_VERSION_MAJOR}
+    GRAB_VERSION_MINOR=${grab_VERSION_MINOR}
+    GRAB_VERSION_PATCH=${grab_VERSION_PATCH})
 
 add_library(grab_codec STATIC
     src/codec/png.cpp
