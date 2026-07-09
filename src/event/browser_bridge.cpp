@@ -4,6 +4,7 @@
 #include "grab/event_bus.hpp"
 #include "grab/result.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <charconv>
@@ -13,6 +14,8 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <nlohmann/json.hpp>    // IWYU pragma: keep
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -29,43 +32,22 @@ namespace grab::event
     namespace
     {
 
-        constexpr int           kInvalidFd              = -1;
-        constexpr int           kNoError                = 0;
-        constexpr int           kPosixFailure           = -1;
-        constexpr ssize_t       kEndOfFile              = 0;
-        constexpr std::uint64_t kNoToken                = 0U;
-        constexpr std::uint32_t kNoEvents               = 0U;
-        constexpr std::size_t   kFrameHeaderBytes       = 4U;
-        constexpr std::size_t   kReadChunkBytes         = 4'096U;
-        constexpr std::size_t   kMaxFrameBodyBytes      = 1'048'576U;
-        constexpr std::size_t   kLengthByteZeroOffset   = 0U;
-        constexpr std::size_t   kLengthByteOneOffset    = 1U;
-        constexpr std::size_t   kLengthByteTwoOffset    = 2U;
-        constexpr std::size_t   kLengthByteThreeOffset  = 3U;
-        constexpr unsigned int  kLengthByteOneShift     = 8U;
-        constexpr unsigned int  kLengthByteTwoShift     = 16U;
-        constexpr unsigned int  kLengthByteThreeShift   = 24U;
-        constexpr std::uint32_t kUnicodeEscapeDigits    = 4U;
-        constexpr std::uint32_t kHexDigitBits           = 4U;
-        constexpr std::uint32_t kHighSurrogateMin       = 0XD8'00U;
-        constexpr std::uint32_t kHighSurrogateMax       = 0XDB'FFU;
-        constexpr std::uint32_t kLowSurrogateMin        = 0XDC'00U;
-        constexpr std::uint32_t kLowSurrogateMax        = 0XDF'FFU;
-        constexpr std::uint32_t kSurrogateShift         = 10U;
-        constexpr std::uint32_t kSupplementaryPlaneBase = 0X1'00'00U;
-        constexpr std::uint32_t kUtf8OneByteMax         = 0X7FU;
-        constexpr std::uint32_t kUtf8TwoByteMax         = 0X7'FFU;
-        constexpr std::uint32_t kUtf8ThreeByteMax       = 0XFF'FFU;
-        constexpr std::uint32_t kUtf8MaxCodePoint       = 0X10'FF'FFU;
-        constexpr std::uint32_t kUtf8ContinuationMask   = 0X3FU;
-        constexpr std::uint32_t kUtf8ContinuationTag    = 0X80U;
-        constexpr std::uint32_t kUtf8TwoByteTag         = 0XC0U;
-        constexpr std::uint32_t kUtf8ThreeByteTag       = 0XE0U;
-        constexpr std::uint32_t kUtf8FourByteTag        = 0XF0U;
-        constexpr unsigned int  kUtf8OneContinuation    = 6U;
-        constexpr unsigned int  kUtf8TwoContinuations   = 12U;
-        constexpr unsigned int  kUtf8ThreeContinuations = 18U;
-        constexpr unsigned char kJsonControlMax         = 0X1FU;
+        constexpr int           kInvalidFd             = -1;
+        constexpr int           kNoError               = 0;
+        constexpr int           kPosixFailure          = -1;
+        constexpr ssize_t       kEndOfFile             = 0;
+        constexpr std::uint64_t kNoToken               = 0U;
+        constexpr std::uint32_t kNoEvents              = 0U;
+        constexpr std::size_t   kFrameHeaderBytes      = 4U;
+        constexpr std::size_t   kReadChunkBytes        = 4'096U;
+        constexpr std::size_t   kMaxFrameBodyBytes     = 1'048'576U;
+        constexpr std::size_t   kLengthByteZeroOffset  = 0U;
+        constexpr std::size_t   kLengthByteOneOffset   = 1U;
+        constexpr std::size_t   kLengthByteTwoOffset   = 2U;
+        constexpr std::size_t   kLengthByteThreeOffset = 3U;
+        constexpr unsigned int  kLengthByteOneShift    = 8U;
+        constexpr unsigned int  kLengthByteTwoShift    = 16U;
+        constexpr unsigned int  kLengthByteThreeShift  = 24U;
         constexpr std::uint32_t kReadableEvents =
             static_cast<std::uint32_t>( EPOLLIN ) |
             static_cast<std::uint32_t>( EPOLLERR ) |
@@ -86,17 +68,6 @@ namespace grab::event
         constexpr std::string_view kAppContextUpdateType   = "app.context_update";
         constexpr std::string_view kAppTabChangedType      = "app.tab_changed";
 
-        struct JsonMember
-        {
-                std::string key;
-                std::string value;
-        };
-
-        struct JsonObject
-        {
-                std::vector<JsonMember> members;
-        };
-
         struct ReadResult
         {
                 ssize_t bytes_read   = kPosixFailure;
@@ -113,632 +84,140 @@ namespace grab::event
 
         [[nodiscard]]
         bool
-        is_whitespace( char value ) noexcept
+        is_json_whitespace( char value ) noexcept
         {
             return value == ' ' || value == '\n' || value == '\r' || value == '\t';
         }
 
         [[nodiscard]]
-        bool
-        is_digit( char value ) noexcept
+        std::optional<std::size_t>
+        first_non_whitespace( std::string_view input,
+                              std::size_t      offset = 0U ) noexcept
         {
-            return value >= '0' && value <= '9';
-        }
-
-        [[nodiscard]]
-        bool
-        is_nonzero_digit( char value ) noexcept
-        {
-            return value >= '1' && value <= '9';
-        }
-
-        [[nodiscard]]
-        bool
-        is_hex_digit( char value ) noexcept
-        {
-            return ( value >= '0' && value <= '9' ) ||
-                   ( value >= 'a' && value <= 'f' ) ||
-                   ( value >= 'A' && value <= 'F' );
-        }
-
-        [[nodiscard]]
-        std::uint32_t
-        hex_value( char value ) noexcept
-        {
-            if( value >= '0' && value <= '9' )
-            {
-                return static_cast<std::uint32_t>( value - '0' );
-            }
-            if( value >= 'a' && value <= 'f' )
-            {
-                return static_cast<std::uint32_t>( value - 'a' ) +
-                       static_cast<std::uint32_t>( '9' - '0' ) +
-                       1U;
-            }
-            return static_cast<std::uint32_t>( value - 'A' ) +
-                   static_cast<std::uint32_t>( '9' - '0' ) +
-                   1U;
-        }
-
-        [[nodiscard]]
-        bool
-        is_high_surrogate( std::uint32_t value ) noexcept
-        {
-            return value >= kHighSurrogateMin && value <= kHighSurrogateMax;
-        }
-
-        [[nodiscard]]
-        bool
-        is_low_surrogate( std::uint32_t value ) noexcept
-        {
-            return value >= kLowSurrogateMin && value <= kLowSurrogateMax;
-        }
-
-        [[nodiscard]]
-        bool
-        is_valid_number_literal( std::string_view literal ) noexcept
-        {
-            if( literal.empty() )
-            {
-                return false;
-            }
-
-            std::size_t offset = 0U;
-            if( literal.at( offset ) == '-' )
-            {
-                ++offset;
-                if( offset == literal.size() )
-                {
-                    return false;
-                }
-            }
-
-            if( literal.at( offset ) == '0' )
+            while( offset < input.size() && is_json_whitespace( input.at( offset ) ) )
             {
                 ++offset;
             }
-            else
+            if( offset == input.size() )
             {
-                if( !is_nonzero_digit( literal.at( offset ) ) )
-                {
-                    return false;
-                }
-                while( offset < literal.size() && is_digit( literal.at( offset ) ) )
-                {
-                    ++offset;
-                }
+                return std::nullopt;
             }
-
-            if( offset < literal.size() && literal.at( offset ) == '.' )
-            {
-                ++offset;
-                if( offset == literal.size() || !is_digit( literal.at( offset ) ) )
-                {
-                    return false;
-                }
-                while( offset < literal.size() && is_digit( literal.at( offset ) ) )
-                {
-                    ++offset;
-                }
-            }
-
-            if( offset <
-                literal.size() &&
-                ( literal.at( offset ) == 'e' || literal.at( offset ) == 'E' ) )
-            {
-                ++offset;
-                if( offset <
-                    literal.size() &&
-                    ( literal.at( offset ) == '-' || literal.at( offset ) == '+' ) )
-                {
-                    ++offset;
-                }
-                if( offset == literal.size() || !is_digit( literal.at( offset ) ) )
-                {
-                    return false;
-                }
-                while( offset < literal.size() && is_digit( literal.at( offset ) ) )
-                {
-                    ++offset;
-                }
-            }
-
-            return offset == literal.size();
-        }
-
-        [[nodiscard]]
-        bool
-        is_valid_literal( std::string_view literal ) noexcept
-        {
-            return literal ==
-                   "true" ||
-                   literal ==
-                   "false" ||
-                   literal ==
-                   "null" ||
-                   is_valid_number_literal( literal );
+            return offset;
         }
 
         [[nodiscard]]
         std::string_view
-        trim( std::string_view value ) noexcept
+        malformed_json_message( std::string_view input ) noexcept
         {
-            while( !value.empty() && is_whitespace( value.front() ) )
+            const auto object_start = first_non_whitespace( input );
+            if( !object_start.has_value() || input.at( *object_start ) != '{' )
             {
-                value.remove_prefix( 1U );
+                return "expected object start";
             }
-            while( !value.empty() && is_whitespace( value.back() ) )
+
+            const auto first_member = first_non_whitespace( input, *object_start + 1U );
+            if( first_member.has_value() &&
+                input.at( *first_member ) !=
+                '"' &&
+                input.at( *first_member ) != '}' )
             {
-                value.remove_suffix( 1U );
+                return "expected string";
             }
-            return value;
+
+            return "malformed json";
         }
 
         [[nodiscard]]
-        char
-        utf8_byte( std::uint32_t value ) noexcept
+        bool
+        has_nested_value( const nlohmann::json& object )
         {
-            return static_cast<char>( value );
+            return std::ranges::any_of( object.items(),
+                                        []( const auto& item )
+                                        {
+                                            return item.value().is_structured();
+                                        } );
         }
 
         [[nodiscard]]
-        char
-        utf8_continuation( std::uint32_t value ) noexcept
+        std::optional<std::string>
+        scalar_value( const nlohmann::json& value )
         {
-            return utf8_byte( kUtf8ContinuationTag | ( value & kUtf8ContinuationMask ) );
-        }
-
-        [[nodiscard]]
-        grab::Result<void>
-        append_utf8( std::string&  output,
-                     std::uint32_t code_point )
-        {
-            if( code_point <= kUtf8OneByteMax )
+            if( value.is_string() )
             {
-                output.push_back( utf8_byte( code_point ) );
-                return {};
+                return value.get<std::string>();
             }
-
-            if( code_point <= kUtf8TwoByteMax )
+            if( value.is_null() || value.is_boolean() || value.is_number() )
             {
-                output.push_back( utf8_byte( kUtf8TwoByteTag |
-                                             ( code_point >> kUtf8OneContinuation ) ) );
-                output.push_back( utf8_continuation( code_point ) );
-                return {};
-            }
-
-            if( code_point >= kHighSurrogateMin && code_point <= kLowSurrogateMax )
-            {
-                return protocol_error( "invalid unicode surrogate" );
-            }
-
-            if( code_point <= kUtf8ThreeByteMax )
-            {
-                output.push_back( utf8_byte( kUtf8ThreeByteTag |
-                                             ( code_point >> kUtf8TwoContinuations ) ) );
-                output.push_back( utf8_continuation( code_point >>
-                                                     kUtf8OneContinuation ) );
-                output.push_back( utf8_continuation( code_point ) );
-                return {};
-            }
-
-            if( code_point <= kUtf8MaxCodePoint )
-            {
-                output.push_back( utf8_byte(
-                    kUtf8FourByteTag | ( code_point >> kUtf8ThreeContinuations )
-                ) );
-                output.push_back( utf8_continuation( code_point >>
-                                                     kUtf8TwoContinuations ) );
-                output.push_back( utf8_continuation( code_point >>
-                                                     kUtf8OneContinuation ) );
-                output.push_back( utf8_continuation( code_point ) );
-                return {};
-            }
-
-            return protocol_error( "unicode code point is out of range" );
-        }
-
-        class FlatJsonParser
-        {
-            public:
-
-                explicit FlatJsonParser( std::string_view input ) noexcept :
-                    input_( input )
-                {
-                }
-
-                [[nodiscard]]
-                grab::Result<JsonObject>
-                parse_object()
-                {
-                    skip_whitespace();
-                    if( auto consumed = consume( '{', "expected object start" );
-                        !consumed.has_value() )
-                    {
-                        return std::unexpected( std::move( consumed.error() ) );
-                    }
-                    skip_whitespace();
-
-                    JsonObject object;
-                    if( try_consume( '}' ) )
-                    {
-                        skip_whitespace();
-                        if( !at_end() )
-                        {
-                            return protocol_error( "trailing data after object" );
-                        }
-                        return object;
-                    }
-
-                    while( true )
-                    {
-                        auto key = parse_string();
-                        if( !key.has_value() )
-                        {
-                            return std::unexpected( std::move( key.error() ) );
-                        }
-                        skip_whitespace();
-                        if( auto consumed = consume( ':', "expected object colon" );
-                            !consumed.has_value() )
-                        {
-                            return std::unexpected( std::move( consumed.error() ) );
-                        }
-                        skip_whitespace();
-
-                        auto value = parse_value();
-                        if( !value.has_value() )
-                        {
-                            return std::unexpected( std::move( value.error() ) );
-                        }
-                        object.members.push_back( JsonMember{
-                            .key   = std::move( *key ),
-                            .value = std::move( *value ),
-                        } );
-                        skip_whitespace();
-
-                        if( try_consume( ',' ) )
-                        {
-                            skip_whitespace();
-                            continue;
-                        }
-                        if( try_consume( '}' ) )
-                        {
-                            break;
-                        }
-                        return protocol_error( "expected comma or object end" );
-                    }
-
-                    skip_whitespace();
-                    if( !at_end() )
-                    {
-                        return protocol_error( "trailing data after object" );
-                    }
-                    return object;
-                }
-
-            private:
-
-                [[nodiscard]]
-                bool
-                at_end() const noexcept
-                {
-                    return offset_ == input_.size();
-                }
-
-                [[nodiscard]]
-                char
-                peek() const noexcept
-                {
-                    return input_.at( offset_ );
-                }
-
-                void
-                skip_whitespace() noexcept
-                {
-                    while( offset_ <
-                           input_.size() &&
-                           is_whitespace( input_.at( offset_ ) ) )
-                    {
-                        ++offset_;
-                    }
-                }
-
-                [[nodiscard]]
-                bool
-                try_consume( char expected ) noexcept
-                {
-                    if( offset_ < input_.size() && input_.at( offset_ ) == expected )
-                    {
-                        ++offset_;
-                        return true;
-                    }
-                    return false;
-                }
-
-                [[nodiscard]]
-                grab::Result<void>
-                consume( char             expected,
-                         std::string_view message )
-                {
-                    if( try_consume( expected ) )
-                    {
-                        return {};
-                    }
-                    return protocol_error( std::string{ message } );
-                }
-
-                [[nodiscard]]
-                grab::Result<std::uint32_t>
-                parse_hex4()
-                {
-                    std::uint32_t value = 0U;
-                    for( std::uint32_t index = 0U; index < kUnicodeEscapeDigits;
-                         ++index )
-                    {
-                        if( at_end() || !is_hex_digit( peek() ) )
-                        {
-                            return protocol_error( "invalid unicode escape" );
-                        }
-                        value = ( value << kHexDigitBits ) + hex_value( peek() );
-                        ++offset_;
-                    }
-                    return value;
-                }
-
-                [[nodiscard]]
-                grab::Result<std::uint32_t>
-                parse_unicode_escape()
-                {
-                    auto code_point = parse_hex4();
-                    if( !code_point.has_value() )
-                    {
-                        return std::unexpected( std::move( code_point.error() ) );
-                    }
-
-                    if( !is_high_surrogate( *code_point ) )
-                    {
-                        if( is_low_surrogate( *code_point ) )
-                        {
-                            return protocol_error(
-                                "low surrogate without high surrogate"
-                            );
-                        }
-                        return *code_point;
-                    }
-
-                    if( !try_consume( '\\' ) || !try_consume( 'u' ) )
-                    {
-                        return protocol_error( "missing low surrogate" );
-                    }
-                    auto low = parse_hex4();
-                    if( !low.has_value() )
-                    {
-                        return std::unexpected( std::move( low.error() ) );
-                    }
-                    if( !is_low_surrogate( *low ) )
-                    {
-                        return protocol_error( "invalid low surrogate" );
-                    }
-
-                    return kSupplementaryPlaneBase +
-                           ( ( *code_point - kHighSurrogateMin ) << kSurrogateShift ) +
-                           ( *low - kLowSurrogateMin );
-                }
-
-                [[nodiscard]]
-                grab::Result<void>
-                append_escape( std::string& output )
-                {
-                    if( at_end() )
-                    {
-                        return protocol_error( "unterminated escape" );
-                    }
-
-                    const char escape = input_.at( offset_ );
-                    ++offset_;
-                    switch( escape )
-                    {
-                        case '"' :
-                            output.push_back( '"' );
-                            return {};
-                        case '\\' :
-                            output.push_back( '\\' );
-                            return {};
-                        case '/' :
-                            output.push_back( '/' );
-                            return {};
-                        case 'b' :
-                            output.push_back( '\b' );
-                            return {};
-                        case 'f' :
-                            output.push_back( '\f' );
-                            return {};
-                        case 'n' :
-                            output.push_back( '\n' );
-                            return {};
-                        case 'r' :
-                            output.push_back( '\r' );
-                            return {};
-                        case 't' :
-                            output.push_back( '\t' );
-                            return {};
-                        case 'u' :
-                            {
-                                auto code_point = parse_unicode_escape();
-                                if( !code_point.has_value() )
-                                {
-                                    return std::unexpected(
-                                        std::move( code_point.error() )
-                                    );
-                                }
-                                return append_utf8( output, *code_point );
-                            }
-                        default :
-                            return protocol_error( "unknown escape" );
-                    }
-                }
-
-                [[nodiscard]]
-                grab::Result<std::string>
-                parse_string()
-                {
-                    if( auto consumed = consume( '"', "expected string" );
-                        !consumed.has_value() )
-                    {
-                        return std::unexpected( std::move( consumed.error() ) );
-                    }
-
-                    std::string output;
-                    while( !at_end() )
-                    {
-                        const auto value =
-                            static_cast<unsigned char>( input_.at( offset_ ) );
-                        ++offset_;
-                        if( value == static_cast<unsigned char>( '"' ) )
-                        {
-                            return output;
-                        }
-                        if( value == static_cast<unsigned char>( '\\' ) )
-                        {
-                            if( auto escaped = append_escape( output );
-                                !escaped.has_value() )
-                            {
-                                return std::unexpected( std::move( escaped.error() ) );
-                            }
-                            continue;
-                        }
-                        if( value <= kJsonControlMax )
-                        {
-                            return protocol_error( "control character in string" );
-                        }
-                        output.push_back( static_cast<char>( value ) );
-                    }
-
-                    return protocol_error( "unterminated string" );
-                }
-
-                [[nodiscard]]
-                grab::Result<std::string>
-                parse_literal()
-                {
-                    const std::size_t start = offset_;
-                    while( offset_ <
-                           input_.size() &&
-                           input_.at( offset_ ) !=
-                           ',' &&
-                           input_.at( offset_ ) != '}' )
-                    {
-                        if( input_.at( offset_ ) ==
-                            '{' ||
-                            input_.at( offset_ ) ==
-                            '[' ||
-                            input_.at( offset_ ) ==
-                            ']' ||
-                            input_.at( offset_ ) == '"' )
-                        {
-                            return protocol_error( "invalid literal" );
-                        }
-                        ++offset_;
-                    }
-
-                    const auto literal = trim( input_.substr( start, offset_ - start ) );
-                    if( literal.empty() || !is_valid_literal( literal ) )
-                    {
-                        return protocol_error( "invalid literal" );
-                    }
-                    return std::string{ literal };
-                }
-
-                [[nodiscard]]
-                grab::Result<std::string>
-                parse_value()
-                {
-                    if( at_end() )
-                    {
-                        return protocol_error( "expected value" );
-                    }
-                    if( peek() == '"' )
-                    {
-                        return parse_string();
-                    }
-                    if( peek() == '{' || peek() == '[' )
-                    {
-                        return protocol_error( "nested values are unsupported" );
-                    }
-                    return parse_literal();
-                }
-
-                std::string_view input_;
-                std::size_t      offset_ = 0U;
-        };
-
-        [[nodiscard]]
-        std::optional<std::string_view>
-        field_value( const JsonObject& object,
-                     std::string_view  key ) noexcept
-        {
-            for( const auto& member : object.members )
-            {
-                if( member.key == key )
-                {
-                    return std::string_view{ member.value };
-                }
+                return value.dump();
             }
             return std::nullopt;
         }
 
         [[nodiscard]]
+        std::optional<std::string>
+        field_value( const nlohmann::json& object,
+                     std::string_view      key )
+        {
+            const auto member = object.find( std::string{ key } );
+            if( member == object.end() )
+            {
+                return std::nullopt;
+            }
+            return scalar_value( *member );
+        }
+
+        [[nodiscard]]
         std::string
-        field_or_empty( const JsonObject& object,
-                        std::string_view  key )
+        field_or_empty( const nlohmann::json& object,
+                        std::string_view      key )
         {
             const auto value = field_value( object, key );
             if( value.has_value() )
             {
-                return std::string{ *value };
+                return *value;
             }
             return {};
         }
 
         [[nodiscard]]
         std::string
-        title_field( const JsonObject& object )
+        title_field( const nlohmann::json& object )
         {
             if( const auto title = field_value( object, kTitleKey ); title.has_value() )
             {
-                return std::string{ *title };
+                return *title;
             }
             return field_or_empty( object, kTabTitleKey );
         }
 
         [[nodiscard]]
         std::string
-        detail_field( const JsonObject& object,
-                      std::string_view  type )
+        detail_field( const nlohmann::json& object,
+                      std::string_view      type )
         {
             if( const auto detail = field_value( object, kDetailKey );
                 detail.has_value() )
             {
-                return std::string{ *detail };
+                return *detail;
             }
             return std::string{ type };
         }
 
         [[nodiscard]]
         std::string
-        json_field( const JsonObject& object,
-                    std::string_view  original_json )
+        json_field( const nlohmann::json& object,
+                    std::string_view      original_json )
         {
             if( const auto json = field_value( object, kJsonKey ); json.has_value() )
             {
-                return std::string{ *json };
+                return *json;
             }
             return std::string{ original_json };
         }
 
         [[nodiscard]]
         std::optional<double>
-        timestamp_field( const JsonObject& object ) noexcept
+        timestamp_field( const nlohmann::json& object )
         {
             const auto timestamp = field_value( object, kTimestampKey );
             if( !timestamp.has_value() )
@@ -746,10 +225,11 @@ namespace grab::event
                 return std::nullopt;
             }
 
-            double     value = 0.0;
-            const auto parsed =
-                std::from_chars( timestamp->begin(), timestamp->end(), value );
-            if( parsed.ec != std::errc{} || parsed.ptr != timestamp->end() )
+            double      value  = 0.0;
+            const auto* begin  = timestamp->data();
+            const auto* end    = begin + timestamp->size();
+            const auto  parsed = std::from_chars( begin, end, value );
+            if( parsed.ec != std::errc{} || parsed.ptr != end )
             {
                 return std::nullopt;
             }
@@ -758,7 +238,7 @@ namespace grab::event
 
         [[nodiscard]]
         grab::Event
-        make_browser_tab_event( const JsonObject& object )
+        make_browser_tab_event( const nlohmann::json& object )
         {
             const auto kind = grab::EventKind::browser_tab_switched;
             return grab::Event{
@@ -777,10 +257,10 @@ namespace grab::event
 
         [[nodiscard]]
         grab::Event
-        make_integration_event( grab::EventKind   kind,
-                                const JsonObject& object,
-                                std::string_view  type,
-                                std::string_view  original_json )
+        make_integration_event( grab::EventKind       kind,
+                                const nlohmann::json& object,
+                                std::string_view      type,
+                                std::string_view      original_json )
         {
             return grab::Event{
                 .timestamp = timestamp_field( object ).value_or( 0.0 ),
@@ -866,14 +346,21 @@ namespace grab::event
     grab::Result<grab::Event>
     parse_browser_message( std::string_view json )
     {
-        FlatJsonParser parser{ json };
-        auto           object = parser.parse_object();
-        if( !object.has_value() )
+        auto object = nlohmann::json::parse( json, nullptr, false );
+        if( object.is_discarded() )
         {
-            return std::unexpected( std::move( object.error() ) );
+            return protocol_error( std::string{ malformed_json_message( json ) } );
+        }
+        if( !object.is_object() )
+        {
+            return protocol_error( "expected object start" );
+        }
+        if( has_nested_value( object ) )
+        {
+            return protocol_error( "nested values are unsupported" );
         }
 
-        const auto type = field_value( *object, kTypeKey );
+        const auto type = field_value( object, kTypeKey );
         if( !type.has_value() || type->empty() )
         {
             return protocol_error( "missing message type" );
@@ -881,19 +368,19 @@ namespace grab::event
 
         if( *type == kTabSwitchedType || *type == kBrowserTabSwitchedType )
         {
-            return make_browser_tab_event( *object );
+            return make_browser_tab_event( object );
         }
 
         if( *type == kContextUpdateType || *type == kAppContextUpdateType )
         {
             return make_integration_event( grab::EventKind::app_context_update,
-                                           *object,
+                                           object,
                                            *type,
                                            json );
         }
 
         return make_integration_event( grab::EventKind::app_tab_changed,
-                                       *object,
+                                       object,
                                        *type == kAppTabChangedType
                                            ? std::string_view{ kAppTabChangedType }
                                            : *type,

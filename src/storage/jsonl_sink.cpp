@@ -1,4 +1,3 @@
-#include "core/json.hpp"
 #include "core/permission.hpp"
 #include "grab/event.hpp"
 #include "grab/result.hpp"
@@ -16,6 +15,8 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <nlohmann/json.hpp>    // IWYU pragma: keep
+#include <nlohmann/json_fwd.hpp>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -30,15 +31,13 @@ namespace grab::storage
     namespace
     {
 
-        constexpr int            kInvalidFd            = -1;
-        constexpr int            kPosixFailure         = -1;
-        constexpr int            kWriteFailure         = -1;
-        constexpr int            kNoBytesWritten       = 0;
-        constexpr std::size_t    kJsonStringPrefixSize = 5U;
-        constexpr std::size_t    kJsonStringSuffixSize = 1U;
-        constexpr int            kYearWidth            = 4;
-        constexpr int            kMonthDayWidth        = 2;
-        constexpr std::uintmax_t kBytesPerKilobyte     = 1'024U;
+        constexpr int            kInvalidFd        = -1;
+        constexpr int            kPosixFailure     = -1;
+        constexpr int            kWriteFailure     = -1;
+        constexpr int            kNoBytesWritten   = 0;
+        constexpr int            kYearWidth        = 4;
+        constexpr int            kMonthDayWidth    = 2;
+        constexpr std::uintmax_t kBytesPerKilobyte = 1'024U;
         constexpr std::uintmax_t kBytesPerMegabyte =
             kBytesPerKilobyte * kBytesPerKilobyte;
         constexpr std::int64_t     kSecondsPerDay              = 86'400;
@@ -58,11 +57,12 @@ namespace grab::storage
         constexpr std::int64_t     kMarchToJanuaryOffset       = 3;
         constexpr std::int64_t     kMarchToCalendarOffset      = 9;
         constexpr std::int64_t     kFebruaryNumber             = 2;
-        constexpr std::string_view kJsonProbeKey               = "v";
         constexpr std::string_view kJsonlExtension             = ".jsonl";
         constexpr std::string_view kJsonlSuffix                = ".jsonl";
         constexpr std::string_view kSinkClosedMessage          = "jsonl sink is closed";
         constexpr std::string_view kMovedFromMessage = "jsonl sink is moved-from";
+
+        using OrderedJson                            = nlohmann::ordered_json;
 
         struct CivilDate
         {
@@ -230,231 +230,144 @@ namespace grab::storage
         }
 
         [[nodiscard]]
-        std::string
-        json_string( std::string_view value )
-        {
-            grab::core::json::Writer writer;
-            writer.begin_object();
-            writer.field( kJsonProbeKey, value );
-            writer.end_object();
-            const std::string object = std::move( writer ).take();
-            return object.substr(
-                kJsonStringPrefixSize,
-                object.size() - kJsonStringPrefixSize - kJsonStringSuffixSize
-            );
-        }
-
-        [[nodiscard]]
-        grab::Result<std::string>
-        format_double( double value )
+        grab::Result<void>
+        ensure_json_number( double value )
         {
             if( !std::isfinite( value ) )
             {
                 return unexpected_error( grab::ErrorCode::invalid_argument,
                                          "jsonl numeric value is not finite" );
             }
-
-            std::ostringstream output;
-            output << std::setprecision( std::numeric_limits<double>::max_digits10 )
-                   << value;
-            if( output.fail() )
-            {
-                return unexpected_error( grab::ErrorCode::internal_fault,
-                                         "jsonl numeric formatting failed" );
-            }
-            return output.str();
+            return {};
         }
 
-        class JsonObjectBuilder
-        {
-            public:
-
-                JsonObjectBuilder()
-                {
-                    out_ += '{';
-                }
-
-                void
-                string_field( std::string_view key,
-                              std::string_view value )
-                {
-                    field_prefix( key );
-                    out_ += json_string( value );
-                }
-
-                void
-                uint_field( std::string_view key,
-                            std::uint64_t    value )
-                {
-                    field_prefix( key );
-                    out_ += std::to_string( value );
-                }
-
-                [[nodiscard]]
-                grab::Result<void>
-                double_field( std::string_view key,
-                              double           value )
-                {
-                    auto formatted = format_double( value );
-                    if( !formatted.has_value() )
-                    {
-                        return std::unexpected( std::move( formatted.error() ) );
-                    }
-                    field_prefix( key );
-                    out_ += *formatted;
-                    return {};
-                }
-
-                [[nodiscard]]
-                std::string
-                take() &&
-                {
-                    out_ += '}';
-                    return std::move( out_ );
-                }
-
-            private:
-
-                void
-                field_prefix( std::string_view key )
-                {
-                    if( needs_comma_ )
-                    {
-                        out_ += ',';
-                    }
-                    out_         += json_string( key );
-                    out_         += ':';
-                    needs_comma_  = true;
-                }
-
-                std::string out_;
-                bool        needs_comma_ = false;
-        };
-
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::InputKey& payload )
         {
-            JsonObjectBuilder object;
-            object.uint_field( "code", payload.code );
-            object.string_field( "name", payload.name );
-            return std::move( object ).take();
+            return OrderedJson{
+                {"code", payload.code},
+                {"name", payload.name},
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::KeyCombo& payload )
         {
-            JsonObjectBuilder object;
-            object.string_field( "text", payload.text );
-            return std::move( object ).take();
+            return OrderedJson{
+                { "text", payload.text },
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::MouseClick& payload )
         {
-            JsonObjectBuilder object;
-            object.uint_field( "button", payload.button );
-            object.string_field( "name", payload.name );
-            return std::move( object ).take();
+            return OrderedJson{
+                {"button", payload.button},
+                {  "name",   payload.name},
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::MouseMove& payload )
         {
-            JsonObjectBuilder object;
-            object.string_field( "axis", payload.axis );
-            auto result = object.double_field( "delta", payload.delta );
+            auto result = ensure_json_number( payload.delta );
             if( !result.has_value() )
             {
                 return std::unexpected( std::move( result.error() ) );
             }
-            return std::move( object ).take();
+            return OrderedJson{
+                { "axis",  payload.axis},
+                {"delta", payload.delta},
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::Idle& payload )
         {
-            JsonObjectBuilder object;
-            auto              result = object.double_field( "idle_s", payload.idle_s );
+            auto result = ensure_json_number( payload.idle_s );
             if( !result.has_value() )
             {
                 return std::unexpected( std::move( result.error() ) );
             }
-            return std::move( object ).take();
+            return OrderedJson{
+                { "idle_s", payload.idle_s },
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::WindowChange& payload )
         {
-            JsonObjectBuilder object;
-            object.string_field( "app", payload.app );
-            object.string_field( "pid", payload.pid );
-            object.string_field( "title", payload.title );
-            object.string_field( "prev_title", payload.prev_title );
-            auto result = object.double_field( "duration_s", payload.duration_s );
+            auto result = ensure_json_number( payload.duration_s );
             if( !result.has_value() )
             {
                 return std::unexpected( std::move( result.error() ) );
             }
-            return std::move( object ).take();
+            return OrderedJson{
+                {       "app",        payload.app},
+                {       "pid",        payload.pid},
+                {     "title",      payload.title},
+                {"prev_title", payload.prev_title},
+                {"duration_s", payload.duration_s},
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::A11yEvent& payload )
         {
-            JsonObjectBuilder object;
-            object.string_field( "app", payload.app );
-            object.string_field( "role", payload.role );
-            object.string_field( "name", payload.name );
-            object.string_field( "detail", payload.detail );
-            return std::move( object ).take();
+            return OrderedJson{
+                {   "app",    payload.app},
+                {  "role",   payload.role},
+                {  "name",   payload.name},
+                {"detail", payload.detail},
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::IntegrationEvent& payload )
         {
-            JsonObjectBuilder object;
-            object.string_field( "app", payload.app );
-            object.string_field( "title", payload.title );
-            object.string_field( "detail", payload.detail );
-            object.string_field( "json", payload.json );
-            return std::move( object ).take();
+            return OrderedJson{
+                {   "app",    payload.app},
+                { "title",  payload.title},
+                {"detail", payload.detail},
+                {  "json",   payload.json},
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::BrowserTab& payload )
         {
-            JsonObjectBuilder object;
-            object.string_field( "app", payload.app );
-            object.string_field( "pid", payload.pid );
-            object.string_field( "tab_title", payload.tab_title );
-            object.string_field( "prev_tab_title", payload.prev_tab_title );
-            return std::move( object ).take();
+            return OrderedJson{
+                {           "app",            payload.app},
+                {           "pid",            payload.pid},
+                {     "tab_title",      payload.tab_title},
+                {"prev_tab_title", payload.prev_tab_title},
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::StateSnapshot& payload )
         {
-            JsonObjectBuilder object;
-            object.string_field( "json", payload.json );
-            return std::move( object ).take();
+            return OrderedJson{
+                { "json", payload.json },
+            };
         }
 
         [[nodiscard]]
-        grab::Result<std::string>
+        grab::Result<OrderedJson>
         serialize_payload( const grab::Payload& payload )
         {
             return std::visit(
-                []( const auto& typed_payload ) -> grab::Result<std::string>
+                []( const auto& typed_payload ) -> grab::Result<OrderedJson>
                 {
                     return serialize_payload( typed_payload );
                 },
@@ -466,7 +379,7 @@ namespace grab::storage
         grab::Result<std::string>
         serialize_line( const grab::Event& event )
         {
-            auto timestamp = format_double( event.timestamp );
+            auto timestamp = ensure_json_number( event.timestamp );
             if( !timestamp.has_value() )
             {
                 return std::unexpected( std::move( timestamp.error() ) );
@@ -477,17 +390,13 @@ namespace grab::storage
                 return std::unexpected( std::move( data.error() ) );
             }
 
-            std::string line;
-            line += "{\"ts\":";
-            line += *timestamp;
-            line += ",\"type\":";
-            line += json_string( kind_name( event.kind ) );
-            line += ",\"tier\":";
-            line += json_string( category_name( event.category ) );
-            line += ",\"data\":";
-            line += *data;
-            line += '}';
-            return line;
+            const OrderedJson line{
+                {  "ts",                                event.timestamp},
+                {"type",         std::string{ kind_name( event.kind ) }},
+                {"tier", std::string{ category_name( event.category ) }},
+                {"data",                             std::move( *data )},
+            };
+            return line.dump();
         }
 
         [[nodiscard]]

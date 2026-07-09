@@ -1,4 +1,3 @@
-#include "core/json.hpp"
 #include "event/state.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -6,6 +5,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <nlohmann/json.hpp>    // IWYU pragma: keep
+#include <nlohmann/json_fwd.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -51,13 +52,17 @@ namespace grab::event
             };
         }
 
-        void
-        write_window( grab::core::json::Writer& writer,
-                      const WindowRecord&       window )
+        using OrderedJson = nlohmann::ordered_json;
+
+        [[nodiscard]]
+        OrderedJson
+        window_to_json( const WindowRecord& window )
         {
-            writer.field( kAppKey, window.app );
-            writer.field( kPidKey, window.pid );
-            writer.field( kTitleKey, window.title );
+            return OrderedJson{
+                {  std::string{ kAppKey },   window.app},
+                {  std::string{ kPidKey },   window.pid},
+                {std::string{ kTitleKey }, window.title},
+            };
         }
 
     }    // namespace
@@ -132,27 +137,19 @@ namespace grab::event
     grab::Event
     StateManager::snapshot( double timestamp ) const
     {
-        grab::core::json::Writer writer;
-        writer.begin_object();
-        writer.begin_array( kOpenKey );
+        OrderedJson open = OrderedJson::array();
         for( const auto& window : open_windows_ )
         {
-            writer.begin_object_in_array();
-            write_window( writer, window );
-            writer.end_object();
+            open.push_back( window_to_json( window ) );
         }
-        writer.end_array();
-        writer.field_object_start( kFocusedKey );
-        if( has_focused_window_ )
-        {
-            write_window( writer, focused_ );
-        }
-        else
-        {
-            write_window( writer, WindowRecord{} );
-        }
-        writer.end_object();
-        writer.end_object();
+
+        OrderedJson focused = has_focused_window_ ? window_to_json( focused_ )
+                                                  : window_to_json( WindowRecord{} );
+
+        const OrderedJson root{
+            {   std::string{ kOpenKey },    std::move( open )},
+            {std::string{ kFocusedKey }, std::move( focused )},
+        };
 
         return grab::Event{
             .timestamp = timestamp,
@@ -160,7 +157,7 @@ namespace grab::event
             .kind      = grab::EventKind::state_snapshot,
             .category  = grab::category_of( grab::EventKind::state_snapshot ),
             .payload   = grab::Payload{ grab::StateSnapshot{
-                .json = std::move( writer ).take(),
+                .json = root.dump(),
             } },
         };
     }

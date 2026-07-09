@@ -2,9 +2,10 @@
 #include "inventory/manifest.hpp"
 
 #include <algorithm>
-#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>    // IWYU pragma: keep
+#include <nlohmann/json_fwd.hpp>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -17,23 +18,7 @@ namespace grab::inventory
     namespace
     {
 
-        constexpr char             quote                   = '"';
-        constexpr char             backslash               = '\\';
-        constexpr char             newline                 = '\n';
-        constexpr char             tab                     = '\t';
-        constexpr char             carriage_return         = '\r';
-        constexpr char             space                   = ' ';
-        constexpr char             comma                   = ',';
-        constexpr char             object_open             = '{';
-        constexpr char             object_close            = '}';
-        constexpr char             array_open              = '[';
-        constexpr char             array_close             = ']';
-        constexpr std::size_t      object_indent           = 2U;
-        constexpr std::size_t      field_indent            = 4U;
-        constexpr auto             control_character_limit = 0X20U;
-        constexpr auto             high_nibble_shift       = 4U;
-        constexpr auto             nibble_mask             = 0X0FU;
-        constexpr std::string_view hex_digits              = "0123456789abcdef";
+        constexpr int kManifestIndent = 2;
 
         [[nodiscard]]
         std::string
@@ -46,107 +31,20 @@ namespace grab::inventory
             return message;
         }
 
-        void
-        append_indent( std::string& output,
-                       std::size_t  count )
+        [[nodiscard]]
+        nlohmann::ordered_json
+        entry_to_json( const Entry& entry )
         {
-            output.append( count, space );
-        }
-
-        void
-        append_control_escape( std::string&  output,
-                               unsigned char byte )
-        {
-            const auto high_nibble =
-                static_cast<std::string_view::size_type>( ( byte >> high_nibble_shift ) &
-                                                          nibble_mask );
-            const auto low_nibble =
-                static_cast<std::string_view::size_type>( byte & nibble_mask );
-            output += "\\u00";
-            output += hex_digits.at( high_nibble );
-            output += hex_digits.at( low_nibble );
-        }
-
-        void
-        append_json_string( std::string&     output,
-                            std::string_view value )
-        {
-            output += quote;
-            for( const char current : value )
-            {
-                switch( current )
-                {
-                    case quote :
-                        output += "\\\"";
-                        break;
-                    case backslash :
-                        output += "\\\\";
-                        break;
-                    case newline :
-                        output += "\\n";
-                        break;
-                    case tab :
-                        output += "\\t";
-                        break;
-                    case carriage_return :
-                        output += "\\r";
-                        break;
-                    default :
-                        const auto byte = static_cast<unsigned char>( current );
-                        if( byte < control_character_limit )
-                        {
-                            append_control_escape( output, byte );
-                        }
-                        else
-                        {
-                            output += current;
-                        }
-                        break;
-                }
-            }
-            output += quote;
-        }
-
-        void
-        append_field( std::string&     output,
-                      std::string_view key,
-                      std::string_view value,
-                      bool             trailing_comma )
-        {
-            append_indent( output, field_indent );
-            append_json_string( output, key );
-            output += ": ";
-            append_json_string( output, value );
-            if( trailing_comma )
-            {
-                output += comma;
-            }
-            output += newline;
-        }
-
-        void
-        append_entry( std::string& output,
-                      const Entry& entry,
-                      bool         trailing_comma )
-        {
-            append_indent( output, object_indent );
-            output += object_open;
-            output += newline;
-            append_field( output, "name", entry.name, true );
-            append_field( output, "category", entry.category, true );
-            append_field( output, "module", entry.module, true );
-            append_field( output, "source_file", entry.source_file, true );
-            append_field( output, "render_method", entry.render_method, true );
-            append_field( output, "output_path", entry.output_path, true );
-            append_field( output, "status", entry.status, true );
-            append_field( output, "notes", entry.notes, false );
-            append_indent( output, object_indent );
-            output += object_close;
-            if( trailing_comma )
-            {
-                output += comma;
-            }
-            output += newline;
+            return nlohmann::ordered_json{
+                {         "name",          entry.name},
+                {     "category",      entry.category},
+                {       "module",        entry.module},
+                {  "source_file",   entry.source_file},
+                {"render_method", entry.render_method},
+                {  "output_path",   entry.output_path},
+                {       "status",        entry.status},
+                {        "notes",         entry.notes},
+            };
         }
 
         [[nodiscard]]
@@ -162,17 +60,13 @@ namespace grab::inventory
         std::string
         render_manifest( const std::vector<Entry>& entries )
         {
-            std::string output;
-            output += array_open;
-            output += newline;
-            for( std::size_t index = 0U; index < entries.size(); ++index )
+            nlohmann::ordered_json manifest = nlohmann::ordered_json::array();
+            for( const auto& entry : entries )
             {
-                append_entry( output,
-                              entries.at( index ),
-                              index + 1U != entries.size() );
+                manifest.push_back( entry_to_json( entry ) );
             }
-            output += array_close;
-            output += newline;
+            std::string output  = manifest.dump( kManifestIndent );
+            output             += '\n';
             return output;
         }
 

@@ -1,6 +1,5 @@
 #include "core/doctor.hpp"
 #include "core/environment.hpp"
-#include "core/json.hpp"
 #include "core/log.hpp"
 #include "core/provider.hpp"
 #include "core/registry.hpp"
@@ -10,6 +9,8 @@
 
 #include <algorithm>
 #include <array>
+#include <nlohmann/json.hpp>    // IWYU pragma: keep
+#include <nlohmann/json_fwd.hpp>
 #include <set>
 #include <string>
 #include <string_view>
@@ -125,41 +126,42 @@ namespace grab::core
     std::string
     to_json( const DoctorReport& report )
     {
-        json::Writer writer;
-        writer.begin_object();
-
-        writer.field_object_start( "environment" );
-        writer.field( "session", session_name( report.environment.session ) );
-        writer.field( "xwayland", report.environment.xwayland_present );
-        writer.field( "desktop", report.environment.desktop );
-        writer.field( "generation", report.environment.generation );
-        writer.field( "uinput_writable", report.environment.uinput_writable );
-        writer.begin_array( "input_devices" );
+        nlohmann::ordered_json input_devices = nlohmann::ordered_json::array();
         for( const auto& device : report.environment.input_devices )
         {
-            writer.begin_object_in_array();
-            writer.field( "path", device.path );
-            writer.field( "readable", device.readable );
-            writer.end_object();
+            input_devices.push_back( nlohmann::ordered_json{
+                {    "path",     device.path},
+                {"readable", device.readable},
+            } );
         }
-        writer.end_array();
-        writer.end_object();
 
-        writer.begin_array( "capabilities" );
+        nlohmann::ordered_json environment{
+            {        "session", std::string{ session_name( report.environment.session ) }},
+            {       "xwayland",                       report.environment.xwayland_present},
+            {        "desktop",                                report.environment.desktop},
+            {     "generation",                             report.environment.generation},
+            {"uinput_writable",                        report.environment.uinput_writable},
+            {  "input_devices",                                std::move( input_devices )},
+        };
+
+        nlohmann::ordered_json capabilities = nlohmann::ordered_json::array();
         for( const auto& entry : report.capabilities )
         {
-            writer.begin_object_in_array();
-            writer.field( "id", entry.id );
-            writer.field( "status", state_name( entry.state ) );
-            writer.field( "provider", entry.provider );
-            writer.field( "degradation_reason", entry.reason );
-            writer.field( "remediation", entry.remediation );
-            writer.end_object();
+            capabilities.push_back( nlohmann::ordered_json{
+                {                "id",                                 entry.id},
+                {            "status", std::string{ state_name( entry.state ) }},
+                {          "provider",                           entry.provider},
+                {"degradation_reason",                             entry.reason},
+                {       "remediation",                        entry.remediation},
+            } );
         }
-        writer.end_array();
 
-        writer.end_object();
-        return std::move( writer ).take();
+        const nlohmann::ordered_json root{
+            { "environment",  std::move( environment )},
+            {"capabilities", std::move( capabilities )},
+        };
+
+        return root.dump();
     }
 
     std::string

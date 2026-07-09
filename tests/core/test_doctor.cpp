@@ -29,7 +29,7 @@ namespace
     constexpr std::string_view kControlDesktop        = "\b\f\x1b";
     constexpr std::string_view kSessionJson           = R"("session":"x11")";
     constexpr std::string_view kDesktopJson           = R"("desktop":"KDE \"test\"")";
-    constexpr std::string_view kControlDesktopJson    = R"(\u0008\u000c\u001b)";
+    constexpr std::string_view kControlDesktopJson    = R"(\b\f\u001b)";
     constexpr std::string_view kEmptyCapabilitiesJson = R"("capabilities":[])";
 
     grab::core::Registry

@@ -1,4 +1,3 @@
-#include "core/json.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "session/record.hpp"
@@ -7,6 +6,8 @@
 #include <cstdint>
 #include <iterator>
 #include <limits>
+#include <nlohmann/json.hpp>    // IWYU pragma: keep
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -360,21 +361,19 @@ namespace grab::session
     std::string
     to_json( const SessionRecord& record )
     {
-        core::json::Writer writer;
-        writer.begin_object();
-        writer.field( "name", record.name );
-        writer.field( "provider", record.provider );
-        writer.field( "endpoint", record.endpoint );
-        writer.field( "control_socket", record.control_socket );
-        writer.field( "mode", mode_name( record.mode ) );
-        writer.field( "state", state_name( record.state ) );
-        writer.field( "width", static_cast<std::uint64_t>( record.geometry.width ) );
-        writer.field( "height", static_cast<std::uint64_t>( record.geometry.height ) );
-        writer.field( "supervisor_pid",
-                      static_cast<std::int64_t>( record.supervisor_pid ) );
-        writer.field( "created_monotonic", record.created_monotonic );
-        writer.end_object();
-        return std::move( writer ).take();
+        const nlohmann::ordered_json object{
+            {             "name",                                          record.name},
+            {         "provider",                                      record.provider},
+            {         "endpoint",                                      record.endpoint},
+            {   "control_socket",                                record.control_socket},
+            {             "mode",              std::string{ mode_name( record.mode ) }},
+            {            "state",            std::string{ state_name( record.state ) }},
+            {            "width",  static_cast<std::uint64_t>( record.geometry.width )},
+            {           "height", static_cast<std::uint64_t>( record.geometry.height )},
+            {   "supervisor_pid",   static_cast<std::int64_t>( record.supervisor_pid )},
+            {"created_monotonic",                             record.created_monotonic},
+        };
+        return object.dump();
     }
 
     grab::Result<SessionRecord>

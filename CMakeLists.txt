@@ -20,6 +20,7 @@ include(Profile)
 include(Xcb)
 include(Grpc)
 include(Codec)
+include(AddJson)
 
 grab_find_xcb()
 grab_find_zlib()
@@ -45,6 +46,7 @@ add_library(grab_core STATIC
     src/core/resolver.cpp
     src/core/session.cpp
 )
+target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
 target_include_directories(grab_core PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_core PUBLIC cxx_std_23)
