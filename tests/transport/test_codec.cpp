@@ -1,5 +1,6 @@
 #include "eventgrab/v1/events.pb.h"
 #include "grab/event.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "transport/codec.hpp"
 
@@ -21,6 +22,7 @@ namespace
     constexpr double        kMouseDelta          = -4.5;
     constexpr double        kIdleSeconds         = 30.25;
     constexpr double        kWindowDuration      = 7.75;
+    constexpr std::int64_t  kPidValue            = 1'234;
     constexpr std::uint64_t kSequence            = 42U;
     constexpr std::uint64_t kDecodedSequence     = 0U;
     constexpr std::uint32_t kKeyCode             = 30U;
@@ -77,7 +79,7 @@ namespace
     {
         return grab::WindowChange{
             .app        = "Firefox",
-            .pid        = "1234",
+            .pid        = grab::Pid{ kPidValue },
             .title      = "New title",
             .prev_title = "Old title",
             .duration_s = kWindowDuration,
@@ -114,7 +116,7 @@ namespace
     {
         return grab::BrowserTab{
             .app            = "Firefox",
-            .pid            = "1234",
+            .pid            = grab::Pid{ kPidValue },
             .tab_title      = "Docs",
             .prev_tab_title = "Search",
         };

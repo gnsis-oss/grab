@@ -2,10 +2,10 @@
 
 #include "core/environment.hpp"
 #include "core/provider.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 
-#include <cstdint>
 #include <string>
 
 namespace grab::session
@@ -13,9 +13,9 @@ namespace grab::session
 
     struct SessionRuntime
     {
-            std::string  endpoint;
-            std::string  control_socket;
-            std::int64_t supervisor_pid = 0;
+            std::string endpoint;
+            std::string control_socket;
+            grab::Pid   supervisor_pid;
     };
 
     class SessionProvider

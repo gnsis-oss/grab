@@ -1,5 +1,7 @@
 #pragma once
 
+#include "grab/pid.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -77,7 +79,7 @@ namespace grab
     struct WindowChange
     {
             std::string app;
-            std::string pid;
+            grab::Pid   pid;
             std::string title;
             std::string prev_title;
             double      duration_s = 0.0;
@@ -102,7 +104,7 @@ namespace grab
     struct BrowserTab
     {
             std::string app;
-            std::string pid;
+            grab::Pid   pid;
             std::string tab_title;
             std::string prev_tab_title;
     };

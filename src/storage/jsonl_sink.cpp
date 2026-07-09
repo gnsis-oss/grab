@@ -309,11 +309,11 @@ namespace grab::storage
                 return std::unexpected( std::move( result.error() ) );
             }
             return OrderedJson{
-                {       "app",        payload.app},
-                {       "pid",        payload.pid},
-                {     "title",      payload.title},
-                {"prev_title", payload.prev_title},
-                {"duration_s", payload.duration_s},
+                {       "app",             payload.app},
+                {       "pid", payload.pid.to_string()},
+                {     "title",           payload.title},
+                {"prev_title",      payload.prev_title},
+                {"duration_s",      payload.duration_s},
             };
         }
 
@@ -346,10 +346,10 @@ namespace grab::storage
         serialize_payload( const grab::BrowserTab& payload )
         {
             return OrderedJson{
-                {           "app",            payload.app},
-                {           "pid",            payload.pid},
-                {     "tab_title",      payload.tab_title},
-                {"prev_tab_title", payload.prev_tab_title},
+                {           "app",             payload.app},
+                {           "pid", payload.pid.to_string()},
+                {     "tab_title",       payload.tab_title},
+                {"prev_tab_title",  payload.prev_tab_title},
             };
         }
 

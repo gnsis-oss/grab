@@ -1,3 +1,4 @@
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "session/record.hpp"
@@ -370,7 +371,7 @@ namespace grab::session
             {            "state",            std::string{ state_name( record.state ) }},
             {            "width",  static_cast<std::uint64_t>( record.geometry.width )},
             {           "height", static_cast<std::uint64_t>( record.geometry.height )},
-            {   "supervisor_pid",   static_cast<std::int64_t>( record.supervisor_pid )},
+            {   "supervisor_pid",                        record.supervisor_pid.value()},
             {"created_monotonic",                             record.created_monotonic},
         };
         return object.dump();
@@ -462,7 +463,7 @@ namespace grab::session
             .mode              = *mode,
             .geometry          = geometry,
             .state             = *state,
-            .supervisor_pid    = *supervisor_pid,
+            .supervisor_pid    = grab::Pid{ *supervisor_pid },
             .created_monotonic = *created_monotonic,
         };
     }

@@ -2,6 +2,7 @@
 #include "event/window_x11.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 
 #include <algorithm>
@@ -69,7 +70,7 @@ namespace grab::event
         {
                 xcb_window_t                          window = XCB_WINDOW_NONE;
                 std::string                           app;
-                std::string                           pid;
+                grab::Pid                             pid;
                 std::string                           title;
                 std::chrono::steady_clock::time_point opened_at;
         };
@@ -358,7 +359,7 @@ namespace grab::event
         }
 
         [[nodiscard]]
-        std::string
+        grab::Pid
         read_pid( xcb_connection_t* connection,
                   xcb_window_t      window,
                   const Atoms&      atoms )
@@ -369,9 +370,9 @@ namespace grab::event
                                           XCB_ATOM_CARDINAL );
             if( !pid.has_value() )
             {
-                return {};
+                return grab::Pid{};
             }
-            return std::to_string( *pid );
+            return grab::Pid{ static_cast<std::int64_t>( *pid ) };
         }
 
         [[nodiscard]]

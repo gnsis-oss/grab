@@ -1,3 +1,4 @@
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "session/record.hpp"
@@ -32,7 +33,7 @@ namespace
             .mode              = grab::SessionMode::offscreen,
             .geometry          = geometry,
             .state             = grab::SessionState::ready,
-            .supervisor_pid    = pid,
+            .supervisor_pid    = grab::Pid{ pid },
             .created_monotonic = created,
         };
     }
@@ -51,7 +52,7 @@ TEST( SessionRecord,
     EXPECT_EQ( parsed->mode, original.mode );
     EXPECT_EQ( parsed->state, original.state );
     EXPECT_EQ( parsed->geometry.width, width );
-    EXPECT_EQ( parsed->supervisor_pid, pid );
+    EXPECT_EQ( parsed->supervisor_pid, grab::Pid{ pid } );
     EXPECT_EQ( parsed->created_monotonic, created );
 }
 

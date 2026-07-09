@@ -2,6 +2,7 @@
 #include "event/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 
 // clang-format off
@@ -50,6 +51,8 @@ namespace
     constexpr std::string_view kExpectedTabTitle    = "Gmail";
     constexpr std::string_view kExpectedPrevTitle   = "Docs";
     constexpr std::string_view kSecondExpectedTitle = "Calendar";
+    constexpr std::int64_t     kExpectedPidValue    = 42;
+    constexpr grab::Pid        kExpectedPid{ kExpectedPidValue };
     constexpr std::string_view kReactorDidNotStart  = "reactor thread did not start";
     constexpr std::string_view kBridgeNotRegistered = "bridge fd did not register";
 
@@ -318,6 +321,7 @@ TEST( BrowserBridge,
     EXPECT_EQ( event->category, grab::EventCategory::browser );
     const auto* payload = std::get_if<grab::BrowserTab>( &event->payload );
     ASSERT_NE( payload, nullptr );
+    EXPECT_EQ( payload->pid, kExpectedPid );
     EXPECT_EQ( payload->tab_title, kExpectedTabTitle );
     EXPECT_EQ( payload->prev_tab_title, kExpectedPrevTitle );
 }
@@ -371,6 +375,7 @@ TEST( BrowserBridge,
     ASSERT_TRUE( event.has_value() );
     const auto* payload = std::get_if<grab::BrowserTab>( &event->payload );
     ASSERT_NE( payload, nullptr );
+    EXPECT_EQ( payload->pid, kExpectedPid );
     EXPECT_EQ( payload->tab_title, kExpectedTabTitle );
     EXPECT_EQ( payload->prev_tab_title, kExpectedPrevTitle );
 

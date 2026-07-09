@@ -30,7 +30,7 @@ namespace grab::event
         bool
         is_empty_window( const grab::WindowChange& change ) noexcept
         {
-            return change.app.empty() && change.pid.empty() && change.title.empty();
+            return change.app.empty() && !change.pid.valid() && change.title.empty();
         }
 
         [[nodiscard]]
@@ -59,9 +59,9 @@ namespace grab::event
         window_to_json( const WindowRecord& window )
         {
             return OrderedJson{
-                {  std::string{ kAppKey },   window.app},
-                {  std::string{ kPidKey },   window.pid},
-                {std::string{ kTitleKey }, window.title},
+                {  std::string{ kAppKey },             window.app},
+                {  std::string{ kPidKey }, window.pid.to_string()},
+                {std::string{ kTitleKey },           window.title},
             };
         }
 

@@ -1,4 +1,5 @@
 #include "core/log.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "session/manager.hpp"
@@ -30,7 +31,7 @@ namespace grab::session
                 .mode              = desc.mode,
                 .geometry          = desc.geometry,
                 .state             = SessionState::starting,
-                .supervisor_pid    = 0,
+                .supervisor_pid    = grab::Pid{},
                 .created_monotonic = 0U,
             };
         }

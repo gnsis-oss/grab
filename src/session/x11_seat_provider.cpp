@@ -1,6 +1,7 @@
 #include "core/environment.hpp"
 #include "core/provider.hpp"
 #include "grab/capability.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "platform/x11/xcb_connection.hpp"
@@ -112,7 +113,7 @@ namespace grab::session
         return SessionRuntime{
             .endpoint       = endpoint,
             .control_socket = {},
-            .supervisor_pid = 0,
+            .supervisor_pid = grab::Pid{},
         };
     }
 

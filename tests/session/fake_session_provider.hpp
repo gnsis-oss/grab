@@ -2,6 +2,7 @@
 
 #include "core/provider.hpp"
 #include "grab/capability.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "session/provider.hpp"
@@ -109,10 +110,10 @@ namespace grab::test
 
         private:
 
-            static constexpr int          quality           = 0;
-            static constexpr std::int64_t no_supervisor_pid = 0;
-            static constexpr const char*  endpoint_prefix   = ":fake-";
-            static constexpr std::size_t  mode_count =
+            static constexpr int         quality = 0;
+            static constexpr grab::Pid   no_supervisor_pid{};
+            static constexpr const char* endpoint_prefix = ":fake-";
+            static constexpr std::size_t mode_count =
                 static_cast<std::size_t>( grab::SessionMode::count );
 
             [[nodiscard]]

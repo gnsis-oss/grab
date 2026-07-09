@@ -2,6 +2,7 @@
 #include "event/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 
 #include <algorithm>
@@ -247,8 +248,8 @@ namespace grab::event
                 .kind      = kind,
                 .category  = grab::category_of( kind ),
                 .payload   = grab::Payload{ grab::BrowserTab{
-                    .app            = field_or_empty( object, kAppKey ),
-                    .pid            = field_or_empty( object, kPidKey ),
+                    .app = field_or_empty( object, kAppKey ),
+                    .pid = grab::Pid::from_string( field_or_empty( object, kPidKey ) ),
                     .tab_title      = field_or_empty( object, kTabTitleKey ),
                     .prev_tab_title = field_or_empty( object, kPrevTabTitleKey ),
                 } },

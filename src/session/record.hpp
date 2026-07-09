@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 
@@ -18,8 +19,8 @@ namespace grab::session
             std::string     control_socket;
             SessionMode     mode = SessionMode::offscreen;
             SessionGeometry geometry;
-            SessionState    state             = SessionState::starting;
-            std::int64_t    supervisor_pid    = 0;
+            SessionState    state = SessionState::starting;
+            grab::Pid       supervisor_pid;
             std::uint64_t   created_monotonic = 0U;
     };
 

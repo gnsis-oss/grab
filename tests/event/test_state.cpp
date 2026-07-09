@@ -1,6 +1,7 @@
 #include "event/state.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/pid.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -28,20 +29,22 @@ namespace
     constexpr std::size_t      kOneOpenWindow  = 1U;
     constexpr std::size_t      kTwoOpenWindows = 2U;
     constexpr std::string_view kFirstApp       = "editor";
-    constexpr std::string_view kFirstPid       = "1001";
+    constexpr std::int64_t     kFirstPidValue  = 1'001;
+    constexpr grab::Pid        kFirstPid{ kFirstPidValue };
     constexpr std::string_view kFirstTitle     = "main.cpp";
     constexpr std::string_view kSecondApp      = "browser";
-    constexpr std::string_view kSecondPid      = "1002";
-    constexpr std::string_view kSecondTitle    = "Release notes";
-    constexpr std::string_view kKeyName        = "tab";
-    constexpr std::string_view kOpenKey        = R"("open")";
-    constexpr std::string_view kFocusedKey     = R"("focused")";
+    constexpr std::int64_t     kSecondPidValue = 1'002;
+    constexpr grab::Pid        kSecondPid{ kSecondPidValue };
+    constexpr std::string_view kSecondTitle = "Release notes";
+    constexpr std::string_view kKeyName     = "tab";
+    constexpr std::string_view kOpenKey     = R"("open")";
+    constexpr std::string_view kFocusedKey  = R"("focused")";
 
     [[nodiscard]]
     grab::Event
     make_window_event( grab::EventKind  kind,
                        std::string_view app,
-                       std::string_view pid,
+                       grab::Pid        pid,
                        std::string_view title )
     {
         return grab::Event{
@@ -51,7 +54,7 @@ namespace
             .category  = grab::category_of( kind ),
             .payload   = grab::Payload{ grab::WindowChange{
                 .app        = std::string{ app },
-                .pid        = std::string{ pid },
+                .pid        = pid,
                 .title      = std::string{ title },
                 .prev_title = {},
                 .duration_s = 0.0,

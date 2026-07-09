@@ -1,5 +1,6 @@
 #include "eventgrab/v1/events.pb.h"
 #include "grab/event.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "transport/codec.hpp"
 
@@ -425,7 +426,7 @@ namespace grab::transport
                               const grab::WindowChange& payload )
         {
             set_data( wire, kApp, payload.app );
-            set_data( wire, kPid, payload.pid );
+            set_data( wire, kPid, payload.pid.to_string() );
             set_data( wire, kTitle, payload.title );
             set_data( wire, kPrevTitle, payload.prev_title );
             set_data( wire, kDurationS, double_to_string( payload.duration_s ) );
@@ -462,7 +463,7 @@ namespace grab::transport
                             const grab::BrowserTab& payload )
         {
             set_data( wire, kApp, payload.app );
-            set_data( wire, kPid, payload.pid );
+            set_data( wire, kPid, payload.pid.to_string() );
             set_data( wire, kTabTitle, payload.tab_title );
             set_data( wire, kPrevTabTitle, payload.prev_tab_title );
         }
@@ -607,7 +608,7 @@ namespace grab::transport
 
             return grab::WindowChange{
                 .app        = *app,
-                .pid        = *pid,
+                .pid        = grab::Pid::from_string( *pid ),
                 .title      = *title,
                 .prev_title = prev_title,
                 .duration_s = *duration_s,
@@ -724,7 +725,7 @@ namespace grab::transport
             }
             return grab::BrowserTab{
                 .app            = *app,
-                .pid            = *pid,
+                .pid            = grab::Pid::from_string( *pid ),
                 .tab_title      = *tab_title,
                 .prev_tab_title = optional_string( wire, kPrevTabTitle ),
             };

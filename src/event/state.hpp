@@ -1,6 +1,7 @@
 #pragma once
 
 #include "grab/event.hpp"
+#include "grab/pid.hpp"
 
 #include <cstddef>
 #include <string>
@@ -19,7 +20,7 @@ namespace grab::event::detail
     struct WindowRecord
     {
             std::string app;
-            std::string pid;
+            grab::Pid   pid;
             std::string title;
     };
 
