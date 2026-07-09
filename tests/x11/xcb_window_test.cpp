@@ -14,9 +14,9 @@
 namespace
 {
 
-    constexpr std::string_view expected_instance  = "plotjuggler4";
-    constexpr std::string_view expected_class     = "PlotJuggler4";
-    constexpr std::string_view plotjuggler_app    = "plotjuggler";
+    constexpr std::string_view expected_instance  = "exampleapp1";
+    constexpr std::string_view expected_class     = "ExampleApp1";
+    constexpr std::string_view sample_app    = "exampleapp";
     constexpr std::string_view missing_app        = "foo";
     constexpr std::string_view other_instance     = "launcher";
     constexpr std::string_view other_class        = "Viewer";
@@ -30,11 +30,11 @@ namespace
     constexpr std::size_t      missing_trailing_raw_bytes =
         expected_instance.size() + terminator_bytes + expected_class.size();
     constexpr std::string_view complete_wm_class{
-        "plotjuggler4\0PlotJuggler4\0",
+        "exampleapp1\0ExampleApp1\0",
         complete_raw_bytes,
     };
     constexpr std::string_view missing_trailing_wm_class{
-        "plotjuggler4\0PlotJuggler4",
+        "exampleapp1\0ExampleApp1",
         missing_trailing_raw_bytes,
     };
     constexpr std::array<std::uint8_t, 0U> empty_wm_class{};
@@ -101,7 +101,7 @@ TEST( X11WmClass,
         .window_class = std::string{ expected_class },
     };
 
-    EXPECT_TRUE( grab::platform::x11::class_matches( wm_class, plotjuggler_app ) );
+    EXPECT_TRUE( grab::platform::x11::class_matches( wm_class, sample_app ) );
 }
 
 TEST( X11WmClass,
