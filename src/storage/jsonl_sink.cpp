@@ -1,5 +1,6 @@
 #include "core/permission.hpp"
 #include "grab/event.hpp"
+#include "grab/event_wire.hpp"
 #include "grab/result.hpp"
 #include "storage/jsonl_sink.hpp"
 
@@ -147,61 +148,6 @@ namespace grab::storage
         {
             return unexpected_error( grab::ErrorCode::session_closed,
                                      std::string{ kMovedFromMessage } );
-        }
-
-        [[nodiscard]]
-        std::string_view
-        kind_name( grab::EventKind kind ) noexcept
-        {
-            switch( kind )
-            {
-                case grab::EventKind::unspecified :
-                    return "unspecified";
-                case grab::EventKind::key_down :
-                    return "input.key_down";
-                case grab::EventKind::key_up :
-                    return "input.key_up";
-                case grab::EventKind::key_combo :
-                    return "input.key_combo";
-                case grab::EventKind::mouse_click :
-                    return "input.mouse_click";
-                case grab::EventKind::mouse_move :
-                    return "input.mouse_move";
-                case grab::EventKind::idle_start :
-                    return "input.idle_start";
-                case grab::EventKind::idle_end :
-                    return "input.idle_end";
-                case grab::EventKind::window_focus_changed :
-                    return "window.focus_changed";
-                case grab::EventKind::window_title_changed :
-                    return "window.title_changed";
-                case grab::EventKind::window_created :
-                    return "window.created";
-                case grab::EventKind::window_closed :
-                    return "window.closed";
-                case grab::EventKind::a11y_button_clicked :
-                    return "a11y.button_clicked";
-                case grab::EventKind::a11y_menu_opened :
-                    return "a11y.menu_opened";
-                case grab::EventKind::a11y_menu_closed :
-                    return "a11y.menu_closed";
-                case grab::EventKind::a11y_focus_changed :
-                    return "a11y.focus_changed";
-                case grab::EventKind::a11y_text_changed :
-                    return "a11y.text_changed";
-                case grab::EventKind::a11y_state_changed :
-                    return "a11y.state_changed";
-                case grab::EventKind::app_tab_changed :
-                    return "app.tab_changed";
-                case grab::EventKind::app_context_update :
-                    return "app.context_update";
-                case grab::EventKind::browser_tab_switched :
-                    return "browser.tab_switched";
-                case grab::EventKind::state_snapshot :
-                    return "state.snapshot";
-            }
-
-            return "unspecified";
         }
 
         [[nodiscard]]
@@ -392,7 +338,7 @@ namespace grab::storage
 
             const OrderedJson line{
                 {  "ts",                                event.timestamp},
-                {"type",         std::string{ kind_name( event.kind ) }},
+                {"type",   std::string{ grab::wire_name( event.kind ) }},
                 {"tier", std::string{ category_name( event.category ) }},
                 {"data",                             std::move( *data )},
             };

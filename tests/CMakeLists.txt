@@ -32,6 +32,7 @@ add_executable(grab_core_tests
     input/test_gestures.cpp
     input/test_input.cpp
     event/test_browser_bridge.cpp
+    event/test_event_wire.cpp
     event/test_atspi.cpp
     event/test_state.cpp
     event/test_evdev.cpp

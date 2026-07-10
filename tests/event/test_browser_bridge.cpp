@@ -43,9 +43,9 @@ namespace
     constexpr auto             kEventTimeout         = std::chrono::seconds{ 2 };
     constexpr auto             kPollInterval         = std::chrono::milliseconds{ 10 };
     constexpr std::string_view kTabSwitchedJson =
-        R"({"type":"tab_switched","tab_title":"Gmail","prev_tab_title":"Docs","app":"chrome","pid":"42"})";
+        R"({"type":"browser.tab_switched","tab_title":"Gmail","prev_tab_title":"Docs","app":"chrome","pid":"42"})";
     constexpr std::string_view kSecondTabSwitchedJson =
-        R"({"type":"tab_switched","tab_title":"Calendar","prev_tab_title":"Gmail","app":"chrome","pid":"42"})";
+        R"({"type":"browser.tab_switched","tab_title":"Calendar","prev_tab_title":"Gmail","app":"chrome","pid":"42"})";
     constexpr std::string_view kMalformedJson       = "{not json";
     constexpr std::string_view kMissingTypeJson     = R"({"tab_title":"x"})";
     constexpr std::string_view kExpectedTabTitle    = "Gmail";

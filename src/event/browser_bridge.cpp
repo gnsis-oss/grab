@@ -2,6 +2,7 @@
 #include "event/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/event_wire.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 
@@ -54,20 +55,15 @@ namespace grab::event
             static_cast<std::uint32_t>( EPOLLERR ) |
             static_cast<std::uint32_t>( EPOLLHUP );
 
-        constexpr std::string_view kTypeKey                = "type";
-        constexpr std::string_view kAppKey                 = "app";
-        constexpr std::string_view kPidKey                 = "pid";
-        constexpr std::string_view kTitleKey               = "title";
-        constexpr std::string_view kTabTitleKey            = "tab_title";
-        constexpr std::string_view kPrevTabTitleKey        = "prev_tab_title";
-        constexpr std::string_view kDetailKey              = "detail";
-        constexpr std::string_view kJsonKey                = "json";
-        constexpr std::string_view kTimestampKey           = "timestamp";
-        constexpr std::string_view kTabSwitchedType        = "tab_switched";
-        constexpr std::string_view kBrowserTabSwitchedType = "browser.tab_switched";
-        constexpr std::string_view kContextUpdateType      = "context_update";
-        constexpr std::string_view kAppContextUpdateType   = "app.context_update";
-        constexpr std::string_view kAppTabChangedType      = "app.tab_changed";
+        constexpr std::string_view kTypeKey         = "type";
+        constexpr std::string_view kAppKey          = "app";
+        constexpr std::string_view kPidKey          = "pid";
+        constexpr std::string_view kTitleKey        = "title";
+        constexpr std::string_view kTabTitleKey     = "tab_title";
+        constexpr std::string_view kPrevTabTitleKey = "prev_tab_title";
+        constexpr std::string_view kDetailKey       = "detail";
+        constexpr std::string_view kJsonKey         = "json";
+        constexpr std::string_view kTimestampKey    = "timestamp";
 
         struct ReadResult
         {
@@ -367,12 +363,14 @@ namespace grab::event
             return protocol_error( "missing message type" );
         }
 
-        if( *type == kTabSwitchedType || *type == kBrowserTabSwitchedType )
+        const auto kind = grab::wire_kind( *type );
+
+        if( kind == grab::EventKind::browser_tab_switched )
         {
             return make_browser_tab_event( object );
         }
 
-        if( *type == kContextUpdateType || *type == kAppContextUpdateType )
+        if( kind == grab::EventKind::app_context_update )
         {
             return make_integration_event( grab::EventKind::app_context_update,
                                            object,
@@ -380,11 +378,12 @@ namespace grab::event
                                            json );
         }
 
+        // Any other type — including app.tab_changed and wire strings this bridge
+        // does not special-case — becomes an app.tab_changed integration event
+        // carrying the raw type as its detail.
         return make_integration_event( grab::EventKind::app_tab_changed,
                                        object,
-                                       *type == kAppTabChangedType
-                                           ? std::string_view{ kAppTabChangedType }
-                                           : *type,
+                                       *type,
                                        json );
     }
 
