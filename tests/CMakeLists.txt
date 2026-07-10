@@ -50,6 +50,7 @@ add_executable(grab_core_tests
     storage/test_jsonl_sink.cpp
     service/test_daemon.cpp
     transport/test_service.cpp
+    event/test_browser_classifier.cpp
 )
 target_link_libraries(grab_core_tests PRIVATE grab_core grab_codec grab_screen grab_image grab_event grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
