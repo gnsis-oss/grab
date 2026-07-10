@@ -112,6 +112,7 @@ add_library(grab_event STATIC
     src/event/source_registry.cpp
     src/event/platform_factory.cpp
     src/event/state.cpp
+    src/event/state_source.cpp
     src/event/evdev.cpp
     src/event/xinput2.cpp
 )

@@ -1,5 +1,6 @@
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "grab/active_kind_probe.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
@@ -174,8 +175,10 @@ namespace grab::transport
 
     }    // namespace
 
-    EventService::EventService( grab::EventBus& bus ) noexcept :
-        bus_( &bus )
+    EventService::EventService( grab::EventBus&              bus,
+                                const grab::ActiveKindProbe* probe ) noexcept :
+        bus_( &bus ),
+        probe_( probe )
     {
     }
 
@@ -211,8 +214,6 @@ namespace grab::transport
             return internal_error( "missing list response" );
         }
 
-        // Producer tracking lands with real backends; until then the service
-        // reports the full static kind registry with active=false.
         for( const auto& row : grab::transport::protoKindRows )
         {
             if( row.kind == grab::EventKind::Unspecified )
@@ -226,7 +227,7 @@ namespace grab::transport
                 grab::transport::to_wire_category( grab::category_of( row.kind ) )
             );
             type->set_name( std::string{ grab::wire_name( row.kind ) } );
-            type->set_active( false );
+            type->set_active( probe_ != nullptr && probe_->is_active( row.kind ) );
         }
 
         return grpc::Status::OK;

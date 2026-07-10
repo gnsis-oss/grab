@@ -1,6 +1,7 @@
 #pragma once
 
 #include "event/source.hpp"
+#include "grab/active_kind_probe.hpp"
 #include "grab/event.hpp"
 #include "grab/result.hpp"
 
@@ -12,7 +13,7 @@
 namespace grab::event
 {
 
-    class SourceRegistry
+    class SourceRegistry : public grab::ActiveKindProbe
     {
         public:
 
@@ -46,6 +47,10 @@ namespace grab::event
             [[nodiscard]]
             bool
             is_kind_active( grab::EventKind kind ) const noexcept;
+
+            [[nodiscard]]
+            bool
+            is_active( grab::EventKind kind ) const noexcept override;
 
             [[nodiscard]]
             std::vector<Status>

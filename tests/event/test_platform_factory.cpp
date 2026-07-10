@@ -24,6 +24,7 @@ namespace
     constexpr std::string_view windowName      = "window";
     constexpr std::string_view atspiName       = "atspi";
     constexpr std::string_view browserName     = "browser";
+    constexpr std::string_view stateName       = "state";
 
     constexpr std::string_view evdevDevicePath = "/dev/input/event0";
 
@@ -68,8 +69,13 @@ namespace
         grab::EventKind::BrowserTabSwitched,
     } );
 
-    constexpr auto             defaultSourceNames =
-        std::to_array<std::string_view>( { xinputName, windowName, atspiName } );
+    constexpr auto             stateKinds         = std::to_array<grab::EventKind>( {
+        grab::EventKind::StateSnapshot,
+    } );
+
+    constexpr auto             defaultSourceNames = std::to_array<std::string_view>(
+        { xinputName, windowName, atspiName, stateName }
+    );
 
     using SourceList = std::vector<std::unique_ptr<grab::event::EventSource>>;
 
@@ -146,6 +152,10 @@ TEST( PlatformFactory,
 
     EXPECT_FALSE( has_source( sources, evdevName ) );
     EXPECT_FALSE( has_source( sources, browserName ) );
+
+    const auto* state = find_source( sources, stateName );
+    ASSERT_NE( state, nullptr );
+    expect_kinds( *state, stateKinds );
 }
 
 TEST( PlatformFactory,
@@ -196,6 +206,7 @@ TEST( PlatformFactory,
     config.enable_input  = false;
     config.enable_window = false;
     config.enable_a11y   = false;
+    config.enable_state  = false;
 
     const auto sources   = grab::event::PlatformFactory::build( config );
 
@@ -203,6 +214,33 @@ TEST( PlatformFactory,
     EXPECT_FALSE( has_source( sources, xinputName ) );
     EXPECT_FALSE( has_source( sources, windowName ) );
     EXPECT_FALSE( has_source( sources, atspiName ) );
+    EXPECT_FALSE( has_source( sources, stateName ) );
+}
+
+TEST( PlatformFactory,
+      StateSourceFollowsEnableState )
+{
+    grab::event::SourceConfig enabled;
+    enabled.enable_input        = false;
+    enabled.enable_window       = false;
+    enabled.enable_a11y         = false;
+    enabled.enable_browser      = false;
+    enabled.enable_state        = true;
+
+    const auto  enabled_sources = grab::event::PlatformFactory::build( enabled );
+    const auto* state           = find_source( enabled_sources, stateName );
+    ASSERT_NE( state, nullptr );
+    expect_kinds( *state, stateKinds );
+
+    grab::event::SourceConfig disabled;
+    disabled.enable_input       = false;
+    disabled.enable_window      = false;
+    disabled.enable_a11y        = false;
+    disabled.enable_browser     = false;
+    disabled.enable_state       = false;
+
+    const auto disabled_sources = grab::event::PlatformFactory::build( disabled );
+    EXPECT_FALSE( has_source( disabled_sources, stateName ) );
 }
 
 TEST( PlatformFactory,
@@ -226,6 +264,10 @@ TEST( PlatformFactory,
     const auto* atspi = find_source( sources, atspiName );
     ASSERT_NE( atspi, nullptr );
     expect_kinds( *atspi, a11yKinds );
+
+    const auto* state = find_source( sources, stateName );
+    ASSERT_NE( state, nullptr );
+    expect_kinds( *state, stateKinds );
 }
 
 TEST( PlatformFactory,

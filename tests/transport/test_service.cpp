@@ -1,6 +1,7 @@
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "grab/active_kind_probe.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
@@ -55,6 +56,36 @@ namespace
     constexpr std::string_view keyUpName           = "B";
     constexpr auto             invalidArgumentCode = grpc::StatusCode::INVALID_ARGUMENT;
     constexpr auto             cancelledCode       = grpc::StatusCode::CANCELLED;
+
+    class FixedProbe final : public grab::ActiveKindProbe
+    {
+        public:
+
+            explicit FixedProbe( std::set<grab::EventKind> active ) :
+                active_( std::move( active ) )
+            {
+            }
+
+            ~FixedProbe() override          = default;
+
+            FixedProbe( const FixedProbe& ) = delete;
+            FixedProbe&
+            operator=( const FixedProbe& ) = delete;
+            FixedProbe( FixedProbe&& )     = delete;
+            FixedProbe&
+            operator=( FixedProbe&& ) = delete;
+
+            [[nodiscard]]
+            bool
+            is_active( grab::EventKind kind ) const noexcept override
+            {
+                return active_.contains( kind );
+            }
+
+        private:
+
+            std::set<grab::EventKind> active_;
+    };
 
     [[nodiscard]]
     std::string
@@ -256,10 +287,13 @@ namespace
     {
         public:
 
-            explicit TestServer( grab::EventBus& bus )
+            explicit TestServer( grab::EventBus&              bus,
+                                 const grab::ActiveKindProbe* probe = nullptr )
             {
                 auto transport =
-                    grab::transport::TransportServer::start( endpoint_.value(), bus );
+                    grab::transport::TransportServer::start( endpoint_.value(),
+                                                             bus,
+                                                             probe );
                 if( transport.has_value() )
                 {
                     transport_.emplace( std::move( *transport ) );
@@ -267,7 +301,7 @@ namespace
                     return;
                 }
 
-                service_ = std::make_unique<grab::transport::EventService>( bus );
+                service_ = std::make_unique<grab::transport::EventService>( bus, probe );
                 grpc::ServerBuilder builder;
                 builder.RegisterService( service_.get() );
                 in_process_ = builder.BuildAndStart();
@@ -593,6 +627,30 @@ TEST( EventService,
         ASSERT_NE( *kind, grab::EventKind::Unspecified );
         EXPECT_EQ( type.name(), grab::wire_name( *kind ) );
         EXPECT_NE( type.name().find( '.' ), std::string::npos );
+    }
+}
+
+TEST( EventService,
+      ListEventTypesUsesActiveKindProbe )
+{
+    grab::EventBus   bus;
+    const FixedProbe probe{
+        {
+         grab::EventKind::KeyDown,
+         grab::EventKind::WindowFocusChanged,
+         }
+    };
+    const TestServer server{ bus, &probe };
+    ASSERT_TRUE( server.started() );
+
+    eventgrab::v1::ListEventTypesResponse response;
+    list_event_types_or_fail( server.stub(), response );
+
+    for( const auto& type : response.types() )
+    {
+        const auto kind = grab::transport::to_grab_kind( type.kind() );
+        ASSERT_TRUE( kind.has_value() );
+        EXPECT_EQ( type.active(), probe.is_active( *kind ) ) << type.name();
     }
 }
 

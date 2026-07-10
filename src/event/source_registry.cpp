@@ -94,6 +94,12 @@ namespace grab::event
         }
     }
 
+    bool
+    SourceRegistry::is_active( grab::EventKind kind ) const noexcept
+    {
+        return is_kind_active( kind );
+    }
+
     std::vector<SourceRegistry::Status>
     SourceRegistry::statuses() const
     {

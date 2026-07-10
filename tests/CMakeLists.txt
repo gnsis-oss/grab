@@ -39,6 +39,7 @@ add_executable(grab_core_tests
     event/test_payload_fields.cpp
     event/test_atspi.cpp
     event/test_state.cpp
+    event/test_state_source.cpp
     event/test_evdev.cpp
     event/test_xinput2.cpp
     event/test_window_x11.cpp

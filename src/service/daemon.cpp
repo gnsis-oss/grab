@@ -286,7 +286,8 @@ namespace grab::service
     grab::Result<void>
     Daemon::Impl::start_transport()
     {
-        auto transport = grab::transport::TransportServer::start( endpoint_, bus_ );
+        auto transport =
+            grab::transport::TransportServer::start( endpoint_, bus_, &registry_ );
         if( !transport.has_value() )
         {
             return std::unexpected( std::move( transport.error() ) );

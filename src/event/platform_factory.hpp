@@ -22,6 +22,7 @@ namespace grab::event
             bool                                 enable_browser = false;
             bool                                 enable_state   = true;
             std::chrono::milliseconds            window_poll{ 100 };
+            std::chrono::milliseconds            state_interval{ 60'000 };
     };
 
     class PlatformFactory

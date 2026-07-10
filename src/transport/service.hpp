@@ -3,6 +3,13 @@
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "grab/event_bus.hpp"
 
+namespace grab
+{
+
+    class ActiveKindProbe;
+
+}    // namespace grab
+
 namespace grab::transport
 {
 
@@ -10,7 +17,9 @@ namespace grab::transport
     {
         public:
 
-            explicit EventService( grab::EventBus& bus ) noexcept;
+            explicit EventService( grab::EventBus&              bus,
+                                   const grab::ActiveKindProbe* probe =
+                                       nullptr ) noexcept;
             ~EventService() override            = default;
 
             EventService( const EventService& ) = delete;
@@ -37,7 +46,8 @@ namespace grab::transport
 
         private:
 
-            grab::EventBus* bus_ = nullptr;
+            grab::EventBus*              bus_   = nullptr;
+            const grab::ActiveKindProbe* probe_ = nullptr;
     };
 
 }    // namespace grab::transport

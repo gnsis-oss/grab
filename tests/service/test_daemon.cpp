@@ -262,9 +262,11 @@ namespace
 
     [[nodiscard]]
     std::unique_ptr<grab::test::FakeSource>
-    make_source( std::string name )
+    make_source( std::string                  name,
+                 std::vector<grab::EventKind> kinds = {} )
     {
-        return std::make_unique<grab::test::FakeSource>( std::move( name ) );
+        return std::make_unique<grab::test::FakeSource>( std::move( name ),
+                                                         std::move( kinds ) );
     }
 
     [[nodiscard]]
@@ -297,6 +299,16 @@ namespace
         sources.emplace_back( std::move( first ) );
         sources.emplace_back( std::move( failing ) );
         sources.emplace_back( std::move( second ) );
+        return sources;
+    }
+
+    [[nodiscard]]
+    std::vector<std::unique_ptr<grab::event::EventSource>>
+    make_key_down_source_list()
+    {
+        std::vector<std::unique_ptr<grab::event::EventSource>> sources;
+        sources.emplace_back( make_source( std::string{ firstSourceName },
+                                           { grab::EventKind::KeyDown } ) );
         return sources;
     }
 
@@ -406,6 +418,34 @@ namespace
             ASSERT_NE( found, actual.data().end() );
             EXPECT_EQ( found->second, value );
         }
+    }
+
+    [[nodiscard]]
+    const eventgrab::v1::EventTypeInfo*
+    find_type( const eventgrab::v1::ListEventTypesResponse& response,
+               eventgrab::v1::EventKind                     kind )
+    {
+        for( const auto& type : response.types() )
+        {
+            if( type.kind() == kind )
+            {
+                return &type;
+            }
+        }
+        return nullptr;
+    }
+
+    void
+    list_event_types_or_fail( eventgrab::v1::EventGrabService::Stub& stub,
+                              eventgrab::v1::ListEventTypesResponse& response )
+    {
+        grpc::ClientContext context;
+        context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+
+        const eventgrab::v1::ListEventTypesRequest request;
+        const auto status = stub.ListEventTypes( &context, request, &response );
+
+        ASSERT_TRUE( status.ok() ) << status.error_message();
     }
 
     [[nodiscard]]
@@ -643,4 +683,38 @@ TEST( Daemon,
     EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Stopped );
     EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Failed );
     EXPECT_EQ( sources.at( 2U )->state(), grab::event::SourceState::Stopped );
+}
+
+TEST( Daemon,
+      ListEventTypesReflectsInjectedSourceActivity )
+{
+    const TempDaemonDir temp;
+    auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
+        .endpoint       = temp.endpoint(),
+        .store_dir      = std::nullopt,
+        .source_factory = []
+        {
+            return make_key_down_source_list();
+        },
+    } );
+    if( transport_start_blocked( daemon_result ) )
+    {
+        GTEST_SKIP() << daemon_result.error().message;
+    }
+    ASSERT_TRUE( is_ok( daemon_result ) );
+    auto                                  daemon = std::move( daemon_result ).value();
+    auto                                  stub   = make_stub( daemon.endpoint() );
+
+    eventgrab::v1::ListEventTypesResponse response;
+    list_event_types_or_fail( *stub, response );
+
+    const auto* key_down = find_type( response, eventgrab::v1::INPUT_KEY_DOWN );
+    ASSERT_NE( key_down, nullptr );
+    EXPECT_TRUE( key_down->active() );
+
+    const auto* state_snapshot = find_type( response, eventgrab::v1::STATE_SNAPSHOT );
+    ASSERT_NE( state_snapshot, nullptr );
+    EXPECT_FALSE( state_snapshot->active() );
+
+    daemon.shutdown();
 }

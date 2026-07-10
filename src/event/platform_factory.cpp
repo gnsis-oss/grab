@@ -4,6 +4,7 @@
 #include "event/monitor_source.hpp"
 #include "event/platform_factory.hpp"
 #include "event/source.hpp"
+#include "event/state_source.hpp"
 #include "event/window_x11.hpp"
 #include "event/xinput2.hpp"
 #include "grab/event.hpp"
@@ -156,7 +157,11 @@ namespace grab::event
             ) );
         }
 
-        // config.enable_state is intentionally ignored; state source wired in 3c.
+        if( config.enable_state )
+        {
+            sources.push_back( std::make_unique<StateSource>( config.state_interval ) );
+        }
+
         return sources;
     }
 

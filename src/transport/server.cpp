@@ -44,10 +44,11 @@ namespace grab::transport
     }
 
     grab::Result<TransportServer>
-    TransportServer::start( const std::string& endpoint,
-                            grab::EventBus&    bus )
+    TransportServer::start( const std::string&           endpoint,
+                            grab::EventBus&              bus,
+                            const grab::ActiveKindProbe* probe )
     {
-        auto                service = std::make_unique<EventService>( bus );
+        auto                service = std::make_unique<EventService>( bus, probe );
         grpc::ServerBuilder builder;
         builder.AddListeningPort( endpoint, grpc::InsecureServerCredentials() );
         builder.RegisterService( service.get() );
