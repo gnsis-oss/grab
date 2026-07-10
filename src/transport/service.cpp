@@ -2,11 +2,12 @@
 #include "eventgrab/v1/service.pb.h"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
 #include "transport/codec.hpp"
+#include "transport/proto_descriptor.hpp"
 #include "transport/service.hpp"
 
-#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -28,105 +29,12 @@ namespace grab::transport
 
         constexpr auto subscribePollInterval = std::chrono::milliseconds{ 100 };
 
-        struct EventTypeRecord
-        {
-                eventgrab::v1::EventKind     kind;
-                eventgrab::v1::EventCategory category;
-        };
-
         struct NotifyState
         {
                 std::mutex              mutex;
                 std::condition_variable data_ready;
                 bool                    notified = false;
         };
-
-        constexpr auto knownEventTypes = std::to_array<EventTypeRecord>( {
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::INPUT_KEY_DOWN,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INPUT,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::INPUT_KEY_UP,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INPUT,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::INPUT_KEY_COMBO,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INPUT,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::INPUT_MOUSE_CLICK,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INPUT,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::INPUT_MOUSE_MOVE,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INPUT,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::INPUT_IDLE_START,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INPUT,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::INPUT_IDLE_END,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INPUT,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::WINDOW_FOCUS_CHANGED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_WINDOW,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::WINDOW_TITLE_CHANGED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_WINDOW,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::WINDOW_CREATED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_WINDOW,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::WINDOW_CLOSED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_WINDOW,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::A11Y_BUTTON_CLICKED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::A11Y_MENU_OPENED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::A11Y_MENU_CLOSED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::A11Y_FOCUS_CHANGED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::A11Y_TEXT_CHANGED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::A11Y_STATE_CHANGED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::APP_TAB_CHANGED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INTEGRATION,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::APP_CONTEXT_UPDATE,
-                            .category = eventgrab::v1::EVENT_CATEGORY_INTEGRATION,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::BROWSER_TAB_SWITCHED,
-                            .category = eventgrab::v1::EVENT_CATEGORY_BROWSER,
-                            },
-            EventTypeRecord{
-                            .kind     = eventgrab::v1::STATE_SNAPSHOT,
-                            .category = eventgrab::v1::EVENT_CATEGORY_STATE,
-                            },
-        } );
 
         [[nodiscard]]
         grpc::Status
@@ -149,80 +57,26 @@ namespace grab::transport
         grab::Result<grab::EventKind>
         from_wire_filter_kind( eventgrab::v1::EventKind kind )
         {
-            switch( kind )
+            const auto grab_kind = grab::transport::to_grab_kind( kind );
+            if( !grab_kind.has_value() || *grab_kind == grab::EventKind::Unspecified )
             {
-                case eventgrab::v1::INPUT_KEY_DOWN :
-                    return grab::EventKind::KeyDown;
-                case eventgrab::v1::INPUT_KEY_UP :
-                    return grab::EventKind::KeyUp;
-                case eventgrab::v1::INPUT_KEY_COMBO :
-                    return grab::EventKind::KeyCombo;
-                case eventgrab::v1::INPUT_MOUSE_CLICK :
-                    return grab::EventKind::MouseClick;
-                case eventgrab::v1::INPUT_MOUSE_MOVE :
-                    return grab::EventKind::MouseMove;
-                case eventgrab::v1::INPUT_IDLE_START :
-                    return grab::EventKind::IdleStart;
-                case eventgrab::v1::INPUT_IDLE_END :
-                    return grab::EventKind::IdleEnd;
-                case eventgrab::v1::WINDOW_FOCUS_CHANGED :
-                    return grab::EventKind::WindowFocusChanged;
-                case eventgrab::v1::WINDOW_TITLE_CHANGED :
-                    return grab::EventKind::WindowTitleChanged;
-                case eventgrab::v1::WINDOW_CREATED :
-                    return grab::EventKind::WindowCreated;
-                case eventgrab::v1::WINDOW_CLOSED :
-                    return grab::EventKind::WindowClosed;
-                case eventgrab::v1::A11Y_BUTTON_CLICKED :
-                    return grab::EventKind::A11yButtonClicked;
-                case eventgrab::v1::A11Y_MENU_OPENED :
-                    return grab::EventKind::A11yMenuOpened;
-                case eventgrab::v1::A11Y_MENU_CLOSED :
-                    return grab::EventKind::A11yMenuClosed;
-                case eventgrab::v1::A11Y_FOCUS_CHANGED :
-                    return grab::EventKind::A11yFocusChanged;
-                case eventgrab::v1::A11Y_TEXT_CHANGED :
-                    return grab::EventKind::A11yTextChanged;
-                case eventgrab::v1::A11Y_STATE_CHANGED :
-                    return grab::EventKind::A11yStateChanged;
-                case eventgrab::v1::APP_TAB_CHANGED :
-                    return grab::EventKind::AppTabChanged;
-                case eventgrab::v1::APP_CONTEXT_UPDATE :
-                    return grab::EventKind::AppContextUpdate;
-                case eventgrab::v1::BROWSER_TAB_SWITCHED :
-                    return grab::EventKind::BrowserTabSwitched;
-                case eventgrab::v1::STATE_SNAPSHOT :
-                    return grab::EventKind::StateSnapshot;
-                case eventgrab::v1::EVENT_KIND_UNSPECIFIED :
-                default :
-                    return grab::fail( grab::ErrorCode::InvalidArgument,
-                                       "invalid event filter kind" );
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "invalid event filter kind" );
             }
+            return *grab_kind;
         }
 
         [[nodiscard]]
         grab::Result<grab::EventCategory>
         from_wire_filter_category( eventgrab::v1::EventCategory category )
         {
-            switch( category )
+            const auto grab_category = grab::transport::to_grab_category( category );
+            if( !grab_category.has_value() )
             {
-                case eventgrab::v1::EVENT_CATEGORY_INPUT :
-                    return grab::EventCategory::Input;
-                case eventgrab::v1::EVENT_CATEGORY_WINDOW :
-                    return grab::EventCategory::Window;
-                case eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY :
-                    return grab::EventCategory::Accessibility;
-                case eventgrab::v1::EVENT_CATEGORY_INTEGRATION :
-                    return grab::EventCategory::Integration;
-                case eventgrab::v1::EVENT_CATEGORY_BROWSER :
-                    return grab::EventCategory::Browser;
-                case eventgrab::v1::EVENT_CATEGORY_STATE :
-                    return grab::EventCategory::State;
-                case eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED :
-                default :
-                    return grab::fail( grab::ErrorCode::InvalidArgument,
-                                       "invalid event filter category" );
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "invalid event filter category" );
             }
+            return *grab_category;
         }
 
         [[nodiscard]]
@@ -359,12 +213,19 @@ namespace grab::transport
 
         // Producer tracking lands with real backends; until then the service
         // reports the full static kind registry with active=false.
-        for( const auto& record : knownEventTypes )
+        for( const auto& row : grab::transport::protoKindRows )
         {
+            if( row.kind == grab::EventKind::Unspecified )
+            {
+                continue;
+            }
+
             auto* type = response->add_types();
-            type->set_kind( record.kind );
-            type->set_category( record.category );
-            type->set_name( eventgrab::v1::EventKind_Name( record.kind ) );
+            type->set_kind( row.proto_kind );
+            type->set_category(
+                grab::transport::to_wire_category( grab::category_of( row.kind ) )
+            );
+            type->set_name( std::string{ grab::wire_name( row.kind ) } );
             type->set_active( false );
         }
 

@@ -1,9 +1,11 @@
 #include "eventgrab/v1/events.pb.h"
 #include "grab/event.hpp"
+#include "grab/event_descriptor.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "storage/jsonl_sink.hpp"
 #include "transport/codec.hpp"
+#include "transport/proto_descriptor.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -462,6 +464,24 @@ TEST( Codec,
         auto decoded = grab::transport::from_wire( *wire );
         ASSERT_TRUE( decoded.has_value() );
         expect_event_eq_after_wire( event, *decoded );
+    }
+}
+
+TEST( Codec,
+      KindAndCategoryRoundTripThroughParityTable )
+{
+    for( const auto& descriptor : grab::detail::eventDescriptors )
+    {
+        const auto wire_kind = grab::transport::to_wire_kind( descriptor.kind );
+        const auto kind      = grab::transport::to_grab_kind( wire_kind );
+        ASSERT_TRUE( kind.has_value() );
+        EXPECT_EQ( *kind, descriptor.kind );
+
+        const auto wire_category =
+            grab::transport::to_wire_category( grab::category_of( descriptor.kind ) );
+        const auto category = grab::transport::to_grab_category( wire_category );
+        ASSERT_TRUE( category.has_value() );
+        EXPECT_EQ( *category, grab::category_of( descriptor.kind ) );
     }
 }
 

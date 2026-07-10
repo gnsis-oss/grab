@@ -5,6 +5,7 @@
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "transport/codec.hpp"
+#include "transport/proto_descriptor.hpp"
 #include "transport/server.hpp"
 #include "transport/service.hpp"
 
@@ -25,6 +26,7 @@
 #include <future>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -437,6 +439,19 @@ namespace
     }
 
     void
+    list_event_types_or_fail( eventgrab::v1::EventGrabService::Stub& stub,
+                              eventgrab::v1::ListEventTypesResponse& response )
+    {
+        grpc::ClientContext context;
+        context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+
+        const eventgrab::v1::ListEventTypesRequest request;
+        const auto status = stub.ListEventTypes( &context, request, &response );
+
+        ASSERT_TRUE( status.ok() ) << status.error_message();
+    }
+
+    void
     expect_type_info( const eventgrab::v1::ListEventTypesResponse& response,
                       eventgrab::v1::EventKind                     kind,
                       eventgrab::v1::EventCategory                 category )
@@ -444,7 +459,9 @@ namespace
         const auto* type = find_type( response, kind );
         ASSERT_NE( type, nullptr );
         EXPECT_EQ( type->category(), category );
-        EXPECT_EQ( type->name(), eventgrab::v1::EventKind_Name( kind ) );
+        const auto grab_kind = grab::transport::to_grab_kind( kind );
+        ASSERT_TRUE( grab_kind.has_value() );
+        EXPECT_EQ( type->name(), grab::wire_name( *grab_kind ) );
         EXPECT_FALSE( type->active() );
     }
 
@@ -542,14 +559,9 @@ TEST( EventService,
     const TestServer server{ bus };
     ASSERT_TRUE( server.started() );
 
-    grpc::ClientContext context;
-    context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+    eventgrab::v1::ListEventTypesResponse response;
+    list_event_types_or_fail( server.stub(), response );
 
-    const eventgrab::v1::ListEventTypesRequest request;
-    eventgrab::v1::ListEventTypesResponse      response;
-    const auto status = server.stub().ListEventTypes( &context, request, &response );
-
-    ASSERT_TRUE( status.ok() ) << status.error_message();
     expect_type_info( response,
                       eventgrab::v1::INPUT_KEY_DOWN,
                       eventgrab::v1::EVENT_CATEGORY_INPUT );
@@ -562,6 +574,77 @@ TEST( EventService,
     expect_type_info( response,
                       eventgrab::v1::STATE_SNAPSHOT,
                       eventgrab::v1::EVENT_CATEGORY_STATE );
+}
+
+TEST( EventService,
+      ListEventTypesReturnsDottedNames )
+{
+    grab::EventBus   bus;
+    const TestServer server{ bus };
+    ASSERT_TRUE( server.started() );
+
+    eventgrab::v1::ListEventTypesResponse response;
+    list_event_types_or_fail( server.stub(), response );
+
+    for( const auto& type : response.types() )
+    {
+        const auto kind = grab::transport::to_grab_kind( type.kind() );
+        ASSERT_TRUE( kind.has_value() );
+        ASSERT_NE( *kind, grab::EventKind::Unspecified );
+        EXPECT_EQ( type.name(), grab::wire_name( *kind ) );
+        EXPECT_NE( type.name().find( '.' ), std::string::npos );
+    }
+}
+
+TEST( EventService,
+      ListEventTypeNamesRoundTripThroughWireKind )
+{
+    grab::EventBus   bus;
+    const TestServer server{ bus };
+    ASSERT_TRUE( server.started() );
+
+    eventgrab::v1::ListEventTypesResponse response;
+    list_event_types_or_fail( server.stub(), response );
+
+    for( const auto& type : response.types() )
+    {
+        const auto kind = grab::wire_kind( type.name() );
+        ASSERT_TRUE( kind.has_value() );
+        EXPECT_EQ( grab::transport::to_wire_kind( *kind ), type.kind() );
+    }
+}
+
+TEST( EventService,
+      ListEventTypesCoversEveryKindOnce )
+{
+    grab::EventBus   bus;
+    const TestServer server{ bus };
+    ASSERT_TRUE( server.started() );
+
+    eventgrab::v1::ListEventTypesResponse response;
+    list_event_types_or_fail( server.stub(), response );
+
+    EXPECT_EQ( response.types_size(),
+               static_cast<int>( grab::detail::eventDescriptors.size() - 1U ) );
+
+    std::set<grab::EventKind> seen;
+    for( const auto& type : response.types() )
+    {
+        EXPECT_NE( type.kind(), eventgrab::v1::EVENT_KIND_UNSPECIFIED );
+        const auto kind = grab::transport::to_grab_kind( type.kind() );
+        ASSERT_TRUE( kind.has_value() );
+        EXPECT_NE( *kind, grab::EventKind::Unspecified );
+        EXPECT_TRUE( seen.insert( *kind ).second );
+    }
+
+    for( const auto& descriptor : grab::detail::eventDescriptors )
+    {
+        if( descriptor.kind == grab::EventKind::Unspecified )
+        {
+            continue;
+        }
+        EXPECT_TRUE( seen.contains( descriptor.kind ) );
+    }
 }
 
 TEST( EventService,

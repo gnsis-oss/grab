@@ -4,6 +4,7 @@
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "transport/codec.hpp"
+#include "transport/proto_descriptor.hpp"
 
 #include <charconv>
 #include <cstddef>
@@ -33,165 +34,6 @@ namespace grab::transport
         {
             return grab::fail( grab::ErrorCode::ProtocolError,
                                std::string{ protocolPrefix } + std::move( message ) );
-        }
-
-        [[nodiscard]]
-        eventgrab::v1::EventKind
-        to_wire_kind( grab::EventKind kind )
-        {
-            switch( kind )
-            {
-                case grab::EventKind::KeyDown :
-                    return eventgrab::v1::INPUT_KEY_DOWN;
-                case grab::EventKind::KeyUp :
-                    return eventgrab::v1::INPUT_KEY_UP;
-                case grab::EventKind::KeyCombo :
-                    return eventgrab::v1::INPUT_KEY_COMBO;
-                case grab::EventKind::MouseClick :
-                    return eventgrab::v1::INPUT_MOUSE_CLICK;
-                case grab::EventKind::MouseMove :
-                    return eventgrab::v1::INPUT_MOUSE_MOVE;
-                case grab::EventKind::IdleStart :
-                    return eventgrab::v1::INPUT_IDLE_START;
-                case grab::EventKind::IdleEnd :
-                    return eventgrab::v1::INPUT_IDLE_END;
-                case grab::EventKind::WindowFocusChanged :
-                    return eventgrab::v1::WINDOW_FOCUS_CHANGED;
-                case grab::EventKind::WindowTitleChanged :
-                    return eventgrab::v1::WINDOW_TITLE_CHANGED;
-                case grab::EventKind::WindowCreated :
-                    return eventgrab::v1::WINDOW_CREATED;
-                case grab::EventKind::WindowClosed :
-                    return eventgrab::v1::WINDOW_CLOSED;
-                case grab::EventKind::A11yButtonClicked :
-                    return eventgrab::v1::A11Y_BUTTON_CLICKED;
-                case grab::EventKind::A11yMenuOpened :
-                    return eventgrab::v1::A11Y_MENU_OPENED;
-                case grab::EventKind::A11yMenuClosed :
-                    return eventgrab::v1::A11Y_MENU_CLOSED;
-                case grab::EventKind::A11yFocusChanged :
-                    return eventgrab::v1::A11Y_FOCUS_CHANGED;
-                case grab::EventKind::A11yTextChanged :
-                    return eventgrab::v1::A11Y_TEXT_CHANGED;
-                case grab::EventKind::A11yStateChanged :
-                    return eventgrab::v1::A11Y_STATE_CHANGED;
-                case grab::EventKind::AppTabChanged :
-                    return eventgrab::v1::APP_TAB_CHANGED;
-                case grab::EventKind::AppContextUpdate :
-                    return eventgrab::v1::APP_CONTEXT_UPDATE;
-                case grab::EventKind::BrowserTabSwitched :
-                    return eventgrab::v1::BROWSER_TAB_SWITCHED;
-                case grab::EventKind::StateSnapshot :
-                    return eventgrab::v1::STATE_SNAPSHOT;
-                case grab::EventKind::Unspecified :
-                    return eventgrab::v1::EVENT_KIND_UNSPECIFIED;
-            }
-
-            return eventgrab::v1::EVENT_KIND_UNSPECIFIED;
-        }
-
-        [[nodiscard]]
-        grab::Result<grab::EventKind>
-        from_wire_kind( eventgrab::v1::EventKind kind )
-        {
-            switch( kind )
-            {
-                case eventgrab::v1::INPUT_KEY_DOWN :
-                    return grab::EventKind::KeyDown;
-                case eventgrab::v1::INPUT_KEY_UP :
-                    return grab::EventKind::KeyUp;
-                case eventgrab::v1::INPUT_KEY_COMBO :
-                    return grab::EventKind::KeyCombo;
-                case eventgrab::v1::INPUT_MOUSE_CLICK :
-                    return grab::EventKind::MouseClick;
-                case eventgrab::v1::INPUT_MOUSE_MOVE :
-                    return grab::EventKind::MouseMove;
-                case eventgrab::v1::INPUT_IDLE_START :
-                    return grab::EventKind::IdleStart;
-                case eventgrab::v1::INPUT_IDLE_END :
-                    return grab::EventKind::IdleEnd;
-                case eventgrab::v1::WINDOW_FOCUS_CHANGED :
-                    return grab::EventKind::WindowFocusChanged;
-                case eventgrab::v1::WINDOW_TITLE_CHANGED :
-                    return grab::EventKind::WindowTitleChanged;
-                case eventgrab::v1::WINDOW_CREATED :
-                    return grab::EventKind::WindowCreated;
-                case eventgrab::v1::WINDOW_CLOSED :
-                    return grab::EventKind::WindowClosed;
-                case eventgrab::v1::A11Y_BUTTON_CLICKED :
-                    return grab::EventKind::A11yButtonClicked;
-                case eventgrab::v1::A11Y_MENU_OPENED :
-                    return grab::EventKind::A11yMenuOpened;
-                case eventgrab::v1::A11Y_MENU_CLOSED :
-                    return grab::EventKind::A11yMenuClosed;
-                case eventgrab::v1::A11Y_FOCUS_CHANGED :
-                    return grab::EventKind::A11yFocusChanged;
-                case eventgrab::v1::A11Y_TEXT_CHANGED :
-                    return grab::EventKind::A11yTextChanged;
-                case eventgrab::v1::A11Y_STATE_CHANGED :
-                    return grab::EventKind::A11yStateChanged;
-                case eventgrab::v1::APP_TAB_CHANGED :
-                    return grab::EventKind::AppTabChanged;
-                case eventgrab::v1::APP_CONTEXT_UPDATE :
-                    return grab::EventKind::AppContextUpdate;
-                case eventgrab::v1::BROWSER_TAB_SWITCHED :
-                    return grab::EventKind::BrowserTabSwitched;
-                case eventgrab::v1::STATE_SNAPSHOT :
-                    return grab::EventKind::StateSnapshot;
-                case eventgrab::v1::EVENT_KIND_UNSPECIFIED :
-                default :
-                    return protocol_error( "unknown event kind" );
-            }
-        }
-
-        [[nodiscard]]
-        eventgrab::v1::EventCategory
-        to_wire_category( grab::EventCategory category )
-        {
-            switch( category )
-            {
-                case grab::EventCategory::Input :
-                    return eventgrab::v1::EVENT_CATEGORY_INPUT;
-                case grab::EventCategory::Window :
-                    return eventgrab::v1::EVENT_CATEGORY_WINDOW;
-                case grab::EventCategory::Accessibility :
-                    return eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY;
-                case grab::EventCategory::Integration :
-                    return eventgrab::v1::EVENT_CATEGORY_INTEGRATION;
-                case grab::EventCategory::Browser :
-                    return eventgrab::v1::EVENT_CATEGORY_BROWSER;
-                case grab::EventCategory::State :
-                    return eventgrab::v1::EVENT_CATEGORY_STATE;
-                case grab::EventCategory::Unspecified :
-                    return eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED;
-            }
-
-            return eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED;
-        }
-
-        [[nodiscard]]
-        grab::Result<grab::EventCategory>
-        from_wire_category( eventgrab::v1::EventCategory category )
-        {
-            switch( category )
-            {
-                case eventgrab::v1::EVENT_CATEGORY_INPUT :
-                    return grab::EventCategory::Input;
-                case eventgrab::v1::EVENT_CATEGORY_WINDOW :
-                    return grab::EventCategory::Window;
-                case eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY :
-                    return grab::EventCategory::Accessibility;
-                case eventgrab::v1::EVENT_CATEGORY_INTEGRATION :
-                    return grab::EventCategory::Integration;
-                case eventgrab::v1::EVENT_CATEGORY_BROWSER :
-                    return grab::EventCategory::Browser;
-                case eventgrab::v1::EVENT_CATEGORY_STATE :
-                    return grab::EventCategory::State;
-                case eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED :
-                    return grab::EventCategory::Unspecified;
-                default :
-                    return protocol_error( "unknown event category" );
-            }
         }
 
         [[nodiscard]]
@@ -902,16 +744,16 @@ namespace grab::transport
             return std::unexpected( size_status.error() );
         }
 
-        auto kind = from_wire_kind( wire.kind() );
-        if( !kind.has_value() )
+        const auto kind = grab::transport::to_grab_kind( wire.kind() );
+        if( !kind.has_value() || *kind == grab::EventKind::Unspecified )
         {
-            return std::unexpected( kind.error() );
+            return protocol_error( "unknown event kind" );
         }
 
-        auto category = from_wire_category( wire.category() );
+        const auto category = grab::transport::to_grab_category( wire.category() );
         if( !category.has_value() )
         {
-            return std::unexpected( category.error() );
+            return protocol_error( "unknown event category" );
         }
 
         auto payload = decode_payload( wire, *kind );
