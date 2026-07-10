@@ -30,7 +30,7 @@ namespace grab::session
                 .control_socket    = {},
                 .mode              = desc.mode,
                 .geometry          = desc.geometry,
-                .state             = SessionState::starting,
+                .state             = SessionState::Starting,
                 .supervisor_pid    = grab::Pid{},
                 .created_monotonic = 0U,
             };
@@ -103,7 +103,7 @@ namespace grab::session
             {
                 return {};
             }
-            return grab::fail( ErrorCode::internal_fault,
+            return grab::fail( ErrorCode::InternalFault,
                                std::string{ "invalid session transition: " } +
                                    std::string{ grab::state_name( from ) } +
                                    " -> " +
@@ -139,7 +139,7 @@ namespace grab::session
             return std::unexpected( runtime.error() );
         }
 
-        auto transition = ensure_transition( record.state, SessionState::ready );
+        auto transition = ensure_transition( record.state, SessionState::Ready );
         if( !transition.has_value() )
         {
             remove_after_failed_start( registry, record.name );
@@ -149,7 +149,7 @@ namespace grab::session
         record.endpoint       = runtime->endpoint;
         record.control_socket = runtime->control_socket;
         record.supervisor_pid = runtime->supervisor_pid;
-        record.state          = SessionState::ready;
+        record.state          = SessionState::Ready;
         log_transition( record.name, record.state );
 
         const auto written = registry.write( record );
@@ -171,13 +171,13 @@ namespace grab::session
             return std::unexpected( record.error() );
         }
 
-        auto transition = ensure_transition( record->state, SessionState::draining );
+        auto transition = ensure_transition( record->state, SessionState::Draining );
         if( !transition.has_value() )
         {
             return std::unexpected( transition.error() );
         }
 
-        record->state = SessionState::draining;
+        record->state = SessionState::Draining;
         log_transition( record->name, record->state );
         const auto written = registry.write( *record );
         if( !written.has_value() )
@@ -192,13 +192,13 @@ namespace grab::session
             return std::unexpected( destroyed.error() );
         }
 
-        transition = ensure_transition( record->state, SessionState::stopped );
+        transition = ensure_transition( record->state, SessionState::Stopped );
         if( !transition.has_value() )
         {
             return std::unexpected( transition.error() );
         }
 
-        log_transition( record->name, SessionState::stopped );
+        log_transition( record->name, SessionState::Stopped );
         return registry.remove( record->name );
     }
 

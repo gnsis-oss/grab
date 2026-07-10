@@ -9,96 +9,94 @@
 namespace
 {
 
-    constexpr std::string_view kScreenDisplayImageId      = "screen.display.image";
-    constexpr std::string_view kScreenDisplayVideoId      = "screen.display.video";
-    constexpr std::string_view kScreenWindowImageId       = "screen.window.image";
-    constexpr std::string_view kScreenActiveWindowImageId = "screen.active_window.image";
-    constexpr std::string_view kScreenUserSelectedImageId = "screen.user_selected.image";
-    constexpr std::string_view kEventKeyGlobalId          = "event.key.global";
-    constexpr std::string_view kEventMouseGlobalId        = "event.mouse.global";
-    constexpr std::string_view kEventWindowFocusId        = "event.window.focus";
-    constexpr std::string_view kEventWindowListId         = "event.window.list";
-    constexpr std::string_view kWindowFindId              = "window.find";
-    constexpr std::string_view kWindowGeometryId          = "window.geometry";
-    constexpr std::string_view kEventWidgetPrefixId       = "event.widget";
-    constexpr std::string_view kMouseMoveId               = "mouse.move";
-    constexpr std::string_view kMouseMoveAbsoluteId       = "mouse.move.absolute";
-    constexpr std::string_view kMouseMoveRelativeId       = "mouse.move.relative";
-    constexpr std::string_view kMouseClickId              = "mouse.click";
-    constexpr std::string_view kMouseDragId               = "mouse.drag";
-    constexpr std::string_view kKeyTextId                 = "key.text";
-    constexpr std::string_view kKeyChordId                = "key.chord";
-    constexpr std::string_view kAvailableStateName        = "available";
-    constexpr std::string_view kDegradedStateName         = "degraded";
-    constexpr std::string_view kNeedsPermissionName       = "needs-permission";
-    constexpr std::string_view kUnavailableStateName      = "unavailable";
-    constexpr auto             kAvailableState = grab::AvailabilityState::available;
-    constexpr auto             kDegradedState  = grab::AvailabilityState::degraded;
-    constexpr auto kNeedsPermissionState   = grab::AvailabilityState::needs_permission;
-    constexpr auto kUnavailableState       = grab::AvailabilityState::unavailable;
-    constexpr auto kScreenWindowCapability = grab::Capability::screen_window_image;
-    constexpr auto kMouseMoveCapability    = grab::Capability::mouse_move;
-    constexpr auto kKeyChordCapability     = grab::Capability::key_chord;
-    constexpr auto kConcreteCapabilityCount =
-        static_cast<std::size_t>( grab::Capability::count );
+    constexpr std::string_view screenDisplayImageId      = "screen.display.image";
+    constexpr std::string_view screenDisplayVideoId      = "screen.display.video";
+    constexpr std::string_view screenWindowImageId       = "screen.window.image";
+    constexpr std::string_view screenActiveWindowImageId = "screen.active_window.image";
+    constexpr std::string_view screenUserSelectedImageId = "screen.user_selected.image";
+    constexpr std::string_view eventKeyGlobalId          = "event.key.global";
+    constexpr std::string_view eventMouseGlobalId        = "event.mouse.global";
+    constexpr std::string_view eventWindowFocusId        = "event.window.focus";
+    constexpr std::string_view eventWindowListId         = "event.window.list";
+    constexpr std::string_view windowFindId              = "window.find";
+    constexpr std::string_view windowGeometryId          = "window.geometry";
+    constexpr std::string_view eventWidgetPrefixId       = "event.widget";
+    constexpr std::string_view mouseMoveId               = "mouse.move";
+    constexpr std::string_view mouseMoveAbsoluteId       = "mouse.move.absolute";
+    constexpr std::string_view mouseMoveRelativeId       = "mouse.move.relative";
+    constexpr std::string_view mouseClickId              = "mouse.click";
+    constexpr std::string_view mouseDragId               = "mouse.drag";
+    constexpr std::string_view keyTextId                 = "key.text";
+    constexpr std::string_view keyChordId                = "key.chord";
+    constexpr std::string_view availableStateName        = "available";
+    constexpr std::string_view degradedStateName         = "degraded";
+    constexpr std::string_view needsPermissionName       = "needs-permission";
+    constexpr std::string_view unavailableStateName      = "unavailable";
+    constexpr auto             availableState = grab::AvailabilityState::Available;
+    constexpr auto             degradedState  = grab::AvailabilityState::Degraded;
+    constexpr auto needsPermissionState       = grab::AvailabilityState::NeedsPermission;
+    constexpr auto unavailableState           = grab::AvailabilityState::Unavailable;
+    constexpr auto screenWindowCapability     = grab::Capability::ScreenWindowImage;
+    constexpr auto mouseMoveCapability        = grab::Capability::MouseMove;
+    constexpr auto keyChordCapability         = grab::Capability::KeyChord;
+    constexpr auto concreteCapabilityCount =
+        static_cast<std::size_t>( grab::Capability::Count );
 
 }    // namespace
 
 TEST( Capability,
       IdsMatchSpecTaxonomy )
 {
-    EXPECT_EQ( grab::capability::screen_display_image, kScreenDisplayImageId );
-    EXPECT_EQ( grab::capability::screen_display_video, kScreenDisplayVideoId );
-    EXPECT_EQ( grab::capability::screen_window_image, kScreenWindowImageId );
-    EXPECT_EQ( grab::capability::screen_active_window_image,
-               kScreenActiveWindowImageId );
-    EXPECT_EQ( grab::capability::screen_user_selected_image,
-               kScreenUserSelectedImageId );
-    EXPECT_EQ( grab::capability::event_key_global, kEventKeyGlobalId );
-    EXPECT_EQ( grab::capability::event_mouse_global, kEventMouseGlobalId );
-    EXPECT_EQ( grab::capability::event_window_focus, kEventWindowFocusId );
-    EXPECT_EQ( grab::capability::event_window_list, kEventWindowListId );
-    EXPECT_EQ( grab::capability::window_find, kWindowFindId );
-    EXPECT_EQ( grab::capability::window_geometry, kWindowGeometryId );
-    EXPECT_EQ( grab::capability::event_widget_prefix, kEventWidgetPrefixId );
-    EXPECT_EQ( grab::capability::mouse_move, kMouseMoveId );
-    EXPECT_EQ( grab::capability::mouse_move_absolute, kMouseMoveAbsoluteId );
-    EXPECT_EQ( grab::capability::mouse_move_relative, kMouseMoveRelativeId );
-    EXPECT_EQ( grab::capability::mouse_click, kMouseClickId );
-    EXPECT_EQ( grab::capability::mouse_drag, kMouseDragId );
-    EXPECT_EQ( grab::capability::key_text, kKeyTextId );
-    EXPECT_EQ( grab::capability::key_chord, kKeyChordId );
+    EXPECT_EQ( grab::capability::screen_display_image, screenDisplayImageId );
+    EXPECT_EQ( grab::capability::screen_display_video, screenDisplayVideoId );
+    EXPECT_EQ( grab::capability::screen_window_image, screenWindowImageId );
+    EXPECT_EQ( grab::capability::screen_active_window_image, screenActiveWindowImageId );
+    EXPECT_EQ( grab::capability::screen_user_selected_image, screenUserSelectedImageId );
+    EXPECT_EQ( grab::capability::event_key_global, eventKeyGlobalId );
+    EXPECT_EQ( grab::capability::event_mouse_global, eventMouseGlobalId );
+    EXPECT_EQ( grab::capability::event_window_focus, eventWindowFocusId );
+    EXPECT_EQ( grab::capability::event_window_list, eventWindowListId );
+    EXPECT_EQ( grab::capability::window_find, windowFindId );
+    EXPECT_EQ( grab::capability::window_geometry, windowGeometryId );
+    EXPECT_EQ( grab::capability::event_widget_prefix, eventWidgetPrefixId );
+    EXPECT_EQ( grab::capability::mouse_move, mouseMoveId );
+    EXPECT_EQ( grab::capability::mouse_move_absolute, mouseMoveAbsoluteId );
+    EXPECT_EQ( grab::capability::mouse_move_relative, mouseMoveRelativeId );
+    EXPECT_EQ( grab::capability::mouse_click, mouseClickId );
+    EXPECT_EQ( grab::capability::mouse_drag, mouseDragId );
+    EXPECT_EQ( grab::capability::key_text, keyTextId );
+    EXPECT_EQ( grab::capability::key_chord, keyChordId );
 }
 
 TEST( Capability,
       StateNamesAreStable )
 {
-    EXPECT_EQ( grab::state_name( kAvailableState ), kAvailableStateName );
-    EXPECT_EQ( grab::state_name( kDegradedState ), kDegradedStateName );
-    EXPECT_EQ( grab::state_name( kNeedsPermissionState ), kNeedsPermissionName );
-    EXPECT_EQ( grab::state_name( kUnavailableState ), kUnavailableStateName );
+    EXPECT_EQ( grab::state_name( availableState ), availableStateName );
+    EXPECT_EQ( grab::state_name( degradedState ), degradedStateName );
+    EXPECT_EQ( grab::state_name( needsPermissionState ), needsPermissionName );
+    EXPECT_EQ( grab::state_name( unavailableState ), unavailableStateName );
 }
 
 TEST( Capability,
       EnumMapsToStableIds )
 {
-    static_assert( grab::capability_entries().size() == kConcreteCapabilityCount );
+    static_assert( grab::capability_entries().size() == concreteCapabilityCount );
 
-    EXPECT_EQ( grab::capability_name( kScreenWindowCapability ), kScreenWindowImageId );
-    EXPECT_EQ( grab::capability_name( kMouseMoveCapability ), kMouseMoveId );
-    EXPECT_EQ( grab::capability_name( kKeyChordCapability ), kKeyChordId );
+    EXPECT_EQ( grab::capability_name( screenWindowCapability ), screenWindowImageId );
+    EXPECT_EQ( grab::capability_name( mouseMoveCapability ), mouseMoveId );
+    EXPECT_EQ( grab::capability_name( keyChordCapability ), keyChordId );
 }
 
 TEST( Capability,
       StableIdsMapBackToEnum )
 {
-    const auto screen = grab::capability_from_string( kScreenWindowImageId );
+    const auto screen = grab::capability_from_string( screenWindowImageId );
     ASSERT_TRUE( screen.has_value() );
-    EXPECT_EQ( *screen, kScreenWindowCapability );
+    EXPECT_EQ( *screen, screenWindowCapability );
 
-    const auto chord = grab::capability_from_string( kKeyChordId );
+    const auto chord = grab::capability_from_string( keyChordId );
     ASSERT_TRUE( chord.has_value() );
-    EXPECT_EQ( *chord, kKeyChordCapability );
+    EXPECT_EQ( *chord, keyChordCapability );
 
-    EXPECT_FALSE( grab::capability_from_string( kEventWidgetPrefixId ).has_value() );
+    EXPECT_FALSE( grab::capability_from_string( eventWidgetPrefixId ).has_value() );
 }

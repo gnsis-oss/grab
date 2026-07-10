@@ -18,36 +18,36 @@
 namespace
 {
 
-    constexpr const char*      kXvfbDisplay         = ":92";
-    constexpr const char*      kBadDisplay          = ":bad-nonexistent-92";
-    constexpr int              kXcbOk               = 0;
-    constexpr int              kInvalidScreenIndex  = 0;
-    constexpr std::int16_t     kFirstWindowX        = 40;
-    constexpr std::int16_t     kFirstWindowY        = 52;
-    constexpr std::int16_t     kSecondWindowX       = 260;
-    constexpr std::int16_t     kSecondWindowY       = 180;
-    constexpr std::uint16_t    kWindowWidth         = 180U;
-    constexpr std::uint16_t    kWindowHeight        = 120U;
-    constexpr std::uint16_t    kWindowBorderWidth   = 0U;
-    constexpr std::uint16_t    kXvfbWidth           = 1'280U;
-    constexpr std::uint16_t    kXvfbHeight          = 1'024U;
-    constexpr std::uint32_t    kWindowValueMask     = XCB_CW_BACK_PIXEL;
-    constexpr std::uint32_t    kPropertyReplaceMode = XCB_PROP_MODE_REPLACE;
-    constexpr std::uint8_t     kFormat8Bits         = 8U;
-    constexpr std::uint8_t     kFormat32Bits        = 32U;
-    constexpr std::size_t      kCreatedWindowCount  = 2U;
-    constexpr std::uint32_t    kFirstWindowColor    = 0X00'22'44'66U;
-    constexpr std::uint32_t    kSecondWindowColor   = 0X00'66'44'22U;
+    constexpr const char*      xvfbDisplay         = ":92";
+    constexpr const char*      badDisplay          = ":bad-nonexistent-92";
+    constexpr int              xcbOk               = 0;
+    constexpr int              invalidScreenIndex  = 0;
+    constexpr std::int16_t     firstWindowX        = 40;
+    constexpr std::int16_t     firstWindowY        = 52;
+    constexpr std::int16_t     secondWindowX       = 260;
+    constexpr std::int16_t     secondWindowY       = 180;
+    constexpr std::uint16_t    windowWidth         = 180U;
+    constexpr std::uint16_t    windowHeight        = 120U;
+    constexpr std::uint16_t    windowBorderWidth   = 0U;
+    constexpr std::uint16_t    xvfbWidth           = 1'280U;
+    constexpr std::uint16_t    xvfbHeight          = 1'024U;
+    constexpr std::uint32_t    windowValueMask     = XCB_CW_BACK_PIXEL;
+    constexpr std::uint32_t    propertyReplaceMode = XCB_PROP_MODE_REPLACE;
+    constexpr std::uint8_t     format8Bits         = 8U;
+    constexpr std::uint8_t     format32Bits        = 32U;
+    constexpr std::size_t      createdWindowCount  = 2U;
+    constexpr std::uint32_t    firstWindowColor    = 0X00'22'44'66U;
+    constexpr std::uint32_t    secondWindowColor   = 0X00'66'44'22U;
 
-    constexpr std::string_view kFirstInstance       = "grab-enumerate-one";
-    constexpr std::string_view kFirstClass          = "GrabEnumerateOne";
-    constexpr std::string_view kFirstTitle          = "grab enumerate first";
-    constexpr std::string_view kSecondInstance      = "grab-enumerate-two";
-    constexpr std::string_view kSecondClass         = "GrabEnumerateTwo";
-    constexpr std::string_view kSecondTitle         = "grab enumerate second";
-    constexpr std::string_view kNetClientListAtom   = "_NET_CLIENT_LIST";
-    constexpr std::string_view kNetWmNameAtom       = "_NET_WM_NAME";
-    constexpr std::string_view kUtf8StringAtom      = "UTF8_STRING";
+    constexpr std::string_view firstInstance       = "grab-enumerate-one";
+    constexpr std::string_view firstClass          = "GrabEnumerateOne";
+    constexpr std::string_view firstTitle          = "grab enumerate first";
+    constexpr std::string_view secondInstance      = "grab-enumerate-two";
+    constexpr std::string_view secondClass         = "GrabEnumerateTwo";
+    constexpr std::string_view secondTitle         = "grab enumerate second";
+    constexpr std::string_view netClientListAtom   = "_NET_CLIENT_LIST";
+    constexpr std::string_view netWmNameAtom       = "_NET_WM_NAME";
+    constexpr std::string_view utf8StringAtom      = "UTF8_STRING";
 
     template<typename T>
     using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -102,7 +102,7 @@ namespace
         private:
 
             xcb_connection_t* connection_   = nullptr;
-            int               screen_index_ = kInvalidScreenIndex;
+            int               screen_index_ = invalidScreenIndex;
     };
 
     [[nodiscard]]
@@ -140,7 +140,7 @@ namespace
     {
         if( xcb_flush( connection ) <=
             0 ||
-            xcb_connection_has_error( connection ) != kXcbOk )
+            xcb_connection_has_error( connection ) != xcbOk )
         {
             return testing::AssertionFailure() << "xcb_flush failed";
         }
@@ -193,11 +193,11 @@ namespace
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          XCB_ATOM_WM_CLASS,
                                          XCB_ATOM_STRING,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( value.size() ),
                                          value.data() )
         ) );
@@ -210,16 +210,16 @@ namespace
     {
         xcb_atom_t net_wm_name = XCB_ATOM_NONE;
         xcb_atom_t utf8_string = XCB_ATOM_NONE;
-        ASSERT_TRUE( intern_atom( connection, kNetWmNameAtom, net_wm_name ) );
-        ASSERT_TRUE( intern_atom( connection, kUtf8StringAtom, utf8_string ) );
+        ASSERT_TRUE( intern_atom( connection, netWmNameAtom, net_wm_name ) );
+        ASSERT_TRUE( intern_atom( connection, utf8StringAtom, utf8_string ) );
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          net_wm_name,
                                          utf8_string,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( title.size() ),
                                          title.data() )
         ) );
@@ -232,19 +232,19 @@ namespace
                      xcb_window_t      second_window )
     {
         xcb_atom_t net_client_list = XCB_ATOM_NONE;
-        ASSERT_TRUE( intern_atom( connection, kNetClientListAtom, net_client_list ) );
-        const std::array<xcb_window_t, kCreatedWindowCount> windows{
+        ASSERT_TRUE( intern_atom( connection, netClientListAtom, net_client_list ) );
+        const std::array<xcb_window_t, createdWindowCount> windows{
             first_window,
             second_window,
         };
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          root,
                                          net_client_list,
                                          XCB_ATOM_WINDOW,
-                                         kFormat32Bits,
+                                         format32Bits,
                                          static_cast<std::uint32_t>( windows.size() ),
                                          windows.data() )
         ) );
@@ -271,12 +271,12 @@ namespace
                                                           screen.root,
                                                           x,
                                                           y,
-                                                          kWindowWidth,
-                                                          kWindowHeight,
-                                                          kWindowBorderWidth,
+                                                          windowWidth,
+                                                          windowHeight,
+                                                          windowBorderWidth,
                                                           XCB_WINDOW_CLASS_INPUT_OUTPUT,
                                                           screen.root_visual,
-                                                          kWindowValueMask,
+                                                          windowValueMask,
                                                           values.data() ) )
         );
         set_wm_class( connection, window, instance, class_name );
@@ -304,58 +304,58 @@ namespace
 TEST( Enumerate,
       ListsCreatedWindows )
 {
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen, nullptr );
 
     const xcb_window_t first_window  = create_test_window( connection.get(),
                                                            *screen,
-                                                           kFirstWindowX,
-                                                           kFirstWindowY,
-                                                           kFirstWindowColor,
-                                                           kFirstInstance,
-                                                           kFirstClass,
-                                                           kFirstTitle );
+                                                           firstWindowX,
+                                                           firstWindowY,
+                                                           firstWindowColor,
+                                                           firstInstance,
+                                                           firstClass,
+                                                           firstTitle );
     const xcb_window_t second_window = create_test_window( connection.get(),
                                                            *screen,
-                                                           kSecondWindowX,
-                                                           kSecondWindowY,
-                                                           kSecondWindowColor,
-                                                           kSecondInstance,
-                                                           kSecondClass,
-                                                           kSecondTitle );
+                                                           secondWindowX,
+                                                           secondWindowY,
+                                                           secondWindowColor,
+                                                           secondInstance,
+                                                           secondClass,
+                                                           secondTitle );
     set_client_list( connection.get(), screen->root, first_window, second_window );
     ASSERT_TRUE( flush_succeeded( connection.get() ) );
 
-    auto listed = grab::screen::list_windows( kXvfbDisplay );
+    auto listed = grab::screen::list_windows( xvfbDisplay );
 
     ASSERT_TRUE( listed.has_value() ) << listed.error().message;
-    const auto first = find_by_class( *listed, kFirstClass );
+    const auto first = find_by_class( *listed, firstClass );
     ASSERT_NE( first, listed->end() );
     EXPECT_EQ( first->id, static_cast<std::uint32_t>( first_window ) );
-    EXPECT_EQ( first->title, kFirstTitle );
-    EXPECT_EQ( first->bounds.x, kFirstWindowX );
-    EXPECT_EQ( first->bounds.y, kFirstWindowY );
-    EXPECT_EQ( first->bounds.width, kWindowWidth );
-    EXPECT_EQ( first->bounds.height, kWindowHeight );
+    EXPECT_EQ( first->title, firstTitle );
+    EXPECT_EQ( first->bounds.x, firstWindowX );
+    EXPECT_EQ( first->bounds.y, firstWindowY );
+    EXPECT_EQ( first->bounds.width, windowWidth );
+    EXPECT_EQ( first->bounds.height, windowHeight );
 
-    const auto second = find_by_class( *listed, kSecondClass );
+    const auto second = find_by_class( *listed, secondClass );
     ASSERT_NE( second, listed->end() );
     EXPECT_EQ( second->id, static_cast<std::uint32_t>( second_window ) );
-    EXPECT_EQ( second->title, kSecondTitle );
-    EXPECT_EQ( second->bounds.x, kSecondWindowX );
-    EXPECT_EQ( second->bounds.y, kSecondWindowY );
-    EXPECT_EQ( second->bounds.width, kWindowWidth );
-    EXPECT_EQ( second->bounds.height, kWindowHeight );
+    EXPECT_EQ( second->title, secondTitle );
+    EXPECT_EQ( second->bounds.x, secondWindowX );
+    EXPECT_EQ( second->bounds.y, secondWindowY );
+    EXPECT_EQ( second->bounds.width, windowWidth );
+    EXPECT_EQ( second->bounds.height, windowHeight );
 }
 
 TEST( Enumerate,
       ListsAtLeastOneOutput )
 {
-    auto outputs = grab::screen::list_outputs( kXvfbDisplay );
+    auto outputs = grab::screen::list_outputs( xvfbDisplay );
 
     ASSERT_TRUE( outputs.has_value() ) << outputs.error().message;
     ASSERT_FALSE( outputs->empty() );
@@ -364,8 +364,8 @@ TEST( Enumerate,
                               []( const grab::screen::OutputInfo& output )
                               {
                                   return output.bounds.width ==
-                                         kXvfbWidth &&
-                                         output.bounds.height == kXvfbHeight;
+                                         xvfbWidth &&
+                                         output.bounds.height == xvfbHeight;
                               } );
     EXPECT_NE( matching_screen, outputs->end() );
 }
@@ -373,8 +373,8 @@ TEST( Enumerate,
 TEST( Enumerate,
       ListWindowsFailsOnBadDisplay )
 {
-    auto windows = grab::screen::list_windows( kBadDisplay );
+    auto windows = grab::screen::list_windows( badDisplay );
 
     ASSERT_FALSE( windows.has_value() );
-    EXPECT_EQ( windows.error().code, grab::ErrorCode::device_inaccessible );
+    EXPECT_EQ( windows.error().code, grab::ErrorCode::DeviceInaccessible );
 }

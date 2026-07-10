@@ -101,7 +101,7 @@ namespace grab::platform::x11
             const auto pixel_count = grab::checked_mul<std::size_t>(
                 static_cast<std::size_t>( cursor.width ),
                 static_cast<std::size_t>( cursor.height ),
-                grab::ErrorCode::provider_failed,
+                grab::ErrorCode::ProviderFailed,
                 "XFixes cursor image is too large"
             );
             return pixel_count.has_value() && cursor.pixels.size() >= *pixel_count;
@@ -124,7 +124,7 @@ namespace grab::platform::x11
             const auto row_bytes =
                 grab::checked_mul<std::size_t>( static_cast<std::size_t>( region.width ),
                                                 Traits::bytes_per_pixel,
-                                                grab::ErrorCode::provider_failed,
+                                                grab::ErrorCode::ProviderFailed,
                                                 "cursor frame row is too large" );
             if( !row_bytes.has_value() || stride < *row_bytes )
             {
@@ -136,7 +136,7 @@ namespace grab::platform::x11
             const auto tail_bytes =
                 grab::checked_mul<std::size_t>( tail_rows,
                                                 stride,
-                                                grab::ErrorCode::provider_failed,
+                                                grab::ErrorCode::ProviderFailed,
                                                 "cursor frame is too large" );
             if( !tail_bytes.has_value() )
             {
@@ -145,7 +145,7 @@ namespace grab::platform::x11
             const auto required_bytes =
                 grab::checked_add<std::size_t>( *tail_bytes,
                                                 *row_bytes,
-                                                grab::ErrorCode::provider_failed,
+                                                grab::ErrorCode::ProviderFailed,
                                                 "cursor frame is too large" );
             return required_bytes.has_value() && frame_bgr0.size() >= *required_bytes;
         }
@@ -251,7 +251,7 @@ namespace grab::platform::x11
             return grab::checked_mul<std::size_t>(
                 static_cast<std::size_t>( reply.width ),
                 static_cast<std::size_t>( reply.height ),
-                grab::ErrorCode::provider_failed,
+                grab::ErrorCode::ProviderFailed,
                 "XFixes cursor image is too large"
             );
         }
@@ -306,15 +306,15 @@ namespace grab::platform::x11
 
         struct CursorDispatch
         {
-                grab::PixelFormat format    = grab::PixelFormat::bgr0;
+                grab::PixelFormat format    = grab::PixelFormat::Bgr0;
                 CursorComposite   composite = nullptr;
         };
 
         constexpr std::size_t cursor_dispatch_count = 1U;
         constexpr std::array<CursorDispatch, cursor_dispatch_count> cursor_dispatch{
             CursorDispatch{
-                           .format    = grab::PixelFormat::bgr0,
-                           .composite = &composite_cursor_kernel<grab::PixelFormat::bgr0>,
+                           .format    = grab::PixelFormat::Bgr0,
+                           .composite = &composite_cursor_kernel<grab::PixelFormat::Bgr0>,
                            },
         };
 
@@ -343,7 +343,7 @@ namespace grab::platform::x11
                       const grab::geometry::Rectangle& region,
                       const CursorImage&               cursor )
     {
-        composite_cursor_for_format( grab::PixelFormat::bgr0,
+        composite_cursor_for_format( grab::PixelFormat::Bgr0,
                                      frame_bgr0,
                                      stride,
                                      region,
@@ -383,13 +383,13 @@ namespace grab::platform::x11
             xcb_xfixes_get_cursor_image_cursor_image_length( reply.get() );
         if( length < 0 || !std::in_range<std::size_t>( length ) )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "XFixes cursor image length is invalid" );
         }
         const auto actual_count = static_cast<std::size_t>( length );
         if( actual_count < *pixel_count )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "XFixes cursor image length is too short" );
         }
 
@@ -397,7 +397,7 @@ namespace grab::platform::x11
             xcb_xfixes_get_cursor_image_cursor_image( reply.get() );
         if( pixels == nullptr && *pixel_count != 0U )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "XFixes cursor image data is null" );
         }
 

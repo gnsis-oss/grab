@@ -51,7 +51,7 @@ namespace grab::cli
             const std::size_t dimension = input.find( detail::dimension_marker );
             if( dimension == std::string_view::npos )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "session geometry must match WxH" );
             }
 
@@ -105,7 +105,7 @@ namespace grab::cli
         {
             if( args.size() != first_option_position || args.front() != command )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ "usage: grab session " } +
                                        std::string{ command } +
                                        " <name>" );
@@ -113,7 +113,7 @@ namespace grab::cli
             const std::string_view name = args.subspan( name_position ).front();
             if( name.empty() || is_flag_like( name ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "session name is required" );
             }
             return name;
@@ -292,19 +292,19 @@ namespace grab::cli
     {
         if( args.size() <= name_position || args.front() != start_command )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "usage: grab session start <name> [options]" );
         }
         const std::string_view name = args.subspan( name_position ).front();
         if( name.empty() || is_flag_like( name ) )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "session name is required" );
         }
 
         SessionDesc desc;
         desc.name    = std::string{ name };
-        desc.mode    = SessionMode::offscreen;
+        desc.mode    = SessionMode::Offscreen;
 
         auto current = std::next( args.begin(),
                                   static_cast<std::ptrdiff_t>( first_option_position ) );
@@ -314,7 +314,7 @@ namespace grab::cli
             const auto             value_position = std::next( current );
             if( value_position == args.end() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ flag } + " requires a value" );
             }
 
@@ -324,7 +324,7 @@ namespace grab::cli
                 auto mode = mode_from_string( value );
                 if( !mode.has_value() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "unknown session mode: " + std::string{ value } );
                 }
                 desc.mode = *mode;
@@ -344,7 +344,7 @@ namespace grab::cli
             }
             else
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "unknown session argument: " + std::string{ flag } );
             }
 

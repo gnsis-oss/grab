@@ -22,37 +22,37 @@
 namespace
 {
 
-    constexpr const char*      kXvfbDisplay         = ":89";
-    constexpr const char*      kBadDisplay          = ":bad-nonexistent-89";
-    constexpr int              kXcbOk               = 0;
-    constexpr int              kInvalidScreenIndex  = 0;
-    constexpr std::int16_t     kWindowX             = 72;
-    constexpr std::int16_t     kWindowY             = 88;
-    constexpr std::uint16_t    kWindowWidth         = 176U;
-    constexpr std::uint16_t    kWindowHeight        = 112U;
-    constexpr std::uint16_t    kWindowBorderWidth   = 0U;
-    constexpr std::uint16_t    kXvfbWidth           = 1'280U;
-    constexpr std::uint16_t    kXvfbHeight          = 1'024U;
-    constexpr std::uint32_t    kWindowValueMask     = XCB_CW_BACK_PIXEL;
-    constexpr std::uint32_t    kPropertyReplaceMode = XCB_PROP_MODE_REPLACE;
-    constexpr std::uint32_t    kKnownColor          = 0X00'2A'7C'E1U;
-    constexpr std::uint32_t    kOtherColor          = 0X00'E1'7C'2AU;
-    constexpr std::uint8_t     kFormat8Bits         = 8U;
-    constexpr std::uint8_t     kFormat32Bits        = 32U;
-    constexpr std::uint8_t     kExpectedRed         = 0X2AU;
-    constexpr std::uint8_t     kExpectedGreen       = 0X7CU;
-    constexpr std::uint8_t     kExpectedBlue        = 0XE1U;
-    constexpr std::uint32_t    kSampleX             = kWindowWidth / 2U;
-    constexpr std::uint32_t    kSampleY             = kWindowHeight / 2U;
-    constexpr std::size_t      kSingleWindowCount   = 1U;
-    constexpr auto             kPaintDelay          = std::chrono::milliseconds{ 50 };
-    constexpr std::string_view kKnownInstance       = "grab-screen-instance";
-    constexpr std::string_view kKnownClass          = "GrabScreenKnownClass";
-    constexpr std::string_view kKnownClassCandidate = "screenknown";
-    constexpr std::string_view kOtherInstance       = "grab-screen-other-instance";
-    constexpr std::string_view kOtherClass          = "GrabScreenOtherClass";
-    constexpr std::string_view kMissingClass        = "class-that-does-not-exist";
-    constexpr std::string_view kNetClientListAtom   = "_NET_CLIENT_LIST";
+    constexpr const char*      xvfbDisplay         = ":89";
+    constexpr const char*      badDisplay          = ":bad-nonexistent-89";
+    constexpr int              xcbOk               = 0;
+    constexpr int              invalidScreenIndex  = 0;
+    constexpr std::int16_t     windowX             = 72;
+    constexpr std::int16_t     windowY             = 88;
+    constexpr std::uint16_t    windowWidth         = 176U;
+    constexpr std::uint16_t    windowHeight        = 112U;
+    constexpr std::uint16_t    windowBorderWidth   = 0U;
+    constexpr std::uint16_t    xvfbWidth           = 1'280U;
+    constexpr std::uint16_t    xvfbHeight          = 1'024U;
+    constexpr std::uint32_t    windowValueMask     = XCB_CW_BACK_PIXEL;
+    constexpr std::uint32_t    propertyReplaceMode = XCB_PROP_MODE_REPLACE;
+    constexpr std::uint32_t    knownColor          = 0X00'2A'7C'E1U;
+    constexpr std::uint32_t    otherColor          = 0X00'E1'7C'2AU;
+    constexpr std::uint8_t     format8Bits         = 8U;
+    constexpr std::uint8_t     format32Bits        = 32U;
+    constexpr std::uint8_t     expectedRed         = 0X2AU;
+    constexpr std::uint8_t     expectedGreen       = 0X7CU;
+    constexpr std::uint8_t     expectedBlue        = 0XE1U;
+    constexpr std::uint32_t    sampleX             = windowWidth / 2U;
+    constexpr std::uint32_t    sampleY             = windowHeight / 2U;
+    constexpr std::size_t      singleWindowCount   = 1U;
+    constexpr auto             paintDelay          = std::chrono::milliseconds{ 50 };
+    constexpr std::string_view knownInstance       = "grab-screen-instance";
+    constexpr std::string_view knownClass          = "GrabScreenKnownClass";
+    constexpr std::string_view knownClassCandidate = "screenknown";
+    constexpr std::string_view otherInstance       = "grab-screen-other-instance";
+    constexpr std::string_view otherClass          = "GrabScreenOtherClass";
+    constexpr std::string_view missingClass        = "class-that-does-not-exist";
+    constexpr std::string_view netClientListAtom   = "_NET_CLIENT_LIST";
 
     template<typename T>
     using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -107,7 +107,7 @@ namespace
         private:
 
             xcb_connection_t* connection_   = nullptr;
-            int               screen_index_ = kInvalidScreenIndex;
+            int               screen_index_ = invalidScreenIndex;
     };
 
     [[nodiscard]]
@@ -145,7 +145,7 @@ namespace
     {
         if( xcb_flush( connection ) <=
             0 ||
-            xcb_connection_has_error( connection ) != kXcbOk )
+            xcb_connection_has_error( connection ) != xcbOk )
         {
             return testing::AssertionFailure() << "xcb_flush failed";
         }
@@ -198,11 +198,11 @@ namespace
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          XCB_ATOM_WM_CLASS,
                                          XCB_ATOM_STRING,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( value.size() ),
                                          value.data() )
         ) );
@@ -214,16 +214,16 @@ namespace
                      xcb_window_t      window )
     {
         xcb_atom_t net_client_list = XCB_ATOM_NONE;
-        ASSERT_TRUE( intern_atom( connection, kNetClientListAtom, net_client_list ) );
-        const std::array<xcb_window_t, kSingleWindowCount> windows{ window };
+        ASSERT_TRUE( intern_atom( connection, netClientListAtom, net_client_list ) );
+        const std::array<xcb_window_t, singleWindowCount> windows{ window };
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          root,
                                          net_client_list,
                                          XCB_ATOM_WINDOW,
-                                         kFormat32Bits,
+                                         format32Bits,
                                          static_cast<std::uint32_t>( windows.size() ),
                                          windows.data() )
         ) );
@@ -245,14 +245,14 @@ namespace
                                                           screen.root_depth,
                                                           window,
                                                           screen.root,
-                                                          kWindowX,
-                                                          kWindowY,
-                                                          kWindowWidth,
-                                                          kWindowHeight,
-                                                          kWindowBorderWidth,
+                                                          windowX,
+                                                          windowY,
+                                                          windowWidth,
+                                                          windowHeight,
+                                                          windowBorderWidth,
                                                           XCB_WINDOW_CLASS_INPUT_OUTPUT,
                                                           screen.root_visual,
-                                                          kWindowValueMask,
+                                                          windowValueMask,
                                                           values.data() ) )
         );
         set_wm_class( connection, window, instance, class_name );
@@ -260,7 +260,7 @@ namespace
                                         xcb_map_window_checked( connection, window ) ) );
         set_client_list( connection, screen.root, window );
         EXPECT_TRUE( flush_succeeded( connection ) );
-        std::this_thread::sleep_for( kPaintDelay );
+        std::this_thread::sleep_for( paintDelay );
         return window;
     }
 
@@ -283,12 +283,12 @@ namespace
     is_supported_capture_format( grab::PixelFormat format ) noexcept
     {
         return format ==
-               grab::PixelFormat::bgra ||
+               grab::PixelFormat::Bgra ||
                format ==
-               grab::PixelFormat::rgba ||
+               grab::PixelFormat::Rgba ||
                format ==
-               grab::PixelFormat::bgr ||
-               format == grab::PixelFormat::rgb;
+               grab::PixelFormat::Bgr ||
+               format == grab::PixelFormat::Rgb;
     }
 
     struct ExpectedChannels
@@ -304,23 +304,23 @@ namespace
     {
         switch( format )
         {
-            case grab::PixelFormat::bgra :
-            case grab::PixelFormat::bgr :
-            case grab::PixelFormat::bgr0 :
+            case grab::PixelFormat::Bgra :
+            case grab::PixelFormat::Bgr :
+            case grab::PixelFormat::Bgr0 :
                 return ExpectedChannels{
-                    .first  = kExpectedBlue,
-                    .second = kExpectedGreen,
-                    .third  = kExpectedRed,
+                    .first  = expectedBlue,
+                    .second = expectedGreen,
+                    .third  = expectedRed,
                 };
-            case grab::PixelFormat::rgba :
-            case grab::PixelFormat::rgb :
-            case grab::PixelFormat::rgb24 :
+            case grab::PixelFormat::Rgba :
+            case grab::PixelFormat::Rgb :
+            case grab::PixelFormat::Rgb24 :
                 return ExpectedChannels{
-                    .first  = kExpectedRed,
-                    .second = kExpectedGreen,
-                    .third  = kExpectedBlue,
+                    .first  = expectedRed,
+                    .second = expectedGreen,
+                    .third  = expectedBlue,
                 };
-            case grab::PixelFormat::gray :
+            case grab::PixelFormat::Gray :
                 return {};
         }
         return {};
@@ -329,14 +329,14 @@ namespace
     void
     expect_sample_matches_known_color( const grab::Image& image )
     {
-        ASSERT_EQ( image.width, kWindowWidth );
-        ASSERT_EQ( image.height, kWindowHeight );
+        ASSERT_EQ( image.width, windowWidth );
+        ASSERT_EQ( image.height, windowHeight );
         ASSERT_TRUE( is_supported_capture_format( image.format ) );
 
         const ExpectedChannels expected = expected_channels_for( image.format );
-        EXPECT_EQ( byte_at( image, kSampleX, kSampleY, 0U ), expected.first );
-        EXPECT_EQ( byte_at( image, kSampleX, kSampleY, 1U ), expected.second );
-        EXPECT_EQ( byte_at( image, kSampleX, kSampleY, 2U ), expected.third );
+        EXPECT_EQ( byte_at( image, sampleX, sampleY, 0U ), expected.first );
+        EXPECT_EQ( byte_at( image, sampleX, sampleY, 1U ), expected.second );
+        EXPECT_EQ( byte_at( image, sampleX, sampleY, 2U ), expected.third );
     }
 
 }    // namespace
@@ -344,21 +344,21 @@ namespace
 TEST( Screen,
       CapturesWindowByClass )
 {
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen_info =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen_info, nullptr );
     static_cast<void>( create_solid_window( connection.get(),
                                             *screen_info,
-                                            kKnownColor,
-                                            kKnownInstance,
-                                            kKnownClass ) );
+                                            knownColor,
+                                            knownInstance,
+                                            knownClass ) );
 
-    auto screen = grab::Screen::open( kXvfbDisplay );
+    auto screen = grab::Screen::open( xvfbDisplay );
     ASSERT_TRUE( screen.has_value() ) << screen.error().message;
-    const std::vector<std::string> candidates{ std::string{ kKnownClassCandidate } };
+    const std::vector<std::string> candidates{ std::string{ knownClassCandidate } };
     auto                           image = screen->window_by_class( candidates );
 
     ASSERT_TRUE( image.has_value() ) << image.error().message;
@@ -370,21 +370,21 @@ TEST( Screen,
 
     auto decoded = grab::codec::decode_png( *encoded );
     ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
-    EXPECT_EQ( decoded->width, kWindowWidth );
-    EXPECT_EQ( decoded->height, kWindowHeight );
+    EXPECT_EQ( decoded->width, windowWidth );
+    EXPECT_EQ( decoded->height, windowHeight );
 }
 
 TEST( Screen,
       CaptureDisplayEncodesToPng )
 {
-    auto screen = grab::Screen::open( kXvfbDisplay );
+    auto screen = grab::Screen::open( xvfbDisplay );
     ASSERT_TRUE( screen.has_value() ) << screen.error().message;
 
     auto image = screen->display();
 
     ASSERT_TRUE( image.has_value() ) << image.error().message;
-    EXPECT_EQ( image->width, kXvfbWidth );
-    EXPECT_EQ( image->height, kXvfbHeight );
+    EXPECT_EQ( image->width, xvfbWidth );
+    EXPECT_EQ( image->height, xvfbHeight );
 
     auto encoded = grab::codec::encode_png( *image );
     ASSERT_TRUE( encoded.has_value() ) << encoded.error().message;
@@ -392,39 +392,39 @@ TEST( Screen,
 
     auto decoded = grab::codec::decode_png( *encoded );
     ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
-    EXPECT_EQ( decoded->width, kXvfbWidth );
-    EXPECT_EQ( decoded->height, kXvfbHeight );
+    EXPECT_EQ( decoded->width, xvfbWidth );
+    EXPECT_EQ( decoded->height, xvfbHeight );
 }
 
 TEST( Screen,
       WindowByClassNotFound )
 {
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen_info =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen_info, nullptr );
     static_cast<void>( create_solid_window( connection.get(),
                                             *screen_info,
-                                            kOtherColor,
-                                            kOtherInstance,
-                                            kOtherClass ) );
-    auto screen = grab::Screen::open( kXvfbDisplay );
+                                            otherColor,
+                                            otherInstance,
+                                            otherClass ) );
+    auto screen = grab::Screen::open( xvfbDisplay );
     ASSERT_TRUE( screen.has_value() ) << screen.error().message;
-    const std::vector<std::string> candidates{ std::string{ kMissingClass } };
+    const std::vector<std::string> candidates{ std::string{ missingClass } };
 
     auto                           image = screen->window_by_class( candidates );
 
     ASSERT_FALSE( image.has_value() );
-    EXPECT_EQ( image.error().code, grab::ErrorCode::window_not_found );
+    EXPECT_EQ( image.error().code, grab::ErrorCode::WindowNotFound );
 }
 
 TEST( Screen,
       OpenFailsOnBadDisplay )
 {
-    auto screen = grab::Screen::open( kBadDisplay );
+    auto screen = grab::Screen::open( badDisplay );
 
     ASSERT_FALSE( screen.has_value() );
-    EXPECT_EQ( screen.error().code, grab::ErrorCode::device_inaccessible );
+    EXPECT_EQ( screen.error().code, grab::ErrorCode::DeviceInaccessible );
 }

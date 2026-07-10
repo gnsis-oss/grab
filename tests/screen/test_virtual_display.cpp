@@ -13,9 +13,9 @@
 namespace
 {
 
-    constexpr int           kXcbOk         = 0;
-    constexpr std::uint16_t kVirtualWidth  = 640U;
-    constexpr std::uint16_t kVirtualHeight = 480U;
+    constexpr int           xcbOk         = 0;
+    constexpr std::uint16_t virtualWidth  = 640U;
+    constexpr std::uint16_t virtualHeight = 480U;
 
     using XcbConnection = std::unique_ptr<xcb_connection_t, decltype( &xcb_disconnect )>;
 
@@ -30,7 +30,7 @@ namespace
         };
         return connection !=
                nullptr &&
-               xcb_connection_has_error( connection.get() ) == kXcbOk;
+               xcb_connection_has_error( connection.get() ) == xcbOk;
     }
 
 }    // namespace
@@ -41,7 +41,7 @@ TEST( VirtualDisplay,
     std::string display_name;
     {
         auto display =
-            grab::screen::VirtualDisplay::start( kVirtualWidth, kVirtualHeight );
+            grab::screen::VirtualDisplay::start( virtualWidth, virtualHeight );
         if( !display.has_value() )
         {
             // The spawn logic is verified sound standalone (a bare posix_spawnp
@@ -62,8 +62,8 @@ TEST( VirtualDisplay,
 
         auto image = capturer->capture_display();
         ASSERT_TRUE( image.has_value() ) << image.error().message;
-        EXPECT_EQ( image->width, kVirtualWidth );
-        EXPECT_EQ( image->height, kVirtualHeight );
+        EXPECT_EQ( image->width, virtualWidth );
+        EXPECT_EQ( image->height, virtualHeight );
     }
 
     EXPECT_FALSE( display_connectable( display_name ) );

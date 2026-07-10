@@ -12,52 +12,52 @@ namespace
 
     enum class TestName : std::uint8_t
     {
-        alpha,
-        beta,
-        count,
+        Alpha,
+        Beta,
+        Count,
     };
 
-    constexpr std::string_view kAlphaText = "alpha";
-    constexpr std::string_view kBetaText  = "beta";
-    constexpr std::string_view kFallback  = "fallback";
-    constexpr std::string_view kMissing   = "missing";
-    constexpr auto             kAlpha     = TestName::alpha;
-    constexpr auto             kBeta      = TestName::beta;
+    constexpr std::string_view alphaText  = "alpha";
+    constexpr std::string_view betaText   = "beta";
+    constexpr std::string_view fallback   = "fallback";
+    constexpr std::string_view missing    = "missing";
+    constexpr auto             alphaValue = TestName::Alpha;
+    constexpr auto             betaValue  = TestName::Beta;
 
-    inline constexpr auto      kTestNames = grab::EnumTable{
+    inline constexpr auto      testNames  = grab::EnumTable{
         std::to_array( {
-            grab::enum_entry( TestName::alpha, kAlphaText ),
-            grab::enum_entry( TestName::beta, kBetaText ),
+            grab::enum_entry( TestName::Alpha, alphaText ),
+            grab::enum_entry( TestName::Beta, betaText ),
         } ),
     };
-    static_assert( grab::enum_table_has_count( kTestNames,
-                                               TestName::count ) );
+    static_assert( grab::enum_table_has_count( testNames,
+                                               TestName::Count ) );
 
 }    // namespace
 
 TEST( EnumTable,
       MapsEnumToText )
 {
-    static_assert( kTestNames.text_of( kAlpha, kFallback ) == kAlphaText );
+    static_assert( testNames.text_of( alphaValue, fallback ) == alphaText );
 
-    EXPECT_EQ( kTestNames.text_of( kBeta, kFallback ), kBetaText );
+    EXPECT_EQ( testNames.text_of( betaValue, fallback ), betaText );
 }
 
 TEST( EnumTable,
       MapsTextToEnum )
 {
-    constexpr auto alpha = kTestNames.value_of( kAlphaText );
+    constexpr auto alpha = testNames.value_of( alphaText );
     static_assert( alpha.has_value() );
-    static_assert( *alpha == kAlpha );
+    static_assert( *alpha == alpha );
 
-    const auto beta = kTestNames.value_of( kBetaText );
+    const auto beta = testNames.value_of( betaText );
     ASSERT_TRUE( beta.has_value() );
-    EXPECT_EQ( *beta, kBeta );
+    EXPECT_EQ( *beta, beta );
 }
 
 TEST( EnumTable,
       MissingValuesUseExplicitFallbacks )
 {
-    EXPECT_EQ( kTestNames.text_of( TestName::count, kFallback ), kFallback );
-    EXPECT_FALSE( kTestNames.value_of( kMissing ).has_value() );
+    EXPECT_EQ( testNames.text_of( TestName::Count, fallback ), fallback );
+    EXPECT_FALSE( testNames.value_of( missing ).has_value() );
 }

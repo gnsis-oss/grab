@@ -7,10 +7,10 @@
 namespace
 {
 
-    constexpr std::string_view kExpectedVersion = "0.0.1";
-    constexpr int              kExpectedMajor   = 0;
-    constexpr int              kExpectedMinor   = 0;
-    constexpr int              kExpectedPatch   = 1;
+    constexpr std::string_view expectedVersion = "0.0.1";
+    constexpr int              expectedMajor   = 0;
+    constexpr int              expectedMinor   = 0;
+    constexpr int              expectedPatch   = 1;
 
 }    // namespace
 
@@ -18,10 +18,10 @@ TEST( Version,
       MatchesCMakeProjectVersion )
 {
     // Source of truth is `project(grab VERSION x.y.z)`; these must track it.
-    EXPECT_EQ( grab::version, kExpectedVersion );
-    EXPECT_EQ( grab::majorVersion, kExpectedMajor );
-    EXPECT_EQ( grab::minorVersion, kExpectedMinor );
-    EXPECT_EQ( grab::patchVersion, kExpectedPatch );
+    EXPECT_EQ( grab::version, expectedVersion );
+    EXPECT_EQ( grab::majorVersion, expectedMajor );
+    EXPECT_EQ( grab::minorVersion, expectedMinor );
+    EXPECT_EQ( grab::patchVersion, expectedPatch );
 }
 
 TEST( Version,

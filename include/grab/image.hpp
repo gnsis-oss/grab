@@ -16,38 +16,38 @@ namespace grab
     // integrated platform/x11 + png_encoder path produces.
     enum class PixelFormat : std::uint8_t
     {
-        bgra,
-        rgba,
-        rgb,
-        bgr,
-        gray,
-        rgb24,
-        bgr0,
+        Bgra,
+        Rgba,
+        Rgb,
+        Bgr,
+        Gray,
+        Rgb24,
+        Bgr0,
     };
 
     [[nodiscard]]
     constexpr std::uint32_t
     bytes_per_pixel( PixelFormat format ) noexcept
     {
-        constexpr std::uint32_t kFourChannelBytes  = 4U;
-        constexpr std::uint32_t kThreeChannelBytes = 3U;
-        constexpr std::uint32_t kGrayBytes         = 1U;
+        constexpr std::uint32_t fourChannelBytes  = 4U;
+        constexpr std::uint32_t threeChannelBytes = 3U;
+        constexpr std::uint32_t grayBytes         = 1U;
 
         switch( format )
         {
-            case PixelFormat::bgra :
-            case PixelFormat::rgba :
-            case PixelFormat::bgr0 :
-                return kFourChannelBytes;
-            case PixelFormat::rgb :
-            case PixelFormat::bgr :
-            case PixelFormat::rgb24 :
-                return kThreeChannelBytes;
-            case PixelFormat::gray :
-                return kGrayBytes;
+            case PixelFormat::Bgra :
+            case PixelFormat::Rgba :
+            case PixelFormat::Bgr0 :
+                return fourChannelBytes;
+            case PixelFormat::Rgb :
+            case PixelFormat::Bgr :
+            case PixelFormat::Rgb24 :
+                return threeChannelBytes;
+            case PixelFormat::Gray :
+                return grayBytes;
         }
 
-        return kGrayBytes;
+        return grayBytes;
     }
 
     // Non-owning view over pixel data, used by the integrated png_encoder and
@@ -58,7 +58,7 @@ namespace grab
             std::uint32_t       width  = 0U;
             std::uint32_t       height = 0U;
             std::size_t         stride = 0U;
-            PixelFormat         format = PixelFormat::rgb24;
+            PixelFormat         format = PixelFormat::Rgb24;
 
             [[nodiscard]]
             constexpr geometry::Size
@@ -72,7 +72,7 @@ namespace grab
             from_size( const std::uint8_t* image_data,
                        geometry::Size      image_size,
                        std::size_t         image_stride,
-                       PixelFormat         image_format = PixelFormat::rgb24 ) noexcept
+                       PixelFormat         image_format = PixelFormat::Rgb24 ) noexcept
             {
                 return ImageView{
                     .data   = image_data,
@@ -89,7 +89,7 @@ namespace grab
             std::uint32_t          width  = 0U;
             std::uint32_t          height = 0U;
             std::uint32_t          stride = 0U;
-            PixelFormat            format = PixelFormat::rgba;
+            PixelFormat            format = PixelFormat::Rgba;
             std::vector<std::byte> pixels;
 
             [[nodiscard]]
@@ -130,10 +130,10 @@ namespace grab
                     return {};
                 }
 
-                constexpr auto kMaxSize    = std::numeric_limits<std::size_t>::max();
+                constexpr auto maxSize     = std::numeric_limits<std::size_t>::max();
                 const auto     stride_size = static_cast<std::size_t>( stride );
                 const auto     row_index   = static_cast<std::size_t>( y );
-                if( stride_size != 0U && row_index > kMaxSize / stride_size )
+                if( stride_size != 0U && row_index > maxSize / stride_size )
                 {
                     return {};
                 }

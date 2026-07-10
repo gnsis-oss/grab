@@ -32,26 +32,26 @@ namespace grab::screen
     namespace
     {
 
-        constexpr int              kXcbOk                  = 0;
-        constexpr int              kXcbFlushFailed         = 0;
-        constexpr std::intptr_t    kSystemCallFailed       = -1;
-        constexpr int              kInvalidSharedMemoryId  = -1;
-        constexpr std::uint8_t     kXcbFalse               = 0U;
-        constexpr std::uint8_t     kBitsPerByte            = 8U;
-        constexpr std::uint8_t     kTwentyFourBitDepth     = 24U;
-        constexpr std::uint8_t     kThirtyTwoBitDepth      = 32U;
-        constexpr int              kEightBitDepth          = 8;
-        constexpr std::uint8_t     kFourBytesPerPixel      = 4U;
-        constexpr std::uint8_t     kOpaqueAlpha            = 0XFFU;
-        constexpr std::uint8_t     kFullChannelValue       = 0XFFU;
-        constexpr std::uint8_t     kX11SuccessResponse     = 1U;
-        constexpr int              kUnixUserReadWrite      = 0600;
-        constexpr std::uint32_t    kAllPlanes              = 0XFF'FF'FF'FFU;
-        constexpr std::uint32_t    kNoOffset               = 0U;
-        constexpr std::uint32_t    kNoChannels             = 0U;
+        constexpr int              xcbOk                  = 0;
+        constexpr int              xcbFlushFailed         = 0;
+        constexpr std::intptr_t    systemCallFailed       = -1;
+        constexpr int              invalidSharedMemoryId  = -1;
+        constexpr std::uint8_t     xcbFalse               = 0U;
+        constexpr std::uint8_t     bitsPerByte            = 8U;
+        constexpr std::uint8_t     twentyFourBitDepth     = 24U;
+        constexpr std::uint8_t     thirtyTwoBitDepth      = 32U;
+        constexpr int              eightBitDepth          = 8;
+        constexpr std::uint8_t     fourBytesPerPixel      = 4U;
+        constexpr std::uint8_t     opaqueAlpha            = 0XFFU;
+        constexpr std::uint8_t     fullChannelValue       = 0XFFU;
+        constexpr std::uint8_t     x11SuccessResponse     = 1U;
+        constexpr int              unixUserReadWrite      = 0600;
+        constexpr std::uint32_t    allPlanes              = 0XFF'FF'FF'FFU;
+        constexpr std::uint32_t    noOffset               = 0U;
+        constexpr std::uint32_t    noChannels             = 0U;
 
-        constexpr std::string_view kCompositeExtensionName = "Composite";
-        constexpr std::string_view kShmExtensionName       = "MIT-SHM";
+        constexpr std::string_view compositeExtensionName = "Composite";
+        constexpr std::string_view shmExtensionName       = "MIT-SHM";
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -120,13 +120,13 @@ namespace grab::screen
         {
             if( error.error_code == XCB_WINDOW )
             {
-                return grab::ErrorCode::stale_window;
+                return grab::ErrorCode::StaleWindow;
             }
             if( error.error_code == XCB_MATCH || error.error_code == XCB_DRAWABLE )
             {
-                return grab::ErrorCode::window_not_found;
+                return grab::ErrorCode::WindowNotFound;
             }
-            return grab::ErrorCode::protocol_error;
+            return grab::ErrorCode::ProtocolError;
         }
 
         [[nodiscard]]
@@ -135,7 +135,7 @@ namespace grab::screen
         {
             if( connection == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB capture connection is not open" );
             }
             return {};
@@ -147,10 +147,10 @@ namespace grab::screen
                           std::string_view  operation )
         {
             if( xcb_flush( connection ) <=
-                kXcbFlushFailed ||
-                xcb_connection_has_error( connection ) != kXcbOk )
+                xcbFlushFailed ||
+                xcb_connection_has_error( connection ) != xcbOk )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    std::string{ operation } + " flush failed" );
             }
             return {};
@@ -165,7 +165,7 @@ namespace grab::screen
             const auto error = take_xcb_owned( xcb_request_check( connection, cookie ) );
             if( error != nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    std::string{ operation } +
                                        " failed with X error " +
                                        std::to_string( error->error_code ) );
@@ -211,7 +211,7 @@ namespace grab::screen
                 nullptr ||
                 extension_reply->present == 0U )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    std::string{ name } + " extension is unavailable" );
             }
             return {};
@@ -221,7 +221,7 @@ namespace grab::screen
         grab::Result<void>
         require_composite( xcb_connection_t* connection )
         {
-            auto extension = require_extension( connection, kCompositeExtensionName );
+            auto extension = require_extension( connection, compositeExtensionName );
             if( !extension.has_value() )
             {
                 return extension;
@@ -238,7 +238,7 @@ namespace grab::screen
             const auto error = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "Composite version query failed" );
             }
             return {};
@@ -248,7 +248,7 @@ namespace grab::screen
         grab::Result<void>
         require_shm( xcb_connection_t* connection )
         {
-            auto extension = require_extension( connection, kShmExtensionName );
+            auto extension = require_extension( connection, shmExtensionName );
             if( !extension.has_value() )
             {
                 return extension;
@@ -263,7 +263,7 @@ namespace grab::screen
             const auto error = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "MIT-SHM version query failed" );
             }
             return {};
@@ -275,9 +275,9 @@ namespace grab::screen
                              int               screen_index )
         {
             const xcb_setup_t* const setup = xcb_get_setup( connection );
-            if( setup == nullptr || setup->status != kX11SuccessResponse )
+            if( setup == nullptr || setup->status != x11SuccessResponse )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB setup is unavailable" );
             }
 
@@ -291,7 +291,7 @@ namespace grab::screen
 
             if( iterator.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB default screen is unavailable" );
             }
 
@@ -314,7 +314,7 @@ namespace grab::screen
             const xcb_setup_t* const setup = xcb_get_setup( connection );
             if( setup == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB setup is unavailable" );
             }
 
@@ -332,7 +332,7 @@ namespace grab::screen
                 xcb_format_next( &iterator );
             }
 
-            return grab::fail( grab::ErrorCode::protocol_error,
+            return grab::fail( grab::ErrorCode::ProtocolError,
                                "XCB pixmap format is unavailable for depth " +
                                    std::to_string( depth ) );
         }
@@ -345,7 +345,7 @@ namespace grab::screen
             const xcb_setup_t* const setup = xcb_get_setup( connection );
             if( setup == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB setup is unavailable" );
             }
 
@@ -383,7 +383,7 @@ namespace grab::screen
                 xcb_screen_next( &screen_iterator );
             }
 
-            return grab::fail( grab::ErrorCode::protocol_error,
+            return grab::fail( grab::ErrorCode::ProtocolError,
                                "XCB visual masks are unavailable for visual " +
                                    std::to_string( visual ) );
         }
@@ -399,7 +399,7 @@ namespace grab::screen
             const auto pad          = static_cast<std::size_t>( scanline_pad );
             const auto padded_bits =
                 pad == 0U ? bits_per_row : ( ( bits_per_row + pad - 1U ) / pad ) * pad;
-            return padded_bits / kBitsPerByte;
+            return padded_bits / bitsPerByte;
         }
 
         [[nodiscard]]
@@ -414,7 +414,7 @@ namespace grab::screen
             const auto max_size = std::numeric_limits<std::size_t>::max();
             if( height != 0U && stride > max_size / static_cast<std::size_t>( height ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "X11 capture size overflowed" );
             }
             return stride * static_cast<std::size_t>( height );
@@ -426,7 +426,7 @@ namespace grab::screen
         {
             const auto bits = static_cast<std::uint16_t>( bits_per_pixel );
             return static_cast<std::uint8_t>(
-                ( bits + static_cast<std::uint16_t>( kBitsPerByte - 1U ) ) / kBitsPerByte
+                ( bits + static_cast<std::uint16_t>( bitsPerByte - 1U ) ) / bitsPerByte
             );
         }
 
@@ -442,7 +442,7 @@ namespace grab::screen
             {
                 for( std::uint8_t index = 0U; index < byte_count; ++index )
                 {
-                    value <<= kBitsPerByte;
+                    value <<= bitsPerByte;
                     value  |= static_cast<std::uint32_t>(
                         std::to_integer<std::uint8_t>( source.at( offset + index ) )
                     );
@@ -455,7 +455,7 @@ namespace grab::screen
                 value |= static_cast<std::uint32_t>(
                              std::to_integer<std::uint8_t>( source.at( offset + index ) )
                          )
-                      << ( static_cast<std::uint32_t>( index ) * kBitsPerByte );
+                      << ( static_cast<std::uint32_t>( index ) * bitsPerByte );
             }
             return value;
         }
@@ -465,7 +465,7 @@ namespace grab::screen
         channel_from_mask( std::uint32_t pixel,
                            std::uint32_t mask ) noexcept
         {
-            if( mask == kNoChannels )
+            if( mask == noChannels )
             {
                 return 0U;
             }
@@ -473,27 +473,27 @@ namespace grab::screen
             const auto shift = std::countr_zero( mask );
             const auto width = std::popcount( mask );
             const auto raw   = ( pixel & mask ) >> shift;
-            if( std::cmp_greater_equal( width, kEightBitDepth ) )
+            if( std::cmp_greater_equal( width, eightBitDepth ) )
             {
                 return static_cast<std::uint8_t>(
-                    raw >> static_cast<std::uint32_t>( width - kEightBitDepth )
+                    raw >> static_cast<std::uint32_t>( width - eightBitDepth )
                 );
             }
 
             const auto max_raw =
                 ( std::uint32_t{ 1U } << static_cast<std::uint32_t>( width ) ) - 1U;
-            return static_cast<std::uint8_t>( ( raw * kFullChannelValue ) / max_raw );
+            return static_cast<std::uint8_t>( ( raw * fullChannelValue ) / max_raw );
         }
 
         [[nodiscard]]
         grab::PixelFormat
         output_format_for_source( std::uint8_t bytes_per_pixel ) noexcept
         {
-            if( bytes_per_pixel >= kFourBytesPerPixel )
+            if( bytes_per_pixel >= fourBytesPerPixel )
             {
-                return grab::PixelFormat::bgra;
+                return grab::PixelFormat::Bgra;
             }
-            return grab::PixelFormat::bgr;
+            return grab::PixelFormat::Bgr;
         }
 
         [[nodiscard]]
@@ -523,7 +523,7 @@ namespace grab::screen
             const auto source_bpp = source_bytes_per_pixel( bits_per_pixel );
             if( source_bpp == 0U )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB image has zero bytes per pixel" );
             }
 
@@ -533,7 +533,7 @@ namespace grab::screen
                 source_stride * static_cast<std::size_t>( height );
             if( captured.pixels.size() < required_size )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB image data is shorter than expected" );
             }
 
@@ -577,10 +577,10 @@ namespace grab::screen
                     image.pixels.at( output_pixel_offset + 2U ) =
                         static_cast<std::byte>( channel_from_mask( pixel,
                                                                    visual_masks->red ) );
-                    if( output_bpp == kFourBytesPerPixel )
+                    if( output_bpp == fourBytesPerPixel )
                     {
                         image.pixels.at( output_pixel_offset + 3U ) =
-                            static_cast<std::byte>( kOpaqueAlpha );
+                            static_cast<std::byte>( opaqueAlpha );
                     }
                 }
             }
@@ -602,27 +602,27 @@ namespace grab::screen
                         size >
                         static_cast<std::size_t>( std::numeric_limits<int>::max() ) )
                     {
-                        return grab::fail( grab::ErrorCode::invalid_argument,
+                        return grab::fail( grab::ErrorCode::InvalidArgument,
                                            "MIT-SHM capture size is invalid" );
                     }
 
                     const int id =
-                        shmget( IPC_PRIVATE, size, IPC_CREAT | kUnixUserReadWrite );
-                    if( id == kInvalidSharedMemoryId )
+                        shmget( IPC_PRIVATE, size, IPC_CREAT | unixUserReadWrite );
+                    if( id == invalidSharedMemoryId )
                     {
-                        return grab::fail( grab::ErrorCode::device_inaccessible,
+                        return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                            errno_message( "shmget" ) );
                     }
 
                     void* const address = shmat( id, nullptr, 0 );
                     auto* const failed_address =
-                        std::bit_cast<void*>( kSystemCallFailed );
+                        std::bit_cast<void*>( systemCallFailed );
                     if( address == failed_address )
                     {
                         const int saved_errno = errno;
                         static_cast<void>( shmctl( id, IPC_RMID, nullptr ) );
                         errno = saved_errno;
-                        return grab::fail( grab::ErrorCode::device_inaccessible,
+                        return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                            errno_message( "shmat" ) );
                     }
 
@@ -633,7 +633,7 @@ namespace grab::screen
                         xcb_shm_attach_checked( connection,
                                                 segment,
                                                 static_cast<std::uint32_t>( id ),
-                                                kXcbFalse ),
+                                                xcbFalse ),
                         "MIT-SHM attach"
                     );
                     if( !attach_result.has_value() )
@@ -661,7 +661,7 @@ namespace grab::screen
                     segment_( std::exchange( other.segment_,
                                              0U ) ),
                     id_( std::exchange( other.id_,
-                                        kInvalidSharedMemoryId ) ),
+                                        invalidSharedMemoryId ) ),
                     address_( std::exchange( other.address_,
                                              nullptr ) ),
                     size_( std::exchange( other.size_,
@@ -677,7 +677,7 @@ namespace grab::screen
                         cleanup();
                         connection_ = std::exchange( other.connection_, nullptr );
                         segment_    = std::exchange( other.segment_, 0U );
-                        id_         = std::exchange( other.id_, kInvalidSharedMemoryId );
+                        id_         = std::exchange( other.id_, invalidSharedMemoryId );
                         address_    = std::exchange( other.address_, nullptr );
                         size_       = std::exchange( other.size_, 0U );
                     }
@@ -732,20 +732,20 @@ namespace grab::screen
                     {
                         static_cast<void>( shmdt( address_ ) );
                     }
-                    if( id_ != kInvalidSharedMemoryId )
+                    if( id_ != invalidSharedMemoryId )
                     {
                         static_cast<void>( shmctl( id_, IPC_RMID, nullptr ) );
                     }
                     connection_ = nullptr;
                     segment_    = 0U;
-                    id_         = kInvalidSharedMemoryId;
+                    id_         = invalidSharedMemoryId;
                     address_    = nullptr;
                     size_       = 0U;
                 }
 
                 xcb_connection_t* connection_ = nullptr;
                 xcb_shm_seg_t     segment_    = 0U;
-                int               id_         = kInvalidSharedMemoryId;
+                int               id_         = invalidSharedMemoryId;
                 void*             address_    = nullptr;
                 std::size_t       size_       = 0U;
         };
@@ -780,10 +780,10 @@ namespace grab::screen
                                    static_cast<std::int16_t>( spec.bounds.y ),
                                    static_cast<std::uint16_t>( spec.bounds.width ),
                                    static_cast<std::uint16_t>( spec.bounds.height ),
-                                   kAllPlanes,
+                                   allPlanes,
                                    XCB_IMAGE_FORMAT_Z_PIXMAP,
                                    segment->segment(),
-                                   kNoOffset ),
+                                   noOffset ),
                 &raw_error
             ) );
             const auto           error     = take_xcb_owned( raw_error );
@@ -795,7 +795,7 @@ namespace grab::screen
             }
             if( reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "MIT-SHM GetImage returned no reply" );
             }
 
@@ -827,7 +827,7 @@ namespace grab::screen
                                static_cast<std::int16_t>( spec.bounds.y ),
                                static_cast<std::uint16_t>( spec.bounds.width ),
                                static_cast<std::uint16_t>( spec.bounds.height ),
-                               kAllPlanes ),
+                               allPlanes ),
                 &raw_error
             ) );
             const auto           error     = take_xcb_owned( raw_error );
@@ -839,14 +839,14 @@ namespace grab::screen
             }
             if( reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB GetImage returned no reply" );
             }
 
             const int data_length = xcb_get_image_data_length( reply.get() );
             if( data_length < 0 )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB GetImage returned a negative data length" );
             }
             const auto* const data = xcb_get_image_data( reply.get() );
@@ -889,10 +889,10 @@ namespace grab::screen
             if( captured->depth !=
                 spec.depth &&
                 captured->depth !=
-                kTwentyFourBitDepth &&
-                captured->depth != kThirtyTwoBitDepth )
+                twentyFourBitDepth &&
+                captured->depth != thirtyTwoBitDepth )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB GetImage returned an unexpected depth" );
             }
 
@@ -916,12 +916,12 @@ namespace grab::screen
         {
             if( width == 0U || height == 0U )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "X11 capture region must be non-empty" );
             }
             if( std::cmp_less( x, 0 ) || std::cmp_less( y, 0 ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "X11 capture region must start inside the screen" );
             }
 
@@ -932,7 +932,7 @@ namespace grab::screen
             if( std::cmp_greater( right, screen_width ) ||
                 std::cmp_greater( bottom, screen_height ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "X11 capture region exceeds the screen bounds" );
             }
 
@@ -1016,9 +1016,9 @@ namespace grab::screen
         };
         if( connection ==
             nullptr ||
-            xcb_connection_has_error( connection.get() ) != kXcbOk )
+            xcb_connection_has_error( connection.get() ) != xcbOk )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "XCB display connection failed" );
         }
 
@@ -1061,7 +1061,7 @@ namespace grab::screen
         }
         if( window == 0U || window == root_ )
         {
-            return grab::fail( grab::ErrorCode::window_not_found,
+            return grab::fail( grab::ErrorCode::WindowNotFound,
                                "X11 capture target window is invalid" );
         }
 
@@ -1104,12 +1104,12 @@ namespace grab::screen
         }
         if( geometry == nullptr )
         {
-            return grab::fail( grab::ErrorCode::stale_window,
+            return grab::fail( grab::ErrorCode::StaleWindow,
                                "XCB GetGeometry returned no reply" );
         }
         if( geometry->width == 0U || geometry->height == 0U )
         {
-            return grab::fail( grab::ErrorCode::geometry_untrusted,
+            return grab::fail( grab::ErrorCode::GeometryUntrusted,
                                "X11 capture target window has empty geometry" );
         }
 

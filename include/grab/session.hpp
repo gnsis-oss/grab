@@ -75,19 +75,19 @@ namespace grab
 
     enum class SessionMode : std::uint8_t
     {
-        shared,
-        offscreen,
-        count,
+        Shared,
+        Offscreen,
+        Count,
     };
 
     enum class SessionState : std::uint8_t
     {
-        starting,
-        ready,
-        draining,
-        stopped,
-        failed,
-        count,
+        Starting,
+        Ready,
+        Draining,
+        Stopped,
+        Failed,
+        Count,
     };
 
     using SessionGeometry = geometry::Size;
@@ -95,7 +95,7 @@ namespace grab
     struct SessionDesc
     {
             std::string     name;
-            SessionMode     mode = SessionMode::offscreen;
+            SessionMode     mode = SessionMode::Offscreen;
             SessionGeometry geometry;
             std::string     app_command;    // empty = launch nothing
     };
@@ -105,24 +105,24 @@ namespace grab
 
         inline constexpr auto session_mode_names = EnumTable{
             std::to_array( {
-                enum_entry( SessionMode::shared, "shared" ),
-                enum_entry( SessionMode::offscreen, "offscreen" ),
+                enum_entry( SessionMode::Shared, "shared" ),
+                enum_entry( SessionMode::Offscreen, "offscreen" ),
             } ),
         };
         static_assert( enum_table_has_count( session_mode_names,
-                                             SessionMode::count ) );
+                                             SessionMode::Count ) );
 
         inline constexpr auto session_state_names = EnumTable{
             std::to_array( {
-                enum_entry( SessionState::starting, "starting" ),
-                enum_entry( SessionState::ready, "ready" ),
-                enum_entry( SessionState::draining, "draining" ),
-                enum_entry( SessionState::stopped, "stopped" ),
-                enum_entry( SessionState::failed, "failed" ),
+                enum_entry( SessionState::Starting, "starting" ),
+                enum_entry( SessionState::Ready, "ready" ),
+                enum_entry( SessionState::Draining, "draining" ),
+                enum_entry( SessionState::Stopped, "stopped" ),
+                enum_entry( SessionState::Failed, "failed" ),
             } ),
         };
         static_assert( enum_table_has_count( session_state_names,
-                                             SessionState::count ) );
+                                             SessionState::Count ) );
 
     }    // namespace detail
 

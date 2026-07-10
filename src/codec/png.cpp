@@ -24,94 +24,94 @@ namespace grab::codec
     namespace
     {
 
-        using Byte                                        = std::uint8_t;
-        using ByteVector                                  = std::vector<Byte>;
-        using ChunkType                                   = std::array<Byte, 4U>;
+        using Byte                                       = std::uint8_t;
+        using ByteVector                                 = std::vector<Byte>;
+        using ChunkType                                  = std::array<Byte, 4U>;
 
-        constexpr Byte                 kPngSignatureByte0 = 0X89U;
-        constexpr Byte                 kPngSignatureByte1 = 0X50U;
-        constexpr Byte                 kPngSignatureByte2 = 0X4EU;
-        constexpr Byte                 kPngSignatureByte3 = 0X47U;
-        constexpr Byte                 kPngSignatureByte4 = 0X0DU;
-        constexpr Byte                 kPngSignatureByte5 = 0X0AU;
-        constexpr Byte                 kPngSignatureByte6 = 0X1AU;
-        constexpr Byte                 kPngSignatureByte7 = 0X0AU;
-        constexpr std::array<Byte, 8U> kPngSignature      = {
-            kPngSignatureByte0,
-            kPngSignatureByte1,
-            kPngSignatureByte2,
-            kPngSignatureByte3,
-            kPngSignatureByte4,
-            kPngSignatureByte5,
-            kPngSignatureByte6,
-            kPngSignatureByte7,
+        constexpr Byte                 pngSignatureByte0 = 0X89U;
+        constexpr Byte                 pngSignatureByte1 = 0X50U;
+        constexpr Byte                 pngSignatureByte2 = 0X4EU;
+        constexpr Byte                 pngSignatureByte3 = 0X47U;
+        constexpr Byte                 pngSignatureByte4 = 0X0DU;
+        constexpr Byte                 pngSignatureByte5 = 0X0AU;
+        constexpr Byte                 pngSignatureByte6 = 0X1AU;
+        constexpr Byte                 pngSignatureByte7 = 0X0AU;
+        constexpr std::array<Byte, 8U> pngSignature      = {
+            pngSignatureByte0,
+            pngSignatureByte1,
+            pngSignatureByte2,
+            pngSignatureByte3,
+            pngSignatureByte4,
+            pngSignatureByte5,
+            pngSignatureByte6,
+            pngSignatureByte7,
         };
-        constexpr ChunkType   kChunkIhdr           = { 'I', 'H', 'D', 'R' };
-        constexpr ChunkType   kChunkPlte           = { 'P', 'L', 'T', 'E' };
-        constexpr ChunkType   kChunkIdat           = { 'I', 'D', 'A', 'T' };
-        constexpr ChunkType   kChunkIend           = { 'I', 'E', 'N', 'D' };
-        constexpr ChunkType   kChunkTrns           = { 't', 'R', 'N', 'S' };
-        constexpr std::size_t kPngUint32Bytes      = 4U;
-        constexpr std::size_t kPngChunkLengthBytes = 4U;
-        constexpr std::size_t kPngChunkTypeBytes   = 4U;
-        constexpr std::size_t kPngChunkCrcBytes    = 4U;
-        constexpr std::size_t kPngChunkOverheadBytes =
-            kPngChunkLengthBytes + kPngChunkTypeBytes + kPngChunkCrcBytes;
-        constexpr std::size_t      kPngIhdrBytes          = 13U;
-        constexpr std::size_t      kIhdrWidthOffset       = 0U;
-        constexpr std::size_t      kIhdrHeightOffset      = 4U;
-        constexpr std::size_t      kIhdrBitDepthOffset    = 8U;
-        constexpr std::size_t      kIhdrColorTypeOffset   = 9U;
-        constexpr std::size_t      kIhdrCompressionOffset = 10U;
-        constexpr std::size_t      kIhdrFilterOffset      = 11U;
-        constexpr std::size_t      kIhdrInterlaceOffset   = 12U;
-        constexpr Byte             kPngBitDepth8          = 8U;
-        constexpr Byte             kPngMethodNone         = 0U;
-        constexpr Byte             kPngColorGray          = 0U;
-        constexpr Byte             kPngColorRgb           = 2U;
-        constexpr Byte             kPngColorPalette       = 3U;
-        constexpr Byte             kPngColorGrayAlpha     = 4U;
-        constexpr Byte             kPngColorRgba          = 6U;
-        constexpr std::size_t      kGrayBytes             = 1U;
-        constexpr std::size_t      kRgbBytes              = 3U;
-        constexpr std::size_t      kRgbaBytes             = 4U;
-        constexpr std::size_t      kPaletteEntryBytes     = 3U;
-        constexpr std::size_t      kMaxPaletteEntries     = 256U;
-        constexpr Byte             kOpaqueAlpha           = 0XFFU;
-        constexpr unsigned int     kByteModulo            = 256U;
-        constexpr std::uint32_t    kByteMask              = 0XFFU;
-        constexpr std::uint32_t    kBigEndianShift24      = 24U;
-        constexpr std::uint32_t    kBigEndianShift16      = 16U;
-        constexpr std::uint32_t    kBigEndianShift8       = 8U;
-        constexpr std::size_t      kKilobyte              = 1'024U;
-        constexpr std::size_t      kMaxChunkBytes         = 64U * kKilobyte * kKilobyte;
-        constexpr std::size_t      kMaxCompressedBytes    = 64U * kKilobyte * kKilobyte;
-        constexpr std::size_t      kMaxDecodedBytes       = 256U * kKilobyte * kKilobyte;
-        constexpr uLong            kInitialCrc            = 0UL;
-        constexpr Byte             kAsciiUpperA           = 0X41U;
-        constexpr Byte             kAsciiUpperZ           = 0X5AU;
-        constexpr Byte             kAsciiLowerA           = 0X61U;
-        constexpr Byte             kAsciiLowerZ           = 0X7AU;
-        constexpr std::string_view kMalformedPngPrefix    = "malformed PNG: ";
-        constexpr std::string_view kInvalidImagePrefix    = "invalid image: ";
-        constexpr std::string_view kCodecFailurePrefix    = "PNG codec failure: ";
+        constexpr ChunkType   chunkIhdr           = { 'I', 'H', 'D', 'R' };
+        constexpr ChunkType   chunkPlte           = { 'P', 'L', 'T', 'E' };
+        constexpr ChunkType   chunkIdat           = { 'I', 'D', 'A', 'T' };
+        constexpr ChunkType   chunkIend           = { 'I', 'E', 'N', 'D' };
+        constexpr ChunkType   chunkTrns           = { 't', 'R', 'N', 'S' };
+        constexpr std::size_t pngUint32Bytes      = 4U;
+        constexpr std::size_t pngChunkLengthBytes = 4U;
+        constexpr std::size_t pngChunkTypeBytes   = 4U;
+        constexpr std::size_t pngChunkCrcBytes    = 4U;
+        constexpr std::size_t pngChunkOverheadBytes =
+            pngChunkLengthBytes + pngChunkTypeBytes + pngChunkCrcBytes;
+        constexpr std::size_t      pngIhdrBytes          = 13U;
+        constexpr std::size_t      ihdrWidthOffset       = 0U;
+        constexpr std::size_t      ihdrHeightOffset      = 4U;
+        constexpr std::size_t      ihdrBitDepthOffset    = 8U;
+        constexpr std::size_t      ihdrColorTypeOffset   = 9U;
+        constexpr std::size_t      ihdrCompressionOffset = 10U;
+        constexpr std::size_t      ihdrFilterOffset      = 11U;
+        constexpr std::size_t      ihdrInterlaceOffset   = 12U;
+        constexpr Byte             pngBitDepth8          = 8U;
+        constexpr Byte             pngMethodNone         = 0U;
+        constexpr Byte             pngColorGray          = 0U;
+        constexpr Byte             pngColorRgb           = 2U;
+        constexpr Byte             pngColorPalette       = 3U;
+        constexpr Byte             pngColorGrayAlpha     = 4U;
+        constexpr Byte             pngColorRgba          = 6U;
+        constexpr std::size_t      grayBytes             = 1U;
+        constexpr std::size_t      rgbBytes              = 3U;
+        constexpr std::size_t      rgbaBytes             = 4U;
+        constexpr std::size_t      paletteEntryBytes     = 3U;
+        constexpr std::size_t      maxPaletteEntries     = 256U;
+        constexpr Byte             opaqueAlpha           = 0XFFU;
+        constexpr unsigned int     byteModulo            = 256U;
+        constexpr std::uint32_t    byteMask              = 0XFFU;
+        constexpr std::uint32_t    bigEndianShift24      = 24U;
+        constexpr std::uint32_t    bigEndianShift16      = 16U;
+        constexpr std::uint32_t    bigEndianShift8       = 8U;
+        constexpr std::size_t      kilobyte              = 1'024U;
+        constexpr std::size_t      maxChunkBytes         = 64U * kilobyte * kilobyte;
+        constexpr std::size_t      maxCompressedBytes    = 64U * kilobyte * kilobyte;
+        constexpr std::size_t      maxDecodedBytes       = 256U * kilobyte * kilobyte;
+        constexpr uLong            initialCrc            = 0UL;
+        constexpr Byte             asciiUpperA           = 0X41U;
+        constexpr Byte             asciiUpperZ           = 0X5AU;
+        constexpr Byte             asciiLowerA           = 0X61U;
+        constexpr Byte             asciiLowerZ           = 0X7AU;
+        constexpr std::string_view malformedPngPrefix    = "malformed PNG: ";
+        constexpr std::string_view invalidImagePrefix    = "invalid image: ";
+        constexpr std::string_view codecFailurePrefix    = "PNG codec failure: ";
 
         enum class PngColorType : Byte
         {
-            grayscale       = kPngColorGray,
-            truecolor       = kPngColorRgb,
-            palette         = kPngColorPalette,
-            grayscale_alpha = kPngColorGrayAlpha,
-            truecolor_alpha = kPngColorRgba,
+            Grayscale      = pngColorGray,
+            Truecolor      = pngColorRgb,
+            Palette        = pngColorPalette,
+            GrayscaleAlpha = pngColorGrayAlpha,
+            TruecolorAlpha = pngColorRgba,
         };
 
         enum class FilterType : Byte
         {
-            none    = 0U,
-            sub     = 1U,
-            up      = 2U,
-            average = 3U,
-            paeth   = 4U,
+            None    = 0U,
+            Sub     = 1U,
+            Up      = 2U,
+            Average = 3U,
+            Paeth   = 4U,
         };
 
         struct Ihdr
@@ -119,7 +119,7 @@ namespace grab::codec
                 std::uint32_t width       = 0U;
                 std::uint32_t height      = 0U;
                 Byte          bit_depth   = 0U;
-                PngColorType  color_type  = PngColorType::truecolor_alpha;
+                PngColorType  color_type  = PngColorType::TruecolorAlpha;
                 Byte          compression = 0U;
                 Byte          filter      = 0U;
                 Byte          interlace   = 0U;
@@ -146,7 +146,7 @@ namespace grab::codec
                 std::size_t  png_row_bytes      = 0U;
                 std::size_t  filtered_bytes     = 0U;
                 std::size_t  source_pixel_bytes = 0U;
-                PngColorType color_type         = PngColorType::truecolor_alpha;
+                PngColorType color_type         = PngColorType::TruecolorAlpha;
         };
 
         struct DecodeLayout
@@ -157,15 +157,15 @@ namespace grab::codec
                 std::size_t       filter_pixel_bytes = 0U;
                 std::size_t       output_stride      = 0U;
                 std::size_t       output_bytes       = 0U;
-                grab::PixelFormat output_format      = grab::PixelFormat::rgba;
+                grab::PixelFormat output_format      = grab::PixelFormat::Rgba;
         };
 
         [[nodiscard]]
         std::unexpected<grab::Error>
         png_protocol_error( std::string message )
         {
-            return grab::fail( grab::ErrorCode::protocol_error,
-                               std::string{ kMalformedPngPrefix } +
+            return grab::fail( grab::ErrorCode::ProtocolError,
+                               std::string{ malformedPngPrefix } +
                                    std::move( message ) );
         }
 
@@ -173,8 +173,8 @@ namespace grab::codec
         std::unexpected<grab::Error>
         invalid_image_error( std::string message )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
-                               std::string{ kInvalidImagePrefix } +
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               std::string{ invalidImagePrefix } +
                                    std::move( message ) );
         }
 
@@ -182,8 +182,8 @@ namespace grab::codec
         std::unexpected<grab::Error>
         codec_failure( std::string message )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
-                               std::string{ kCodecFailurePrefix } +
+            return grab::fail( grab::ErrorCode::InternalFault,
+                               std::string{ codecFailurePrefix } +
                                    std::move( message ) );
         }
 
@@ -227,8 +227,8 @@ namespace grab::codec
                      std::size_t  right,
                      std::size_t& result ) noexcept
         {
-            constexpr auto kMaxSize = std::numeric_limits<std::size_t>::max();
-            if( right != 0U && left > kMaxSize / right )
+            constexpr auto maxSize = std::numeric_limits<std::size_t>::max();
+            if( right != 0U && left > maxSize / right )
             {
                 return false;
             }
@@ -243,8 +243,8 @@ namespace grab::codec
                      std::size_t  right,
                      std::size_t& result ) noexcept
         {
-            constexpr auto kMaxSize = std::numeric_limits<std::size_t>::max();
-            if( left > kMaxSize - right )
+            constexpr auto maxSize = std::numeric_limits<std::size_t>::max();
+            if( left > maxSize - right )
             {
                 return false;
             }
@@ -267,16 +267,16 @@ namespace grab::codec
         read_be32( std::span<const Byte> bytes,
                    std::size_t           offset )
         {
-            if( !has_bytes( bytes, offset, kPngUint32Bytes ) )
+            if( !has_bytes( bytes, offset, pngUint32Bytes ) )
             {
                 return std::nullopt;
             }
 
             std::uint32_t value = 0U;
-            for( const auto byte : bytes.subspan( offset, kPngUint32Bytes ) )
+            for( const auto byte : bytes.subspan( offset, pngUint32Bytes ) )
             {
                 value =
-                    ( value << kBigEndianShift8 ) | static_cast<std::uint32_t>( byte );
+                    ( value << bigEndianShift8 ) | static_cast<std::uint32_t>( byte );
             }
             return value;
         }
@@ -298,13 +298,13 @@ namespace grab::codec
         append_be32( ByteVector&   output,
                      std::uint32_t value )
         {
-            output.push_back( static_cast<Byte>( ( value >> kBigEndianShift24 ) &
-                                                 kByteMask ) );
-            output.push_back( static_cast<Byte>( ( value >> kBigEndianShift16 ) &
-                                                 kByteMask ) );
-            output.push_back( static_cast<Byte>( ( value >> kBigEndianShift8 ) &
-                                                 kByteMask ) );
-            output.push_back( static_cast<Byte>( value & kByteMask ) );
+            output.push_back( static_cast<Byte>( ( value >> bigEndianShift24 ) &
+                                                 byteMask ) );
+            output.push_back( static_cast<Byte>( ( value >> bigEndianShift16 ) &
+                                                 byteMask ) );
+            output.push_back( static_cast<Byte>( ( value >> bigEndianShift8 ) &
+                                                 byteMask ) );
+            output.push_back( static_cast<Byte>( value & byteMask ) );
         }
 
         [[nodiscard]]
@@ -313,16 +313,16 @@ namespace grab::codec
         {
             switch( value )
             {
-                case kPngColorGray :
-                    return PngColorType::grayscale;
-                case kPngColorRgb :
-                    return PngColorType::truecolor;
-                case kPngColorPalette :
-                    return PngColorType::palette;
-                case kPngColorGrayAlpha :
-                    return PngColorType::grayscale_alpha;
-                case kPngColorRgba :
-                    return PngColorType::truecolor_alpha;
+                case pngColorGray :
+                    return PngColorType::Grayscale;
+                case pngColorRgb :
+                    return PngColorType::Truecolor;
+                case pngColorPalette :
+                    return PngColorType::Palette;
+                case pngColorGrayAlpha :
+                    return PngColorType::GrayscaleAlpha;
+                case pngColorRgba :
+                    return PngColorType::TruecolorAlpha;
                 default :
                     return std::nullopt;
             }
@@ -334,16 +334,16 @@ namespace grab::codec
         {
             switch( value )
             {
-                case static_cast<Byte>( FilterType::none ) :
-                    return FilterType::none;
-                case static_cast<Byte>( FilterType::sub ) :
-                    return FilterType::sub;
-                case static_cast<Byte>( FilterType::up ) :
-                    return FilterType::up;
-                case static_cast<Byte>( FilterType::average ) :
-                    return FilterType::average;
-                case static_cast<Byte>( FilterType::paeth ) :
-                    return FilterType::paeth;
+                case static_cast<Byte>( FilterType::None ) :
+                    return FilterType::None;
+                case static_cast<Byte>( FilterType::Sub ) :
+                    return FilterType::Sub;
+                case static_cast<Byte>( FilterType::Up ) :
+                    return FilterType::Up;
+                case static_cast<Byte>( FilterType::Average ) :
+                    return FilterType::Average;
+                case static_cast<Byte>( FilterType::Paeth ) :
+                    return FilterType::Paeth;
                 default :
                     return std::nullopt;
             }
@@ -353,8 +353,8 @@ namespace grab::codec
         bool
         is_ascii_letter( Byte value ) noexcept
         {
-            return ( value >= kAsciiUpperA && value <= kAsciiUpperZ ) ||
-                   ( value >= kAsciiLowerA && value <= kAsciiLowerZ );
+            return ( value >= asciiUpperA && value <= asciiUpperZ ) ||
+                   ( value >= asciiLowerA && value <= asciiLowerZ );
         }
 
         [[nodiscard]]
@@ -368,7 +368,7 @@ namespace grab::codec
         bool
         is_critical_chunk( const ChunkType& type ) noexcept
         {
-            return type.front() >= kAsciiUpperA && type.front() <= kAsciiUpperZ;
+            return type.front() >= asciiUpperA && type.front() <= asciiUpperZ;
         }
 
         [[nodiscard]]
@@ -376,13 +376,13 @@ namespace grab::codec
         read_chunk_type( std::span<const Byte> bytes,
                          std::size_t           offset )
         {
-            if( !has_bytes( bytes, offset, kPngChunkTypeBytes ) )
+            if( !has_bytes( bytes, offset, pngChunkTypeBytes ) )
             {
                 return std::nullopt;
             }
 
             ChunkType type{};
-            std::ranges::copy( bytes.subspan( offset, kPngChunkTypeBytes ),
+            std::ranges::copy( bytes.subspan( offset, pngChunkTypeBytes ),
                                type.begin() );
             return type;
         }
@@ -392,9 +392,8 @@ namespace grab::codec
         chunk_crc( const ChunkType&      type,
                    std::span<const Byte> data )
         {
-            auto crc = crc32( kInitialCrc,
-                              type.data(),
-                              static_cast<uInt>( kPngChunkTypeBytes ) );
+            auto crc =
+                crc32( initialCrc, type.data(), static_cast<uInt>( pngChunkTypeBytes ) );
             if( !data.empty() )
             {
                 crc = crc32( crc, data.data(), static_cast<uInt>( data.size() ) );
@@ -410,7 +409,7 @@ namespace grab::codec
         {
             if( data.size() >
                 static_cast<std::size_t>( std::numeric_limits<std::uint32_t>::max() ) ||
-                data.size() > kMaxChunkBytes )
+                data.size() > maxChunkBytes )
             {
                 return codec_failure( "chunk is too large" );
             }
@@ -466,25 +465,25 @@ namespace grab::codec
                 .png_row_bytes      = source_row_bytes,
                 .filtered_bytes     = 0U,
                 .source_pixel_bytes = source_pixel_bytes,
-                .color_type         = PngColorType::truecolor_alpha,
+                .color_type         = PngColorType::TruecolorAlpha,
             };
             switch( image.format )
             {
-                case grab::PixelFormat::gray :
-                    layout.color_type    = PngColorType::grayscale;
-                    layout.png_row_bytes = width * kGrayBytes;
+                case grab::PixelFormat::Gray :
+                    layout.color_type    = PngColorType::Grayscale;
+                    layout.png_row_bytes = width * grayBytes;
                     break;
-                case grab::PixelFormat::rgb :
-                case grab::PixelFormat::bgr :
-                case grab::PixelFormat::rgb24 :
-                    layout.color_type    = PngColorType::truecolor;
-                    layout.png_row_bytes = width * kRgbBytes;
+                case grab::PixelFormat::Rgb :
+                case grab::PixelFormat::Bgr :
+                case grab::PixelFormat::Rgb24 :
+                    layout.color_type    = PngColorType::Truecolor;
+                    layout.png_row_bytes = width * rgbBytes;
                     break;
-                case grab::PixelFormat::rgba :
-                case grab::PixelFormat::bgra :
-                case grab::PixelFormat::bgr0 :
-                    layout.color_type    = PngColorType::truecolor_alpha;
-                    layout.png_row_bytes = width * kRgbaBytes;
+                case grab::PixelFormat::Rgba :
+                case grab::PixelFormat::Bgra :
+                case grab::PixelFormat::Bgr0 :
+                    layout.color_type    = PngColorType::TruecolorAlpha;
+                    layout.png_row_bytes = width * rgbaBytes;
                     break;
             }
 
@@ -495,7 +494,7 @@ namespace grab::codec
                 return invalid_image_error( "filtered scanline size overflows" );
             }
 
-            if( layout.filtered_bytes > kMaxDecodedBytes )
+            if( layout.filtered_bytes > maxDecodedBytes )
             {
                 return invalid_image_error( "image is too large to encode" );
             }
@@ -567,20 +566,20 @@ namespace grab::codec
                     return invalid_image_error( "row is outside the pixel buffer" );
                 }
 
-                scanlines.push_back( static_cast<Byte>( FilterType::none ) );
+                scanlines.push_back( static_cast<Byte>( FilterType::None ) );
                 switch( image.format )
                 {
-                    case grab::PixelFormat::gray :
-                    case grab::PixelFormat::rgb :
-                    case grab::PixelFormat::rgba :
-                    case grab::PixelFormat::rgb24 :
+                    case grab::PixelFormat::Gray :
+                    case grab::PixelFormat::Rgb :
+                    case grab::PixelFormat::Rgba :
+                    case grab::PixelFormat::Rgb24 :
                         append_direct_row( scanlines, row, layout.png_row_bytes );
                         break;
-                    case grab::PixelFormat::bgr :
+                    case grab::PixelFormat::Bgr :
                         append_bgr_row( scanlines, row, layout );
                         break;
-                    case grab::PixelFormat::bgra :
-                    case grab::PixelFormat::bgr0 :
+                    case grab::PixelFormat::Bgra :
+                    case grab::PixelFormat::Bgr0 :
                         append_bgra_row( scanlines, row, layout );
                         break;
                 }
@@ -657,18 +656,18 @@ namespace grab::codec
         grab::Result<Ihdr>
         parse_ihdr( std::span<const Byte> data )
         {
-            if( data.size() != kPngIhdrBytes )
+            if( data.size() != pngIhdrBytes )
             {
                 return png_protocol_error( "IHDR has an invalid size" );
             }
 
-            const auto width       = read_be32( data, kIhdrWidthOffset );
-            const auto height      = read_be32( data, kIhdrHeightOffset );
-            const auto bit_depth   = read_byte( data, kIhdrBitDepthOffset );
-            const auto color_byte  = read_byte( data, kIhdrColorTypeOffset );
-            const auto compression = read_byte( data, kIhdrCompressionOffset );
-            const auto filter      = read_byte( data, kIhdrFilterOffset );
-            const auto interlace   = read_byte( data, kIhdrInterlaceOffset );
+            const auto width       = read_be32( data, ihdrWidthOffset );
+            const auto height      = read_be32( data, ihdrHeightOffset );
+            const auto bit_depth   = read_byte( data, ihdrBitDepthOffset );
+            const auto color_byte  = read_byte( data, ihdrColorTypeOffset );
+            const auto compression = read_byte( data, ihdrCompressionOffset );
+            const auto filter      = read_byte( data, ihdrFilterOffset );
+            const auto interlace   = read_byte( data, ihdrInterlaceOffset );
             if( !width.has_value() ||
                 !height.has_value() ||
                 !bit_depth.has_value() ||
@@ -689,21 +688,21 @@ namespace grab::codec
             {
                 return png_protocol_error( "IHDR dimensions must be non-zero" );
             }
-            if( *bit_depth != kPngBitDepth8 )
+            if( *bit_depth != pngBitDepth8 )
             {
                 return png_protocol_error( "only 8-bit PNG images are supported" );
             }
-            if( *color_type == PngColorType::grayscale_alpha )
+            if( *color_type == PngColorType::GrayscaleAlpha )
             {
                 return png_protocol_error(
                     "grayscale alpha PNG images are unsupported"
                 );
             }
             if( *compression !=
-                kPngMethodNone ||
+                pngMethodNone ||
                 *filter !=
-                kPngMethodNone ||
-                *interlace != kPngMethodNone )
+                pngMethodNone ||
+                *interlace != pngMethodNone )
             {
                 return png_protocol_error(
                     "unsupported compression, filter, or interlace method"
@@ -732,10 +731,10 @@ namespace grab::codec
             }
             if( data.empty() ||
                 data.size() %
-                kPaletteEntryBytes !=
+                paletteEntryBytes !=
                 0U ||
                 data.size() /
-                kPaletteEntryBytes > kMaxPaletteEntries )
+                paletteEntryBytes > maxPaletteEntries )
             {
                 return png_protocol_error( "PLTE has an invalid size" );
             }
@@ -753,7 +752,7 @@ namespace grab::codec
             {
                 return png_protocol_error( "tRNS appears in an invalid position" );
             }
-            if( state.png.ihdr.color_type != PngColorType::palette )
+            if( state.png.ihdr.color_type != PngColorType::Palette )
             {
                 return png_protocol_error( "tRNS is only supported for palette PNGs" );
             }
@@ -762,7 +761,7 @@ namespace grab::codec
                 return png_protocol_error( "palette tRNS appears before PLTE" );
             }
 
-            const auto palette_entries = state.png.palette.size() / kPaletteEntryBytes;
+            const auto palette_entries = state.png.palette.size() / paletteEntryBytes;
             if( data.size() > palette_entries )
             {
                 return png_protocol_error( "palette tRNS is larger than PLTE" );
@@ -782,9 +781,9 @@ namespace grab::codec
                 return png_protocol_error( "IDAT appears before IHDR" );
             }
             if( data.size() >
-                kMaxCompressedBytes ||
+                maxCompressedBytes ||
                 state.png.idat.size() >
-                kMaxCompressedBytes -
+                maxCompressedBytes -
                 data.size() )
             {
                 return png_protocol_error( "IDAT data is too large" );
@@ -806,7 +805,7 @@ namespace grab::codec
                 return png_protocol_error( "chunk type contains non-letter bytes" );
             }
 
-            if( type == kChunkIhdr )
+            if( type == chunkIhdr )
             {
                 if( state.seen_ihdr || state.seen_idat )
                 {
@@ -828,7 +827,7 @@ namespace grab::codec
                 return png_protocol_error( "IHDR must be the first chunk" );
             }
 
-            if( type == kChunkPlte )
+            if( type == chunkPlte )
             {
                 auto result = parse_plte( state, data );
                 if( !result.has_value() )
@@ -837,7 +836,7 @@ namespace grab::codec
                 }
                 return false;
             }
-            if( type == kChunkTrns )
+            if( type == chunkTrns )
             {
                 auto result = parse_trns( state, data );
                 if( !result.has_value() )
@@ -846,7 +845,7 @@ namespace grab::codec
                 }
                 return false;
             }
-            if( type == kChunkIdat )
+            if( type == chunkIdat )
             {
                 auto result = append_idat( state, data );
                 if( !result.has_value() )
@@ -855,7 +854,7 @@ namespace grab::codec
                 }
                 return false;
             }
-            if( type == kChunkIend )
+            if( type == chunkIend )
             {
                 if( !data.empty() )
                 {
@@ -876,18 +875,18 @@ namespace grab::codec
         parse_png( std::span<const Byte> bytes )
         {
             if( bytes.size() <
-                kPngSignature.size() ||
-                !std::ranges::equal( bytes.subspan( 0U, kPngSignature.size() ),
-                                     kPngSignature ) )
+                pngSignature.size() ||
+                !std::ranges::equal( bytes.subspan( 0U, pngSignature.size() ),
+                                     pngSignature ) )
             {
                 return png_protocol_error( "signature mismatch" );
             }
 
             ParseState  state;
-            std::size_t offset = kPngSignature.size();
+            std::size_t offset = pngSignature.size();
             while( offset < bytes.size() )
             {
-                if( !has_bytes( bytes, offset, kPngChunkOverheadBytes ) )
+                if( !has_bytes( bytes, offset, pngChunkOverheadBytes ) )
                 {
                     return png_protocol_error( "truncated chunk header" );
                 }
@@ -899,26 +898,26 @@ namespace grab::codec
                 }
 
                 const auto data_size = static_cast<std::size_t>( *length );
-                if( data_size > kMaxChunkBytes )
+                if( data_size > maxChunkBytes )
                 {
                     return png_protocol_error( "chunk is too large" );
                 }
 
                 std::size_t chunk_bytes = 0U;
-                if( !checked_add( kPngChunkOverheadBytes, data_size, chunk_bytes ) ||
+                if( !checked_add( pngChunkOverheadBytes, data_size, chunk_bytes ) ||
                     !has_bytes( bytes, offset, chunk_bytes ) )
                 {
                     return png_protocol_error( "truncated chunk data" );
                 }
 
-                const auto type_offset = offset + kPngChunkLengthBytes;
+                const auto type_offset = offset + pngChunkLengthBytes;
                 const auto type        = read_chunk_type( bytes, type_offset );
                 if( !type.has_value() )
                 {
                     return png_protocol_error( "truncated chunk type" );
                 }
 
-                const auto data_offset  = type_offset + kPngChunkTypeBytes;
+                const auto data_offset  = type_offset + pngChunkTypeBytes;
                 const auto crc_offset   = data_offset + data_size;
                 const auto expected_crc = read_be32( bytes, crc_offset );
                 if( !expected_crc.has_value() )
@@ -950,7 +949,7 @@ namespace grab::codec
                         return png_protocol_error( "missing IDAT data" );
                     }
                     if( state.png.ihdr.color_type ==
-                        PngColorType::palette &&
+                        PngColorType::Palette &&
                         state.png.palette.empty() )
                     {
                         return png_protocol_error( "palette PNG is missing PLTE" );
@@ -968,14 +967,14 @@ namespace grab::codec
         {
             switch( color_type )
             {
-                case PngColorType::grayscale :
-                case PngColorType::palette :
-                    return kGrayBytes;
-                case PngColorType::truecolor :
-                    return kRgbBytes;
-                case PngColorType::truecolor_alpha :
-                    return kRgbaBytes;
-                case PngColorType::grayscale_alpha :
+                case PngColorType::Grayscale :
+                case PngColorType::Palette :
+                    return grayBytes;
+                case PngColorType::Truecolor :
+                    return rgbBytes;
+                case PngColorType::TruecolorAlpha :
+                    return rgbaBytes;
+                case PngColorType::GrayscaleAlpha :
                     return std::nullopt;
             }
 
@@ -1001,7 +1000,7 @@ namespace grab::codec
                 .filter_pixel_bytes = *input_channels,
                 .output_stride      = 0U,
                 .output_bytes       = 0U,
-                .output_format      = grab::PixelFormat::rgba,
+                .output_format      = grab::PixelFormat::Rgba,
             };
             if( !checked_mul( width, *input_channels, layout.source_row_bytes ) ||
                 !checked_add( layout.source_row_bytes, 1U, layout.filtered_row_bytes ) ||
@@ -1015,25 +1014,25 @@ namespace grab::codec
             std::size_t output_channels = 0U;
             switch( png.ihdr.color_type )
             {
-                case PngColorType::grayscale :
-                    layout.output_format = grab::PixelFormat::gray;
-                    output_channels      = kGrayBytes;
+                case PngColorType::Grayscale :
+                    layout.output_format = grab::PixelFormat::Gray;
+                    output_channels      = grayBytes;
                     break;
-                case PngColorType::truecolor :
-                    layout.output_format = grab::PixelFormat::rgb;
-                    output_channels      = kRgbBytes;
+                case PngColorType::Truecolor :
+                    layout.output_format = grab::PixelFormat::Rgb;
+                    output_channels      = rgbBytes;
                     break;
-                case PngColorType::truecolor_alpha :
-                    layout.output_format = grab::PixelFormat::rgba;
-                    output_channels      = kRgbaBytes;
+                case PngColorType::TruecolorAlpha :
+                    layout.output_format = grab::PixelFormat::Rgba;
+                    output_channels      = rgbaBytes;
                     break;
-                case PngColorType::palette :
+                case PngColorType::Palette :
                     layout.output_format = png.transparency.empty()
-                                             ? grab::PixelFormat::rgb
-                                             : grab::PixelFormat::rgba;
-                    output_channels = png.transparency.empty() ? kRgbBytes : kRgbaBytes;
+                                             ? grab::PixelFormat::Rgb
+                                             : grab::PixelFormat::Rgba;
+                    output_channels = png.transparency.empty() ? rgbBytes : rgbaBytes;
                     break;
-                case PngColorType::grayscale_alpha :
+                case PngColorType::GrayscaleAlpha :
                     return png_protocol_error( "unsupported color type" );
             }
 
@@ -1046,8 +1045,8 @@ namespace grab::codec
             if( layout.output_stride >
                 static_cast<std::size_t>( std::numeric_limits<std::uint32_t>::max() ) ||
                 layout.filtered_bytes >
-                kMaxDecodedBytes ||
-                layout.output_bytes > kMaxDecodedBytes )
+                maxDecodedBytes ||
+                layout.output_bytes > maxDecodedBytes )
             {
                 return png_protocol_error( "decoded image is too large" );
             }
@@ -1089,17 +1088,17 @@ namespace grab::codec
         {
             switch( filter )
             {
-                case FilterType::none :
+                case FilterType::None :
                     return 0U;
-                case FilterType::sub :
+                case FilterType::Sub :
                     return left;
-                case FilterType::up :
+                case FilterType::Up :
                     return up;
-                case FilterType::average :
+                case FilterType::Average :
                     return static_cast<Byte>( ( static_cast<unsigned int>( left ) +
                                                 static_cast<unsigned int>( up ) ) /
                                               2U );
-                case FilterType::paeth :
+                case FilterType::Paeth :
                     return paeth_predictor( left, up, up_left );
             }
 
@@ -1113,7 +1112,7 @@ namespace grab::codec
         {
             return static_cast<Byte>( ( static_cast<unsigned int>( filtered ) +
                                         static_cast<unsigned int>( predictor ) ) %
-                                      kByteModulo );
+                                      byteModulo );
         }
 
         [[nodiscard]]
@@ -1170,7 +1169,7 @@ namespace grab::codec
                         const DecodeLayout& layout,
                         const ByteVector&   raw )
         {
-            const auto palette_entries = png.palette.size() / kPaletteEntryBytes;
+            const auto palette_entries = png.palette.size() / paletteEntryBytes;
             ByteVector expanded;
             expanded.reserve( layout.output_bytes );
 
@@ -1182,7 +1181,7 @@ namespace grab::codec
                     return png_protocol_error( "palette index is outside PLTE" );
                 }
 
-                const auto palette_offset = index * kPaletteEntryBytes;
+                const auto palette_offset = index * paletteEntryBytes;
                 expanded.push_back( png.palette.at( palette_offset ) );
                 expanded.push_back( png.palette.at( palette_offset + 1U ) );
                 expanded.push_back( png.palette.at( palette_offset + 2U ) );
@@ -1190,7 +1189,7 @@ namespace grab::codec
                 {
                     const auto alpha = index < png.transparency.size()
                                          ? png.transparency.at( index )
-                                         : kOpaqueAlpha;
+                                         : opaqueAlpha;
                     expanded.push_back( alpha );
                 }
             }
@@ -1209,7 +1208,7 @@ namespace grab::codec
                         const ByteVector&   raw )
         {
             ByteVector pixels = raw;
-            if( png.ihdr.color_type == PngColorType::palette )
+            if( png.ihdr.color_type == PngColorType::Palette )
             {
                 auto expanded = expand_palette( png, layout, raw );
                 if( !expanded.has_value() )
@@ -1252,34 +1251,34 @@ namespace grab::codec
         }
 
         ByteVector png;
-        png.reserve( kPngSignature.size() +
-                     kPngChunkOverheadBytes +
-                     kPngIhdrBytes +
+        png.reserve( pngSignature.size() +
+                     pngChunkOverheadBytes +
+                     pngIhdrBytes +
                      compressed->size() +
-                     ( kPngChunkOverheadBytes * 2U ) );
-        png.insert( png.end(), kPngSignature.begin(), kPngSignature.end() );
+                     ( pngChunkOverheadBytes * 2U ) );
+        png.insert( png.end(), pngSignature.begin(), pngSignature.end() );
 
         ByteVector ihdr;
-        ihdr.reserve( kPngIhdrBytes );
+        ihdr.reserve( pngIhdrBytes );
         append_be32( ihdr, image.width );
         append_be32( ihdr, image.height );
-        ihdr.push_back( kPngBitDepth8 );
+        ihdr.push_back( pngBitDepth8 );
         ihdr.push_back( static_cast<Byte>( layout->color_type ) );
-        ihdr.push_back( kPngMethodNone );
-        ihdr.push_back( kPngMethodNone );
-        ihdr.push_back( kPngMethodNone );
+        ihdr.push_back( pngMethodNone );
+        ihdr.push_back( pngMethodNone );
+        ihdr.push_back( pngMethodNone );
 
-        auto ihdr_chunk = append_chunk( png, kChunkIhdr, ihdr );
+        auto ihdr_chunk = append_chunk( png, chunkIhdr, ihdr );
         if( !ihdr_chunk.has_value() )
         {
             return std::unexpected( ihdr_chunk.error() );
         }
-        auto idat_chunk = append_chunk( png, kChunkIdat, *compressed );
+        auto idat_chunk = append_chunk( png, chunkIdat, *compressed );
         if( !idat_chunk.has_value() )
         {
             return std::unexpected( idat_chunk.error() );
         }
-        auto iend_chunk = append_chunk( png, kChunkIend, std::span<const Byte>{} );
+        auto iend_chunk = append_chunk( png, chunkIend, std::span<const Byte>{} );
         if( !iend_chunk.has_value() )
         {
             return std::unexpected( iend_chunk.error() );

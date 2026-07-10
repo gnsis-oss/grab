@@ -17,30 +17,30 @@
 namespace
 {
 
-    constexpr const char* kXvfbDisplay            = ":99";
-    constexpr const char* kBadDisplay             = ":name-that-does-not-exist-999";
-    constexpr auto        kDeviceInaccessibleCode = grab::ErrorCode::device_inaccessible;
-    constexpr int         kXcbOk                  = 0;
-    constexpr std::int16_t  kTargetX              = 321;
-    constexpr std::int16_t  kTargetY              = 654;
-    constexpr std::int16_t  kWindowX              = 100;
-    constexpr std::int16_t  kWindowY              = 120;
-    constexpr std::uint16_t kWindowWidth          = 160U;
-    constexpr std::uint16_t kWindowHeight         = 120U;
-    constexpr std::int16_t  kWindowHalfWidth      = 80;
-    constexpr std::int16_t  kWindowHalfHeight     = 60;
-    constexpr std::int16_t  kWindowCenterX        = kWindowX + kWindowHalfWidth;
-    constexpr std::int16_t  kWindowCenterY        = kWindowY + kWindowHalfHeight;
-    constexpr std::uint16_t kWindowBorderWidth    = 0U;
-    constexpr std::uint32_t kWindowEventMask =
+    constexpr const char*   xvfbDisplay            = ":99";
+    constexpr const char*   badDisplay             = ":name-that-does-not-exist-999";
+    constexpr auto          deviceInaccessibleCode = grab::ErrorCode::DeviceInaccessible;
+    constexpr int           xcbOk                  = 0;
+    constexpr std::int16_t  targetX                = 321;
+    constexpr std::int16_t  targetY                = 654;
+    constexpr std::int16_t  windowX                = 100;
+    constexpr std::int16_t  windowY                = 120;
+    constexpr std::uint16_t windowWidth            = 160U;
+    constexpr std::uint16_t windowHeight           = 120U;
+    constexpr std::int16_t  windowHalfWidth        = 80;
+    constexpr std::int16_t  windowHalfHeight       = 60;
+    constexpr std::int16_t  windowCenterX          = windowX + windowHalfWidth;
+    constexpr std::int16_t  windowCenterY          = windowY + windowHalfHeight;
+    constexpr std::uint16_t windowBorderWidth      = 0U;
+    constexpr std::uint32_t windowEventMask =
         XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE;
-    constexpr std::uint32_t kWindowValueMask    = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-    constexpr std::uint8_t  kLeftButton         = 1U;
-    constexpr std::uint8_t  kResponseTypeMask   = 0X7FU;
-    constexpr auto          kButtonEventTimeout = std::chrono::seconds{ 2 };
-    constexpr auto          kButtonEventPollInterval = std::chrono::milliseconds{ 10 };
-    constexpr std::string_view kPointerQueryFailed   = "xcb_query_pointer failed";
-    constexpr std::string_view kButtonPressWasNotEmitted =
+    constexpr std::uint32_t    windowValueMask  = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
+    constexpr std::uint8_t     leftButton       = 1U;
+    constexpr std::uint8_t     responseTypeMask = 0X7FU;
+    constexpr auto             buttonEventTimeout      = std::chrono::seconds{ 2 };
+    constexpr auto             buttonEventPollInterval = std::chrono::milliseconds{ 10 };
+    constexpr std::string_view pointerQueryFailed      = "xcb_query_pointer failed";
+    constexpr std::string_view buttonPressWasNotEmitted =
         "button press was not observed";
 
     template<typename T>
@@ -134,7 +134,7 @@ namespace
     {
         if( xcb_flush( connection ) <=
             0 ||
-            xcb_connection_has_error( connection ) != kXcbOk )
+            xcb_connection_has_error( connection ) != xcbOk )
         {
             return testing::AssertionFailure() << "xcb_flush failed";
         }
@@ -145,15 +145,14 @@ namespace
     bool
     wait_for_button_press( xcb_connection_t* connection )
     {
-        const auto deadline = std::chrono::steady_clock::now() + kButtonEventTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + buttonEventTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             const auto event = take_xcb_owned( xcb_poll_for_event( connection ) );
             if( event != nullptr )
             {
                 const auto response_type =
-                    static_cast<std::uint8_t>( event->response_type &
-                                               kResponseTypeMask );
+                    static_cast<std::uint8_t>( event->response_type & responseTypeMask );
                 if( response_type == XCB_BUTTON_PRESS )
                 {
                     return true;
@@ -161,11 +160,11 @@ namespace
                 continue;
             }
 
-            if( xcb_connection_has_error( connection ) != kXcbOk )
+            if( xcb_connection_has_error( connection ) != xcbOk )
             {
                 return false;
             }
-            std::this_thread::sleep_for( kButtonEventPollInterval );
+            std::this_thread::sleep_for( buttonEventPollInterval );
         }
         return false;
     }
@@ -178,7 +177,7 @@ namespace
         const xcb_window_t                 window = xcb_generate_id( connection );
         const std::array<std::uint32_t, 2> values{
             screen.black_pixel,
-            kWindowEventMask,
+            windowEventMask,
         };
         EXPECT_TRUE(
             request_succeeded( connection,
@@ -186,14 +185,14 @@ namespace
                                                           screen.root_depth,
                                                           window,
                                                           screen.root,
-                                                          kWindowX,
-                                                          kWindowY,
-                                                          kWindowWidth,
-                                                          kWindowHeight,
-                                                          kWindowBorderWidth,
+                                                          windowX,
+                                                          windowY,
+                                                          windowWidth,
+                                                          windowHeight,
+                                                          windowBorderWidth,
                                                           XCB_WINDOW_CLASS_INPUT_OUTPUT,
                                                           screen.root_visual,
-                                                          kWindowValueMask,
+                                                          windowValueMask,
                                                           values.data() ) )
         );
         EXPECT_TRUE( request_succeeded( connection,
@@ -207,7 +206,7 @@ namespace
 TEST( Seat,
       OpenConnectsAndHasXtest )
 {
-    auto seat = grab::input::Seat::open( kXvfbDisplay );
+    auto seat = grab::input::Seat::open( xvfbDisplay );
 
     ASSERT_TRUE( seat.has_value() ) << seat.error().message;
 }
@@ -215,16 +214,16 @@ TEST( Seat,
 TEST( Seat,
       PointerMoveIsObservable )
 {
-    const ObserverConnection observer{ kXvfbDisplay };
+    const ObserverConnection observer{ xvfbDisplay };
     ASSERT_NE( observer.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( observer.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( observer.get(), observer.screen_index() );
     ASSERT_NE( screen, nullptr );
 
-    auto seat = grab::input::Seat::open( kXvfbDisplay );
+    auto seat = grab::input::Seat::open( xvfbDisplay );
     ASSERT_TRUE( seat.has_value() ) << seat.error().message;
-    ASSERT_TRUE( seat->move_pointer_absolute( kTargetX, kTargetY ).has_value() );
+    ASSERT_TRUE( seat->move_pointer_absolute( targetX, targetY ).has_value() );
     ASSERT_TRUE( seat->flush().has_value() );
 
     xcb_generic_error_t* raw_error = nullptr;
@@ -234,41 +233,41 @@ TEST( Seat,
                                  &raw_error )
     );
     const auto error = take_xcb_owned( raw_error );
-    ASSERT_EQ( error, nullptr ) << kPointerQueryFailed;
-    ASSERT_NE( pointer, nullptr ) << kPointerQueryFailed;
-    EXPECT_EQ( pointer->root_x, kTargetX );
-    EXPECT_EQ( pointer->root_y, kTargetY );
+    ASSERT_EQ( error, nullptr ) << pointerQueryFailed;
+    ASSERT_NE( pointer, nullptr ) << pointerQueryFailed;
+    EXPECT_EQ( pointer->root_x, targetX );
+    EXPECT_EQ( pointer->root_y, targetY );
 }
 
 TEST( Seat,
       ButtonPressReachesWindow )
 {
-    const ObserverConnection observer{ kXvfbDisplay };
+    const ObserverConnection observer{ xvfbDisplay };
     ASSERT_NE( observer.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( observer.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( observer.get(), observer.screen_index() );
     ASSERT_NE( screen, nullptr );
     static_cast<void>( create_button_window( observer.get(), *screen ) );
 
-    auto seat = grab::input::Seat::open( kXvfbDisplay );
+    auto seat = grab::input::Seat::open( xvfbDisplay );
     ASSERT_TRUE( seat.has_value() ) << seat.error().message;
     ASSERT_TRUE(
-        seat->move_pointer_absolute( kWindowCenterX, kWindowCenterY ).has_value()
+        seat->move_pointer_absolute( windowCenterX, windowCenterY ).has_value()
     );
     ASSERT_TRUE( seat->flush().has_value() );
-    ASSERT_TRUE( seat->button( kLeftButton, true ).has_value() );
-    ASSERT_TRUE( seat->button( kLeftButton, false ).has_value() );
+    ASSERT_TRUE( seat->button( leftButton, true ).has_value() );
+    ASSERT_TRUE( seat->button( leftButton, false ).has_value() );
     ASSERT_TRUE( seat->flush().has_value() );
 
-    EXPECT_TRUE( wait_for_button_press( observer.get() ) ) << kButtonPressWasNotEmitted;
+    EXPECT_TRUE( wait_for_button_press( observer.get() ) ) << buttonPressWasNotEmitted;
 }
 
 TEST( Seat,
       OpenFailsOnBadDisplay )
 {
-    auto seat = grab::input::Seat::open( kBadDisplay );
+    auto seat = grab::input::Seat::open( badDisplay );
 
     ASSERT_FALSE( seat.has_value() );
-    EXPECT_EQ( seat.error().code, kDeviceInaccessibleCode );
+    EXPECT_EQ( seat.error().code, deviceInaccessibleCode );
 }

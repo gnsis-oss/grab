@@ -7,8 +7,8 @@
 namespace grab::transport
 {
 
-    inline constexpr int kMaxDataEntries = 32;
-    inline constexpr int kMaxValueBytes  = 65'536;
+    inline constexpr int maxDataEntries = 32;
+    inline constexpr int maxValueBytes  = 65'536;
 
     // Event::sequence is process-local ingress metadata. The proto Event has no
     // sequence field, so to_wire ignores it and from_wire sets sequence to zero.

@@ -23,7 +23,7 @@ namespace grab
     namespace
     {
 
-        constexpr std::size_t kMaximumModifierCount = 2U;
+        constexpr std::size_t maximumModifierCount = 2U;
 
         [[nodiscard]]
         grab::Result<void>
@@ -34,10 +34,10 @@ namespace grab
 
         [[nodiscard]]
         grab::Result<void>
-        release_modifiers( grab::input::Seat&                       seat,
+        release_modifiers( grab::input::Seat&                      seat,
                            const std::array<std::uint8_t,
-                                            kMaximumModifierCount>& modifiers,
-                           std::size_t                              modifier_count )
+                                            maximumModifierCount>& modifiers,
+                           std::size_t                             modifier_count )
         {
             grab::Result<void> first_error{};
             bool               has_error = false;
@@ -64,12 +64,12 @@ namespace grab
         {
             if( keycode == 0U )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "XTEST keycode must be nonzero" );
             }
             if( keycode > std::numeric_limits<std::uint8_t>::max() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "XTEST keycode is out of range" );
             }
             return static_cast<std::uint8_t>( keycode );
@@ -77,11 +77,11 @@ namespace grab
 
         [[nodiscard]]
         grab::Result<void>
-        press_modifier( grab::input::Seat&                 seat,
-                        std::uint8_t                       keycode,
+        press_modifier( grab::input::Seat&                seat,
+                        std::uint8_t                      keycode,
                         std::array<std::uint8_t,
-                                   kMaximumModifierCount>& modifiers,
-                        std::size_t&                       modifier_count )
+                                   maximumModifierCount>& modifiers,
+                        std::size_t&                      modifier_count )
         {
             auto press_result = seat.key( keycode, true );
             if( !press_result.has_value() )
@@ -104,8 +104,8 @@ namespace grab
                               std::uint8_t           shift_keycode,
                               std::uint8_t           altgr_keycode )
         {
-            std::array<std::uint8_t, kMaximumModifierCount> modifiers{};
-            std::size_t                                     modifier_count = 0U;
+            std::array<std::uint8_t, maximumModifierCount> modifiers{};
+            std::size_t                                    modifier_count = 0U;
 
             auto base_keycode = xtest_keycode( keystroke.keycode );
             if( !base_keycode.has_value() )
@@ -162,7 +162,7 @@ namespace grab
         {
             if( !std::isfinite( fraction ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ axis } + " fraction is not finite" );
             }
 
@@ -173,7 +173,7 @@ namespace grab
                 absolute >
                 static_cast<double>( std::numeric_limits<std::int16_t>::max() ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ axis } +
                                        " coordinate is outside int16 range" );
             }
@@ -342,9 +342,9 @@ namespace grab
                             double                            frac_y,
                             std::uint8_t                      button )
     {
-        if( win.trust == grab::input::GeometryTrust::unavailable )
+        if( win.trust == grab::input::GeometryTrust::Unavailable )
         {
-            return grab::fail( grab::ErrorCode::geometry_untrusted,
+            return grab::fail( grab::ErrorCode::GeometryUntrusted,
                                "window geometry is unavailable" );
         }
 

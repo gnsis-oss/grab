@@ -25,42 +25,42 @@
 namespace
 {
 
-    constexpr int              kInvalidFd            = -1;
-    constexpr int              kPosixFailure         = -1;
-    constexpr int              kPosixSuccess         = 0;
-    constexpr int              kPipeReadIndex        = 0;
-    constexpr int              kPipeWriteIndex       = 1;
-    constexpr std::size_t      kPipeFdCount          = 2U;
-    constexpr ssize_t          kNoBytesWritten       = 0;
-    constexpr std::size_t      kFrameHeaderBytes     = 4U;
-    constexpr unsigned int     kLengthByteOneShift   = 8U;
-    constexpr unsigned int     kLengthByteTwoShift   = 16U;
-    constexpr unsigned int     kLengthByteThreeShift = 24U;
-    constexpr std::uint32_t    kByteMask             = 0XFFU;
-    constexpr std::size_t      kSubscriptionDepth    = 32U;
-    constexpr auto             kThreadReadyTimeout   = std::chrono::seconds{ 2 };
-    constexpr auto             kRegistrationTimeout  = std::chrono::seconds{ 2 };
-    constexpr auto             kEventTimeout         = std::chrono::seconds{ 2 };
-    constexpr auto             kPollInterval         = std::chrono::milliseconds{ 10 };
-    constexpr std::string_view kTabSwitchedJson =
+    constexpr int              invalidFd            = -1;
+    constexpr int              posixFailure         = -1;
+    constexpr int              posixSuccess         = 0;
+    constexpr int              pipeReadIndex        = 0;
+    constexpr int              pipeWriteIndex       = 1;
+    constexpr std::size_t      pipeFdCount          = 2U;
+    constexpr ssize_t          noBytesWritten       = 0;
+    constexpr std::size_t      frameHeaderBytes     = 4U;
+    constexpr unsigned int     lengthByteOneShift   = 8U;
+    constexpr unsigned int     lengthByteTwoShift   = 16U;
+    constexpr unsigned int     lengthByteThreeShift = 24U;
+    constexpr std::uint32_t    byteMask             = 0XFFU;
+    constexpr std::size_t      subscriptionDepth    = 32U;
+    constexpr auto             threadReadyTimeout   = std::chrono::seconds{ 2 };
+    constexpr auto             registrationTimeout  = std::chrono::seconds{ 2 };
+    constexpr auto             eventTimeout         = std::chrono::seconds{ 2 };
+    constexpr auto             pollInterval         = std::chrono::milliseconds{ 10 };
+    constexpr std::string_view tabSwitchedJson =
         R"({"type":"browser.tab_switched","tab_title":"Gmail","prev_tab_title":"Docs","app":"chrome","pid":"42"})";
-    constexpr std::string_view kSecondTabSwitchedJson =
+    constexpr std::string_view secondTabSwitchedJson =
         R"({"type":"browser.tab_switched","tab_title":"Calendar","prev_tab_title":"Gmail","app":"chrome","pid":"42"})";
-    constexpr std::string_view kMalformedJson       = "{not json";
-    constexpr std::string_view kMissingTypeJson     = R"({"tab_title":"x"})";
-    constexpr std::string_view kExpectedTabTitle    = "Gmail";
-    constexpr std::string_view kExpectedPrevTitle   = "Docs";
-    constexpr std::string_view kSecondExpectedTitle = "Calendar";
-    constexpr std::int64_t     kExpectedPidValue    = 42;
-    constexpr grab::Pid        kExpectedPid{ kExpectedPidValue };
-    constexpr std::string_view kReactorDidNotStart  = "reactor thread did not start";
-    constexpr std::string_view kBridgeNotRegistered = "bridge fd did not register";
+    constexpr std::string_view malformedJson       = "{not json";
+    constexpr std::string_view missingTypeJson     = R"({"tab_title":"x"})";
+    constexpr std::string_view expectedTabTitle    = "Gmail";
+    constexpr std::string_view expectedPrevTitle   = "Docs";
+    constexpr std::string_view secondExpectedTitle = "Calendar";
+    constexpr std::int64_t     expectedPidValue    = 42;
+    constexpr grab::Pid        expectedPid{ expectedPidValue };
+    constexpr std::string_view reactorDidNotStart  = "reactor thread did not start";
+    constexpr std::string_view bridgeNotRegistered = "bridge fd did not register";
 
     class UniqueFd
     {
         public:
 
-            explicit UniqueFd( int fd = kInvalidFd ) noexcept :
+            explicit UniqueFd( int fd = invalidFd ) noexcept :
                 fd_( fd )
             {
             }
@@ -76,7 +76,7 @@ namespace
 
             UniqueFd( UniqueFd&& other ) noexcept :
                 fd_( std::exchange( other.fd_,
-                                    kInvalidFd ) )
+                                    invalidFd ) )
             {
             }
 
@@ -86,7 +86,7 @@ namespace
                 if( this != &other )
                 {
                     reset();
-                    fd_ = std::exchange( other.fd_, kInvalidFd );
+                    fd_ = std::exchange( other.fd_, invalidFd );
                 }
                 return *this;
             }
@@ -103,15 +103,15 @@ namespace
             void
             reset() noexcept
             {
-                if( fd_ != kInvalidFd )
+                if( fd_ != invalidFd )
                 {
                     const auto close_result = ::close( fd_ );
                     static_cast<void>( close_result );
-                    fd_ = kInvalidFd;
+                    fd_ = invalidFd;
                 }
             }
 
-            int fd_ = kInvalidFd;
+            int fd_ = invalidFd;
     };
 
     class Pipe
@@ -120,12 +120,12 @@ namespace
 
             Pipe()
             {
-                std::array<int, kPipeFdCount> fds{};
-                valid_ = ::pipe( fds.data() ) == kPosixSuccess;
+                std::array<int, pipeFdCount> fds{};
+                valid_ = ::pipe( fds.data() ) == posixSuccess;
                 if( valid_ )
                 {
-                    read_fd_  = UniqueFd{ fds.at( kPipeReadIndex ) };
-                    write_fd_ = UniqueFd{ fds.at( kPipeWriteIndex ) };
+                    read_fd_  = UniqueFd{ fds.at( pipeReadIndex ) };
+                    write_fd_ = UniqueFd{ fds.at( pipeWriteIndex ) };
                 }
             }
 
@@ -198,7 +198,7 @@ namespace
             bool
             wait_until_started()
             {
-                return started_.wait_for( kThreadReadyTimeout ) ==
+                return started_.wait_for( threadReadyTimeout ) ==
                        std::future_status::ready;
             }
 
@@ -247,7 +247,7 @@ namespace
                 registered.set_value();
             }
         );
-        return registered_future.wait_for( kRegistrationTimeout ) ==
+        return registered_future.wait_for( registrationTimeout ) ==
                std::future_status::ready;
     }
 
@@ -256,7 +256,7 @@ namespace
     wait_for_event( grab::Subscription& subscription,
                     grab::EventKind     kind )
     {
-        const auto deadline = std::chrono::steady_clock::now() + kEventTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + eventTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             while( auto event = subscription.try_pop() )
@@ -266,7 +266,7 @@ namespace
                     return event;
                 }
             }
-            std::this_thread::sleep_for( kPollInterval );
+            std::this_thread::sleep_for( pollInterval );
         }
         return std::nullopt;
     }
@@ -276,11 +276,11 @@ namespace
     frame_message( std::string_view body )
     {
         const auto length = static_cast<std::uint32_t>( body.size() );
-        std::array<char, kFrameHeaderBytes> header{
-            static_cast<char>( length & kByteMask ),
-            static_cast<char>( ( length >> kLengthByteOneShift ) & kByteMask ),
-            static_cast<char>( ( length >> kLengthByteTwoShift ) & kByteMask ),
-            static_cast<char>( ( length >> kLengthByteThreeShift ) & kByteMask ),
+        std::array<char, frameHeaderBytes> header{
+            static_cast<char>( length & byteMask ),
+            static_cast<char>( ( length >> lengthByteOneShift ) & byteMask ),
+            static_cast<char>( ( length >> lengthByteTwoShift ) & byteMask ),
+            static_cast<char>( ( length >> lengthByteThreeShift ) & byteMask ),
         };
 
         std::string frame;
@@ -300,7 +300,7 @@ namespace
         {
             const auto remaining = bytes.substr( written );
             const auto result    = ::write( fd, remaining.data(), remaining.size() );
-            if( result == kPosixFailure || result == kNoBytesWritten )
+            if( result == posixFailure || result == noBytesWritten )
             {
                 return false;
             }
@@ -314,34 +314,34 @@ namespace
 TEST( BrowserBridge,
       ParsesTabSwitchedMessage )
 {
-    auto event = grab::event::parse_browser_message( kTabSwitchedJson );
+    auto event = grab::event::parse_browser_message( tabSwitchedJson );
 
     ASSERT_TRUE( event.has_value() ) << event.error().message;
-    EXPECT_EQ( event->kind, grab::EventKind::browser_tab_switched );
-    EXPECT_EQ( event->category, grab::EventCategory::browser );
+    EXPECT_EQ( event->kind, grab::EventKind::BrowserTabSwitched );
+    EXPECT_EQ( event->category, grab::EventCategory::Browser );
     const auto* payload = std::get_if<grab::BrowserTab>( &event->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->pid, kExpectedPid );
-    EXPECT_EQ( payload->tab_title, kExpectedTabTitle );
-    EXPECT_EQ( payload->prev_tab_title, kExpectedPrevTitle );
+    EXPECT_EQ( payload->pid, expectedPid );
+    EXPECT_EQ( payload->tab_title, expectedTabTitle );
+    EXPECT_EQ( payload->prev_tab_title, expectedPrevTitle );
 }
 
 TEST( BrowserBridge,
       MalformedJsonRejected )
 {
-    auto event = grab::event::parse_browser_message( kMalformedJson );
+    auto event = grab::event::parse_browser_message( malformedJson );
 
     ASSERT_FALSE( event.has_value() );
-    EXPECT_EQ( event.error().code, grab::ErrorCode::protocol_error );
+    EXPECT_EQ( event.error().code, grab::ErrorCode::ProtocolError );
 }
 
 TEST( BrowserBridge,
       MissingTypeRejected )
 {
-    auto event = grab::event::parse_browser_message( kMissingTypeJson );
+    auto event = grab::event::parse_browser_message( missingTypeJson );
 
     ASSERT_FALSE( event.has_value() );
-    EXPECT_EQ( event.error().code, grab::ErrorCode::protocol_error );
+    EXPECT_EQ( event.error().code, grab::ErrorCode::ProtocolError );
 }
 
 TEST( BrowserBridge,
@@ -351,33 +351,33 @@ TEST( BrowserBridge,
     ASSERT_TRUE( pipe.valid() );
 
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
     auto           subscription = bus.subscribe(
         grab::EventFilter{
-            .kinds      = { grab::EventKind::browser_tab_switched },
+            .kinds      = { grab::EventKind::BrowserTabSwitched },
             .categories = {},
         },
-        kSubscriptionDepth
+        subscriptionDepth
     );
 
     auto bridge_result =
         grab::event::BrowserBridge::start( pipe.read_fd(), running.reactor(), bus );
     ASSERT_TRUE( bridge_result.has_value() ) << bridge_result.error().message;
     auto bridge = std::move( *bridge_result );
-    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << kBridgeNotRegistered;
+    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << bridgeNotRegistered;
 
-    const auto frame = frame_message( kTabSwitchedJson );
+    const auto frame = frame_message( tabSwitchedJson );
     ASSERT_TRUE( write_all( pipe.write_fd(), frame ) );
 
-    auto event = wait_for_event( subscription, grab::EventKind::browser_tab_switched );
+    auto event = wait_for_event( subscription, grab::EventKind::BrowserTabSwitched );
     ASSERT_TRUE( event.has_value() );
     const auto* payload = std::get_if<grab::BrowserTab>( &event->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->pid, kExpectedPid );
-    EXPECT_EQ( payload->tab_title, kExpectedTabTitle );
-    EXPECT_EQ( payload->prev_tab_title, kExpectedPrevTitle );
+    EXPECT_EQ( payload->pid, expectedPid );
+    EXPECT_EQ( payload->tab_title, expectedTabTitle );
+    EXPECT_EQ( payload->prev_tab_title, expectedPrevTitle );
 
     bridge.stop();
     running.stop_and_join();
@@ -391,39 +391,39 @@ TEST( BrowserBridge,
     ASSERT_TRUE( pipe.valid() );
 
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
     auto           subscription = bus.subscribe(
         grab::EventFilter{
-            .kinds      = { grab::EventKind::browser_tab_switched },
+            .kinds      = { grab::EventKind::BrowserTabSwitched },
             .categories = {},
         },
-        kSubscriptionDepth
+        subscriptionDepth
     );
 
     auto bridge_result =
         grab::event::BrowserBridge::start( pipe.read_fd(), running.reactor(), bus );
     ASSERT_TRUE( bridge_result.has_value() ) << bridge_result.error().message;
     auto bridge = std::move( *bridge_result );
-    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << kBridgeNotRegistered;
+    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << bridgeNotRegistered;
 
     const auto frames =
-        frame_message( kTabSwitchedJson ) + frame_message( kSecondTabSwitchedJson );
+        frame_message( tabSwitchedJson ) + frame_message( secondTabSwitchedJson );
     ASSERT_TRUE( write_all( pipe.write_fd(), frames ) );
 
-    auto first = wait_for_event( subscription, grab::EventKind::browser_tab_switched );
+    auto first = wait_for_event( subscription, grab::EventKind::BrowserTabSwitched );
     ASSERT_TRUE( first.has_value() );
-    auto second = wait_for_event( subscription, grab::EventKind::browser_tab_switched );
+    auto second = wait_for_event( subscription, grab::EventKind::BrowserTabSwitched );
     ASSERT_TRUE( second.has_value() );
 
     const auto* first_payload = std::get_if<grab::BrowserTab>( &first->payload );
     ASSERT_NE( first_payload, nullptr );
-    EXPECT_EQ( first_payload->tab_title, kExpectedTabTitle );
+    EXPECT_EQ( first_payload->tab_title, expectedTabTitle );
 
     const auto* second_payload = std::get_if<grab::BrowserTab>( &second->payload );
     ASSERT_NE( second_payload, nullptr );
-    EXPECT_EQ( second_payload->tab_title, kSecondExpectedTitle );
+    EXPECT_EQ( second_payload->tab_title, secondExpectedTitle );
 
     bridge.stop();
     running.stop_and_join();

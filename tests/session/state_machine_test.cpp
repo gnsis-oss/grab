@@ -16,23 +16,23 @@ namespace
 TEST( SessionStateMachine,
       AllowsForwardProgress )
 {
-    EXPECT_TRUE( is_valid_transition( SessionState::starting, SessionState::ready ) );
-    EXPECT_TRUE( is_valid_transition( SessionState::ready, SessionState::draining ) );
-    EXPECT_TRUE( is_valid_transition( SessionState::draining, SessionState::stopped ) );
+    EXPECT_TRUE( is_valid_transition( SessionState::Starting, SessionState::Ready ) );
+    EXPECT_TRUE( is_valid_transition( SessionState::Ready, SessionState::Draining ) );
+    EXPECT_TRUE( is_valid_transition( SessionState::Draining, SessionState::Stopped ) );
 }
 
 TEST( SessionStateMachine,
       AllowsFailureFromAnyLiveState )
 {
-    EXPECT_TRUE( is_valid_transition( SessionState::starting, SessionState::failed ) );
-    EXPECT_TRUE( is_valid_transition( SessionState::ready, SessionState::failed ) );
-    EXPECT_TRUE( is_valid_transition( SessionState::draining, SessionState::failed ) );
+    EXPECT_TRUE( is_valid_transition( SessionState::Starting, SessionState::Failed ) );
+    EXPECT_TRUE( is_valid_transition( SessionState::Ready, SessionState::Failed ) );
+    EXPECT_TRUE( is_valid_transition( SessionState::Draining, SessionState::Failed ) );
 }
 
 TEST( SessionStateMachine,
       RejectsIllegalTransitions )
 {
-    EXPECT_FALSE( is_valid_transition( SessionState::stopped, SessionState::ready ) );
-    EXPECT_FALSE( is_valid_transition( SessionState::ready, SessionState::starting ) );
-    EXPECT_FALSE( is_valid_transition( SessionState::ready, SessionState::ready ) );
+    EXPECT_FALSE( is_valid_transition( SessionState::Stopped, SessionState::Ready ) );
+    EXPECT_FALSE( is_valid_transition( SessionState::Ready, SessionState::Starting ) );
+    EXPECT_FALSE( is_valid_transition( SessionState::Ready, SessionState::Ready ) );
 }

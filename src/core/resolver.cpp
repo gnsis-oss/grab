@@ -28,17 +28,17 @@ namespace grab::core
         {
             switch( state )
             {
-                case AvailabilityState::available :
+                case AvailabilityState::Available :
                     return 0;
-                case AvailabilityState::degraded :
+                case AvailabilityState::Degraded :
                     return prefer_permission_over_degraded ? 2 : 1;
-                case AvailabilityState::needs_permission :
+                case AvailabilityState::NeedsPermission :
                     // An exact provider pending one persistable consent beats
                     // permanently degraded output; this matches spec require()
                     // semantics.
                     return prefer_permission_over_degraded ? 1 : 2;
-                case AvailabilityState::count :
-                case AvailabilityState::unavailable :
+                case AvailabilityState::Count :
+                case AvailabilityState::Unavailable :
                     return 3;
             }
             return 3;
@@ -173,7 +173,7 @@ namespace grab::core
         {
             auto availability = provider->probe( env );
             log_probe_result( request, *provider, availability );
-            if( availability.state == AvailabilityState::unavailable )
+            if( availability.state == AvailabilityState::Unavailable )
             {
                 rejected.push_back( ProviderAttempt{
                     .provider = provider->info().name,
@@ -192,7 +192,7 @@ namespace grab::core
             const std::string capability_id{ capability_name( request.capability ) };
             log_unavailable_outcome( capability_id, candidates.size(), rejected.size() );
             Error error{
-                .code       = ErrorCode::capability_unavailable,
+                .code       = ErrorCode::CapabilityUnavailable,
                 .message    = "no provider available for " + capability_id,
                 .capability = capability_id,
                 .target     = request.target_key.empty() ? request.target_class

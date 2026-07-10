@@ -10,55 +10,53 @@
 namespace
 {
 
-    constexpr std::string_view kBrowserTabSwitched = "browser.tab_switched";
-    constexpr std::string_view kAppContextUpdate   = "app.context_update";
-    constexpr std::string_view kAppTabChanged      = "app.tab_changed";
-    constexpr std::string_view kInputKeyDown       = "input.key_down";
-    constexpr std::string_view kUnspecified        = "unspecified";
-    constexpr std::string_view kFlatTabSwitched    = "tab_switched";
-    constexpr std::string_view kFlatContextUpdate  = "context_update";
-    constexpr std::string_view kUnknownType        = "does.not.exist";
+    constexpr std::string_view browserTabSwitched = "browser.tab_switched";
+    constexpr std::string_view appContextUpdate   = "app.context_update";
+    constexpr std::string_view appTabChanged      = "app.tab_changed";
+    constexpr std::string_view inputKeyDown       = "input.key_down";
+    constexpr std::string_view unspecified        = "unspecified";
+    constexpr std::string_view flatTabSwitched    = "tab_switched";
+    constexpr std::string_view flatContextUpdate  = "context_update";
+    constexpr std::string_view unknownType        = "does.not.exist";
 
 }    // namespace
 
 TEST( EventWire,
       MapsKindToWireName )
 {
-    EXPECT_EQ( grab::wire_name( grab::EventKind::browser_tab_switched ),
-               kBrowserTabSwitched );
-    EXPECT_EQ( grab::wire_name( grab::EventKind::app_context_update ),
-               kAppContextUpdate );
-    EXPECT_EQ( grab::wire_name( grab::EventKind::key_down ), kInputKeyDown );
+    EXPECT_EQ( grab::wire_name( grab::EventKind::BrowserTabSwitched ),
+               browserTabSwitched );
+    EXPECT_EQ( grab::wire_name( grab::EventKind::AppContextUpdate ), appContextUpdate );
+    EXPECT_EQ( grab::wire_name( grab::EventKind::KeyDown ), inputKeyDown );
 }
 
 TEST( EventWire,
       MapsWireNameToKind )
 {
-    EXPECT_EQ( grab::wire_kind( kBrowserTabSwitched ),
-               grab::EventKind::browser_tab_switched );
-    EXPECT_EQ( grab::wire_kind( kAppContextUpdate ),
-               grab::EventKind::app_context_update );
-    EXPECT_EQ( grab::wire_kind( kAppTabChanged ), grab::EventKind::app_tab_changed );
+    EXPECT_EQ( grab::wire_kind( browserTabSwitched ),
+               grab::EventKind::BrowserTabSwitched );
+    EXPECT_EQ( grab::wire_kind( appContextUpdate ), grab::EventKind::AppContextUpdate );
+    EXPECT_EQ( grab::wire_kind( appTabChanged ), grab::EventKind::AppTabChanged );
 }
 
 TEST( EventWire,
       RejectsDroppedFlatAliases )
 {
-    EXPECT_EQ( grab::wire_kind( kFlatTabSwitched ), std::nullopt );
-    EXPECT_EQ( grab::wire_kind( kFlatContextUpdate ), std::nullopt );
+    EXPECT_EQ( grab::wire_kind( flatTabSwitched ), std::nullopt );
+    EXPECT_EQ( grab::wire_kind( flatContextUpdate ), std::nullopt );
 }
 
 TEST( EventWire,
       RejectsUnknownType )
 {
-    EXPECT_EQ( grab::wire_kind( kUnknownType ), std::nullopt );
-    EXPECT_EQ( grab::wire_name( grab::EventKind::unspecified ), kUnspecified );
+    EXPECT_EQ( grab::wire_kind( unknownType ), std::nullopt );
+    EXPECT_EQ( grab::wire_name( grab::EventKind::Unspecified ), unspecified );
 }
 
 TEST( EventWire,
       RoundTripsEveryKind )
 {
-    for( const auto& entry : grab::detail::kEventKindWireNames.entries )
+    for( const auto& entry : grab::detail::eventKindWireNames.entries )
     {
         EXPECT_EQ( grab::wire_kind( entry.text ), entry.value );
         EXPECT_EQ( grab::wire_name( entry.value ), entry.text );

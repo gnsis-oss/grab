@@ -21,18 +21,18 @@
 namespace
 {
 
-    constexpr const char* kXvfbDisplay            = ":97";
-    constexpr const char* kBadDisplay             = ":bad-nonexistent-97";
-    constexpr auto        kDeviceInaccessibleCode = grab::ErrorCode::device_inaccessible;
-    constexpr std::uint8_t     kInjectedKeycode   = 38U;
-    constexpr std::uint32_t    kExpectedKeycode   = kInjectedKeycode;
-    constexpr std::size_t      kSubscriptionDepth = 32U;
-    constexpr auto             kThreadReadyTimeout    = std::chrono::seconds{ 2 };
-    constexpr auto             kRegistrationTimeout   = std::chrono::seconds{ 2 };
-    constexpr auto             kEventTimeout          = std::chrono::seconds{ 2 };
-    constexpr auto             kPollInterval          = std::chrono::milliseconds{ 10 };
-    constexpr std::string_view kReactorDidNotStart    = "reactor thread did not start";
-    constexpr std::string_view kMonitorDidNotRegister = "monitor fd did not register";
+    constexpr const char*   xvfbDisplay            = ":97";
+    constexpr const char*   badDisplay             = ":bad-nonexistent-97";
+    constexpr auto          deviceInaccessibleCode = grab::ErrorCode::DeviceInaccessible;
+    constexpr std::uint8_t  injectedKeycode        = 38U;
+    constexpr std::uint32_t expectedKeycode        = injectedKeycode;
+    constexpr std::size_t   subscriptionDepth      = 32U;
+    constexpr auto          threadReadyTimeout     = std::chrono::seconds{ 2 };
+    constexpr auto          registrationTimeout    = std::chrono::seconds{ 2 };
+    constexpr auto          eventTimeout           = std::chrono::seconds{ 2 };
+    constexpr auto          pollInterval           = std::chrono::milliseconds{ 10 };
+    constexpr std::string_view reactorDidNotStart  = "reactor thread did not start";
+    constexpr std::string_view monitorDidNotRegister = "monitor fd did not register";
 
     class RunningReactor
     {
@@ -66,7 +66,7 @@ namespace
             bool
             wait_until_started()
             {
-                return started_.wait_for( kThreadReadyTimeout ) ==
+                return started_.wait_for( threadReadyTimeout ) ==
                        std::future_status::ready;
             }
 
@@ -115,7 +115,7 @@ namespace
                 registered.set_value();
             }
         );
-        return registered_future.wait_for( kRegistrationTimeout ) ==
+        return registered_future.wait_for( registrationTimeout ) ==
                std::future_status::ready;
     }
 
@@ -124,7 +124,7 @@ namespace
     wait_for_event( grab::Subscription& subscription,
                     grab::EventKind     kind )
     {
-        const auto deadline = std::chrono::steady_clock::now() + kEventTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + eventTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             while( auto event = subscription.try_pop() )
@@ -134,7 +134,7 @@ namespace
                     return event;
                 }
             }
-            std::this_thread::sleep_for( kPollInterval );
+            std::this_thread::sleep_for( pollInterval );
         }
         return std::nullopt;
     }
@@ -145,35 +145,35 @@ TEST( XInput2,
       ObservesInjectedKey )
 {
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
     auto           subscription = bus.subscribe(
         grab::EventFilter{
-            .kinds      = { grab::EventKind::key_down },
+            .kinds      = { grab::EventKind::KeyDown },
             .categories = {},
         },
-        kSubscriptionDepth
+        subscriptionDepth
     );
 
     auto monitor_result =
-        grab::event::XInput2Monitor::start( kXvfbDisplay, running.reactor(), bus );
+        grab::event::XInput2Monitor::start( xvfbDisplay, running.reactor(), bus );
     ASSERT_TRUE( monitor_result.has_value() ) << monitor_result.error().message;
     auto monitor = std::move( *monitor_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) )
-        << kMonitorDidNotRegister;
+        << monitorDidNotRegister;
 
-    auto seat = grab::input::Seat::open( kXvfbDisplay );
+    auto seat = grab::input::Seat::open( xvfbDisplay );
     ASSERT_TRUE( seat.has_value() ) << seat.error().message;
-    ASSERT_TRUE( seat->key( kInjectedKeycode, true ).has_value() );
-    ASSERT_TRUE( seat->key( kInjectedKeycode, false ).has_value() );
+    ASSERT_TRUE( seat->key( injectedKeycode, true ).has_value() );
+    ASSERT_TRUE( seat->key( injectedKeycode, false ).has_value() );
     ASSERT_TRUE( seat->flush().has_value() );
 
-    auto event = wait_for_event( subscription, grab::EventKind::key_down );
+    auto event = wait_for_event( subscription, grab::EventKind::KeyDown );
     ASSERT_TRUE( event.has_value() );
     const auto* payload = std::get_if<grab::InputKey>( &event->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->code, kExpectedKeycode );
+    EXPECT_EQ( payload->code, expectedKeycode );
 
     monitor.stop();
     running.stop_and_join();
@@ -186,8 +186,8 @@ TEST( XInput2,
     grab::core::Reactor reactor;
     grab::EventBus      bus;
 
-    auto monitor = grab::event::XInput2Monitor::start( kBadDisplay, reactor, bus );
+    auto monitor = grab::event::XInput2Monitor::start( badDisplay, reactor, bus );
 
     ASSERT_FALSE( monitor.has_value() );
-    EXPECT_EQ( monitor.error().code, kDeviceInaccessibleCode );
+    EXPECT_EQ( monitor.error().code, deviceInaccessibleCode );
 }

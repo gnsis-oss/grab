@@ -19,41 +19,41 @@
 namespace
 {
 
-    constexpr const char*      kXvfbDisplay       = ":94";
-    constexpr const char*      kUsLayout          = "us";
-    constexpr int              kXcbOk             = 0;
-    constexpr std::int16_t     kWindowX           = 160;
-    constexpr std::int16_t     kWindowY           = 180;
-    constexpr std::uint16_t    kWindowWidth       = 320U;
-    constexpr std::uint16_t    kWindowHeight      = 220U;
-    constexpr std::uint16_t    kWindowBorderWidth = 0U;
-    constexpr std::int16_t     kDragFromX         = kWindowX + 64;
-    constexpr std::int16_t     kDragFromY         = kWindowY + 68;
-    constexpr std::int16_t     kDragToX           = kWindowX + 244;
-    constexpr std::int16_t     kDragToY           = kWindowY + 148;
-    constexpr std::uint32_t    kWindowValueMask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-    constexpr std::uint32_t    kPropertyReplaceMode     = XCB_PROP_MODE_REPLACE;
-    constexpr std::uint8_t     kFormat8Bits             = 8U;
-    constexpr std::uint8_t     kResponseTypeMask        = 0X7FU;
-    constexpr std::uint8_t     kLeftButton              = 1U;
-    constexpr std::size_t      kExpectedTypedKeyPresses = 2U;
-    constexpr std::int32_t     kMinimumDragMotionEvents = 1;
-    constexpr double           kWindowCenterFraction    = 0.5;
-    constexpr auto             kEventTimeout            = std::chrono::seconds{ 3 };
-    constexpr auto             kEventPollInterval       = std::chrono::milliseconds{ 5 };
-    constexpr std::string_view kTypedText               = "Ab";
-    constexpr std::string_view kInputInstance           = "grab-input-instance";
-    constexpr std::string_view kInputClass              = "GrabInputTestClass";
-    constexpr std::string_view kWindowTitle             = "grab input test";
-    constexpr std::string_view kMissingClickEvent       = "ButtonPress was not observed";
-    constexpr std::string_view kMissingDragSequence =
+    constexpr const char*      xvfbDisplay       = ":94";
+    constexpr const char*      usLayout          = "us";
+    constexpr int              xcbOk             = 0;
+    constexpr std::int16_t     windowX           = 160;
+    constexpr std::int16_t     windowY           = 180;
+    constexpr std::uint16_t    windowWidth       = 320U;
+    constexpr std::uint16_t    windowHeight      = 220U;
+    constexpr std::uint16_t    windowBorderWidth = 0U;
+    constexpr std::int16_t     dragFromX         = windowX + 64;
+    constexpr std::int16_t     dragFromY         = windowY + 68;
+    constexpr std::int16_t     dragToX           = windowX + 244;
+    constexpr std::int16_t     dragToY           = windowY + 148;
+    constexpr std::uint32_t    windowValueMask   = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
+    constexpr std::uint32_t    propertyReplaceMode     = XCB_PROP_MODE_REPLACE;
+    constexpr std::uint8_t     format8Bits             = 8U;
+    constexpr std::uint8_t     responseTypeMask        = 0X7FU;
+    constexpr std::uint8_t     leftButton              = 1U;
+    constexpr std::size_t      expectedTypedKeyPresses = 2U;
+    constexpr std::int32_t     minimumDragMotionEvents = 1;
+    constexpr double           windowCenterFraction    = 0.5;
+    constexpr auto             eventTimeout            = std::chrono::seconds{ 3 };
+    constexpr auto             eventPollInterval       = std::chrono::milliseconds{ 5 };
+    constexpr std::string_view typedText               = "Ab";
+    constexpr std::string_view inputInstance           = "grab-input-instance";
+    constexpr std::string_view inputClass              = "GrabInputTestClass";
+    constexpr std::string_view windowTitle             = "grab input test";
+    constexpr std::string_view missingClickEvent       = "ButtonPress was not observed";
+    constexpr std::string_view missingDragSequence =
         "ButtonPress, MotionNotify..., ButtonRelease sequence was not observed";
 
     enum class ObservedPointerEvent : std::uint8_t
     {
-        motion,
-        button_press,
-        button_release,
+        Motion,
+        ButtonPress,
+        ButtonRelease,
     };
 
     template<typename T>
@@ -147,7 +147,7 @@ namespace
     {
         if( xcb_flush( connection ) <=
             0 ||
-            xcb_connection_has_error( connection ) != kXcbOk )
+            xcb_connection_has_error( connection ) != xcbOk )
         {
             return testing::AssertionFailure() << "xcb_flush failed";
         }
@@ -176,11 +176,11 @@ namespace
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          XCB_ATOM_WM_CLASS,
                                          XCB_ATOM_STRING,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( value.size() ),
                                          value.data() )
         ) );
@@ -194,11 +194,11 @@ namespace
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          XCB_ATOM_WM_NAME,
                                          XCB_ATOM_STRING,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( title.size() ),
                                          title.data() )
         ) );
@@ -221,18 +221,18 @@ namespace
                                                           screen.root_depth,
                                                           window,
                                                           screen.root,
-                                                          kWindowX,
-                                                          kWindowY,
-                                                          kWindowWidth,
-                                                          kWindowHeight,
-                                                          kWindowBorderWidth,
+                                                          windowX,
+                                                          windowY,
+                                                          windowWidth,
+                                                          windowHeight,
+                                                          windowBorderWidth,
                                                           XCB_WINDOW_CLASS_INPUT_OUTPUT,
                                                           screen.root_visual,
-                                                          kWindowValueMask,
+                                                          windowValueMask,
                                                           values.data() ) )
         );
-        set_wm_class( connection, window, kInputInstance, kInputClass );
-        set_title( connection, window, kWindowTitle );
+        set_wm_class( connection, window, inputInstance, inputClass );
+        set_title( connection, window, windowTitle );
         EXPECT_TRUE( request_succeeded( connection,
                                         xcb_map_window_checked( connection, window ) ) );
         EXPECT_TRUE( flush_succeeded( connection ) );
@@ -259,15 +259,14 @@ namespace
                        std::size_t       expected_count )
     {
         std::size_t key_presses = 0U;
-        const auto  deadline    = std::chrono::steady_clock::now() + kEventTimeout;
+        const auto  deadline    = std::chrono::steady_clock::now() + eventTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             const auto event = take_xcb_owned( xcb_poll_for_event( connection ) );
             if( event != nullptr )
             {
                 const auto response_type =
-                    static_cast<std::uint8_t>( event->response_type &
-                                               kResponseTypeMask );
+                    static_cast<std::uint8_t>( event->response_type & responseTypeMask );
                 if( response_type == XCB_KEY_PRESS )
                 {
                     ++key_presses;
@@ -279,11 +278,11 @@ namespace
                 continue;
             }
 
-            if( xcb_connection_has_error( connection ) != kXcbOk )
+            if( xcb_connection_has_error( connection ) != xcbOk )
             {
                 return key_presses;
             }
-            std::this_thread::sleep_for( kEventPollInterval );
+            std::this_thread::sleep_for( eventPollInterval );
         }
         return key_presses;
     }
@@ -292,15 +291,14 @@ namespace
     bool
     wait_for_button_press( xcb_connection_t* connection )
     {
-        const auto deadline = std::chrono::steady_clock::now() + kEventTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + eventTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             const auto event = take_xcb_owned( xcb_poll_for_event( connection ) );
             if( event != nullptr )
             {
                 const auto response_type =
-                    static_cast<std::uint8_t>( event->response_type &
-                                               kResponseTypeMask );
+                    static_cast<std::uint8_t>( event->response_type & responseTypeMask );
                 if( response_type == XCB_BUTTON_PRESS )
                 {
                     return true;
@@ -308,11 +306,11 @@ namespace
                 continue;
             }
 
-            if( xcb_connection_has_error( connection ) != kXcbOk )
+            if( xcb_connection_has_error( connection ) != xcbOk )
             {
                 return false;
             }
-            std::this_thread::sleep_for( kEventPollInterval );
+            std::this_thread::sleep_for( eventPollInterval );
         }
         return false;
     }
@@ -322,36 +320,35 @@ namespace
     collect_pointer_events( xcb_connection_t* connection )
     {
         std::vector<ObservedPointerEvent> events;
-        const auto deadline = std::chrono::steady_clock::now() + kEventTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + eventTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             const auto event = take_xcb_owned( xcb_poll_for_event( connection ) );
             if( event != nullptr )
             {
                 const auto response_type =
-                    static_cast<std::uint8_t>( event->response_type &
-                                               kResponseTypeMask );
+                    static_cast<std::uint8_t>( event->response_type & responseTypeMask );
                 if( response_type == XCB_MOTION_NOTIFY )
                 {
-                    events.push_back( ObservedPointerEvent::motion );
+                    events.push_back( ObservedPointerEvent::Motion );
                 }
                 else if( response_type == XCB_BUTTON_PRESS )
                 {
-                    events.push_back( ObservedPointerEvent::button_press );
+                    events.push_back( ObservedPointerEvent::ButtonPress );
                 }
                 else if( response_type == XCB_BUTTON_RELEASE )
                 {
-                    events.push_back( ObservedPointerEvent::button_release );
+                    events.push_back( ObservedPointerEvent::ButtonRelease );
                     return events;
                 }
                 continue;
             }
 
-            if( xcb_connection_has_error( connection ) != kXcbOk )
+            if( xcb_connection_has_error( connection ) != xcbOk )
             {
                 return events;
             }
-            std::this_thread::sleep_for( kEventPollInterval );
+            std::this_thread::sleep_for( eventPollInterval );
         }
         return events;
     }
@@ -366,19 +363,19 @@ namespace
         {
             if( !saw_press )
             {
-                saw_press = event == ObservedPointerEvent::button_press;
+                saw_press = event == ObservedPointerEvent::ButtonPress;
                 continue;
             }
 
-            if( event == ObservedPointerEvent::motion )
+            if( event == ObservedPointerEvent::Motion )
             {
                 ++motion_count;
                 continue;
             }
 
-            if( event == ObservedPointerEvent::button_release )
+            if( event == ObservedPointerEvent::ButtonRelease )
             {
-                if( motion_count >= kMinimumDragMotionEvents )
+                if( motion_count >= minimumDragMotionEvents )
                 {
                     return testing::AssertionSuccess();
                 }
@@ -387,7 +384,7 @@ namespace
                     << " MotionNotify events after ButtonPress";
             }
         }
-        return testing::AssertionFailure() << kMissingDragSequence;
+        return testing::AssertionFailure() << missingDragSequence;
     }
 
 }    // namespace
@@ -395,9 +392,9 @@ namespace
 TEST( Input,
       TypeTextReachesWindow )
 {
-    const ObserverConnection observer{ kXvfbDisplay };
+    const ObserverConnection observer{ xvfbDisplay };
     ASSERT_NE( observer.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( observer.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( observer.get(), observer.screen_index() );
     ASSERT_NE( screen, nullptr );
@@ -405,22 +402,22 @@ TEST( Input,
         create_observer_window( observer.get(), *screen, XCB_EVENT_MASK_KEY_PRESS );
     focus_window( observer.get(), window );
 
-    auto input = grab::Input::open( kXvfbDisplay, kUsLayout );
+    auto input = grab::Input::open( xvfbDisplay, usLayout );
     ASSERT_TRUE( input.has_value() ) << input.error().message;
 
-    const auto type_result = input->type_text( kTypedText );
+    const auto type_result = input->type_text( typedText );
     ASSERT_TRUE( type_result.has_value() ) << type_result.error().message;
 
-    EXPECT_GE( count_key_presses( observer.get(), kExpectedTypedKeyPresses ),
-               kExpectedTypedKeyPresses );
+    EXPECT_GE( count_key_presses( observer.get(), expectedTypedKeyPresses ),
+               expectedTypedKeyPresses );
 }
 
 TEST( Input,
       ClickInWindowHitsInside )
 {
-    const ObserverConnection observer{ kXvfbDisplay };
+    const ObserverConnection observer{ xvfbDisplay };
     ASSERT_NE( observer.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( observer.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( observer.get(), observer.screen_index() );
     ASSERT_NE( screen, nullptr );
@@ -428,26 +425,26 @@ TEST( Input,
         create_observer_window( observer.get(), *screen, XCB_EVENT_MASK_BUTTON_PRESS )
     );
 
-    auto input = grab::Input::open( kXvfbDisplay, kUsLayout );
+    auto input = grab::Input::open( xvfbDisplay, usLayout );
     ASSERT_TRUE( input.has_value() ) << input.error().message;
-    auto located = input->locate( { std::string{ kInputClass } }, kWindowTitle );
+    auto located = input->locate( { std::string{ inputClass } }, windowTitle );
     ASSERT_TRUE( located.has_value() ) << located.error().message;
 
     const auto click_result = input->click_in_window( *located,
-                                                      kWindowCenterFraction,
-                                                      kWindowCenterFraction,
-                                                      kLeftButton );
+                                                      windowCenterFraction,
+                                                      windowCenterFraction,
+                                                      leftButton );
     ASSERT_TRUE( click_result.has_value() ) << click_result.error().message;
 
-    EXPECT_TRUE( wait_for_button_press( observer.get() ) ) << kMissingClickEvent;
+    EXPECT_TRUE( wait_for_button_press( observer.get() ) ) << missingClickEvent;
 }
 
 TEST( Input,
       DragEmitsSequence )
 {
-    const ObserverConnection observer{ kXvfbDisplay };
+    const ObserverConnection observer{ xvfbDisplay };
     ASSERT_NE( observer.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( observer.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( observer.get(), observer.screen_index() );
     ASSERT_NE( screen, nullptr );
@@ -457,11 +454,11 @@ TEST( Input,
                                                    XCB_EVENT_MASK_BUTTON_RELEASE |
                                                    XCB_EVENT_MASK_POINTER_MOTION ) );
 
-    auto input = grab::Input::open( kXvfbDisplay, kUsLayout );
+    auto input = grab::Input::open( xvfbDisplay, usLayout );
     ASSERT_TRUE( input.has_value() ) << input.error().message;
 
-    const auto drag_result = input->drag( { .x = kDragFromX, .y = kDragFromY },
-                                          { .x = kDragToX, .y = kDragToY } );
+    const auto drag_result = input->drag( { .x = dragFromX, .y = dragFromY },
+                                          { .x = dragToX, .y = dragToY } );
     ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
 
     const std::vector<ObservedPointerEvent> events =

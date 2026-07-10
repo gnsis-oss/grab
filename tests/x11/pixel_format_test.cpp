@@ -18,8 +18,8 @@ namespace
     constexpr std::uint8_t  rgb565_bpp       = 16U;
     constexpr std::uint32_t lsb_first_order  = XCB_IMAGE_ORDER_LSB_FIRST;
     constexpr std::uint32_t msb_first_order  = XCB_IMAGE_ORDER_MSB_FIRST;
-    constexpr auto          invalid_argument = grab::ErrorCode::invalid_argument;
-    constexpr auto          expected_format  = grab::PixelFormat::bgr0;
+    constexpr auto          invalid_argument = grab::ErrorCode::InvalidArgument;
+    constexpr auto          expected_format  = grab::PixelFormat::Bgr0;
 
 }    // namespace
 

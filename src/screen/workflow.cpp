@@ -34,21 +34,21 @@ namespace grab::screen
     namespace
     {
 
-        constexpr unsigned char kAsciiUpperA                  = 'A';
-        constexpr unsigned char kAsciiUpperZ                  = 'Z';
-        constexpr unsigned char kAsciiCaseOffset              = 'a' - 'A';
-        constexpr char          kCandidateSeparator           = ',';
-        constexpr std::int32_t  kDefaultNotificationTimeoutMs = -1;
-        constexpr std::uint32_t kOneCapture                   = 1U;
-        constexpr std::uint64_t kNoDiffPixels                 = 0U;
-        constexpr std::size_t   kSubscriptionDepth            = 64U;
-        constexpr auto          kTrackerPollInterval = std::chrono::milliseconds{ 50 };
-        constexpr auto          kWatchPollInterval   = std::chrono::milliseconds{ 20 };
-        constexpr std::string_view kDefaultMissLabel = "<empty>";
-        constexpr std::string_view kNotificationApp  = "grab";
-        constexpr std::string_view kDiffSummary      = "screens differ";
-        constexpr std::string_view kDiffPixelsLabel  = "diff_pixels=";
-        constexpr std::string_view kMatchRatioLabel  = " match_ratio=";
+        constexpr unsigned char    asciiUpperA                  = 'A';
+        constexpr unsigned char    asciiUpperZ                  = 'Z';
+        constexpr unsigned char    asciiCaseOffset              = 'a' - 'A';
+        constexpr char             candidateSeparator           = ',';
+        constexpr std::int32_t     defaultNotificationTimeoutMs = -1;
+        constexpr std::uint32_t    oneCapture                   = 1U;
+        constexpr std::uint64_t    noDiffPixels                 = 0U;
+        constexpr std::size_t      subscriptionDepth            = 64U;
+        constexpr auto             trackerPollInterval = std::chrono::milliseconds{ 50 };
+        constexpr auto             watchPollInterval   = std::chrono::milliseconds{ 20 };
+        constexpr std::string_view defaultMissLabel    = "<empty>";
+        constexpr std::string_view notificationApp     = "grab";
+        constexpr std::string_view diffSummary         = "screens differ";
+        constexpr std::string_view diffPixelsLabel     = "diff_pixels=";
+        constexpr std::string_view matchRatioLabel     = " match_ratio=";
 
         class RunningReactor
         {
@@ -112,9 +112,9 @@ namespace grab::screen
         ascii_lower( char value ) noexcept
         {
             const auto code = static_cast<unsigned char>( value );
-            if( code >= kAsciiUpperA && code <= kAsciiUpperZ )
+            if( code >= asciiUpperA && code <= asciiUpperZ )
             {
-                return static_cast<char>( code + kAsciiCaseOffset );
+                return static_cast<char>( code + asciiCaseOffset );
             }
             return value;
         }
@@ -164,7 +164,7 @@ namespace grab::screen
         {
             if( candidates.empty() )
             {
-                return std::string{ kDefaultMissLabel };
+                return std::string{ defaultMissLabel };
             }
 
             std::string label;
@@ -175,7 +175,7 @@ namespace grab::screen
                     label = candidate;
                     continue;
                 }
-                label.push_back( kCandidateSeparator );
+                label.push_back( candidateSeparator );
                 label.append( candidate );
             }
             return label;
@@ -189,7 +189,7 @@ namespace grab::screen
             if( bytes.size() >
                 static_cast<std::size_t>( std::numeric_limits<std::streamsize>::max() ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "file is too large to write: " + path.string() );
             }
 
@@ -205,7 +205,7 @@ namespace grab::screen
             std::ofstream stream{ path, std::ios::binary };
             if( !stream )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "failed to open output file: " + path.string() );
             }
 
@@ -216,7 +216,7 @@ namespace grab::screen
             }
             if( !stream )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "failed to write output file: " + path.string() );
             }
 
@@ -230,7 +230,7 @@ namespace grab::screen
             std::ifstream stream{ path, std::ios::binary };
             if( !stream )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "failed to open input file: " + path.string() );
             }
 
@@ -240,7 +240,7 @@ namespace grab::screen
             };
             if( stream.bad() )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "failed to read input file: " + path.string() );
             }
 
@@ -283,7 +283,7 @@ namespace grab::screen
         matching_title_change( const grab::Event&              event,
                                const std::vector<std::string>& candidates )
         {
-            if( event.kind != grab::EventKind::window_title_changed )
+            if( event.kind != grab::EventKind::WindowTitleChanged )
             {
                 return std::nullopt;
             }
@@ -317,7 +317,7 @@ namespace grab::screen
                 {
                     return std::unexpected( std::move( written.error() ) );
                 }
-                captured += kOneCapture;
+                captured += oneCapture;
             }
             return captured;
         }
@@ -327,14 +327,14 @@ namespace grab::screen
         diff_notification( const grab::image::DiffResult& diff )
         {
             return grab::notify::Notification{
-                .app_name   = std::string{ kNotificationApp },
-                .summary    = std::string{ kDiffSummary },
-                .body       = std::string{ kDiffPixelsLabel } +
+                .app_name   = std::string{ notificationApp },
+                .summary    = std::string{ diffSummary },
+                .body       = std::string{ diffPixelsLabel } +
                               std::to_string( diff.diff_pixels ) +
-                              std::string{ kMatchRatioLabel } +
+                              std::string{ matchRatioLabel } +
                               std::to_string( diff.match_ratio ),
                 .icon       = {},
-                .timeout_ms = kDefaultNotificationTimeoutMs,
+                .timeout_ms = defaultNotificationTimeoutMs,
             };
         }
 
@@ -350,7 +350,7 @@ namespace grab::screen
             auto image = screen.window_by_class( item.wm_class_candidates );
             if( !image.has_value() )
             {
-                if( image.error().code == grab::ErrorCode::window_not_found )
+                if( image.error().code == grab::ErrorCode::WindowNotFound )
                 {
                     result.misses.push_back( miss_label( item.wm_class_candidates ) );
                     continue;
@@ -371,7 +371,7 @@ namespace grab::screen
                 return std::unexpected( std::move( written.error() ) );
             }
 
-            result.captured += kOneCapture;
+            result.captured += oneCapture;
         }
         return result;
     }
@@ -411,7 +411,7 @@ namespace grab::screen
             return std::unexpected( std::move( diff.error() ) );
         }
 
-        if( diff->diff_pixels != kNoDiffPixels && notifier != nullptr )
+        if( diff->diff_pixels != noDiffPixels && notifier != nullptr )
         {
             auto notified = notifier->notify( diff_notification( *diff ) );
             if( !notified.has_value() )
@@ -431,7 +431,7 @@ namespace grab::screen
     {
         if( !should_stop )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "watch_capture requires a stop predicate" );
         }
 
@@ -440,7 +440,7 @@ namespace grab::screen
         if( candidates.empty() )
         {
             return grab::fail(
-                grab::ErrorCode::invalid_argument,
+                grab::ErrorCode::InvalidArgument,
                 "watch_capture requires at least one WM_CLASS candidate"
             );
         }
@@ -449,16 +449,16 @@ namespace grab::screen
         grab::EventBus bus;
         auto           subscription = bus.subscribe(
             grab::EventFilter{
-                .kinds      = { grab::EventKind::window_title_changed },
+                .kinds      = { grab::EventKind::WindowTitleChanged },
                 .categories = {},
             },
-            kSubscriptionDepth
+            subscriptionDepth
         );
 
         auto tracker = grab::event::WindowTracker::start( nullptr,
                                                           running.reactor(),
                                                           bus,
-                                                          kTrackerPollInterval );
+                                                          trackerPollInterval );
         if( !tracker.has_value() )
         {
             running.stop_and_join();
@@ -478,7 +478,7 @@ namespace grab::screen
                 return std::unexpected( std::move( pending.error() ) );
             }
             captured += *pending;
-            std::this_thread::sleep_for( kWatchPollInterval );
+            std::this_thread::sleep_for( watchPollInterval );
         }
 
         auto pending =

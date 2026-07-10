@@ -20,7 +20,7 @@ namespace
         grab::session::SessionRecord r;
         r.name     = std::move( name );
         r.provider = "fake";
-        r.state    = grab::SessionState::starting;
+        r.state    = grab::SessionState::Starting;
         return r;
     }
 
@@ -57,7 +57,7 @@ TEST( SessionRegistry,
     ASSERT_TRUE( registry.create( rec( "ai" ) ).has_value() );
     const auto second = registry.create( rec( "ai" ) );
     ASSERT_FALSE( second.has_value() );
-    EXPECT_EQ( second.error().code, grab::ErrorCode::session_exists );
+    EXPECT_EQ( second.error().code, grab::ErrorCode::SessionExists );
 }
 
 TEST( SessionRegistry,
@@ -69,7 +69,7 @@ TEST( SessionRegistry,
 
     const auto                     read = registry.read( "ghost" );
     ASSERT_FALSE( read.has_value() );
-    EXPECT_EQ( read.error().code, grab::ErrorCode::session_not_found );
+    EXPECT_EQ( read.error().code, grab::ErrorCode::SessionNotFound );
 }
 
 TEST( SessionRegistryLiveness,

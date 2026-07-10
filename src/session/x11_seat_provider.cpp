@@ -56,25 +56,25 @@ namespace grab::session
     X11SeatSessionProvider::probe( const grab::core::Environment& env,
                                    grab::SessionMode              mode ) const
     {
-        if( env.session != grab::core::SessionType::x11 )
+        if( env.session != grab::core::SessionType::X11 )
         {
             return grab::Availability{
-                .state   = grab::AvailabilityState::unavailable,
+                .state   = grab::AvailabilityState::Unavailable,
                 .reason  = "not an X11 session",
                 .quality = 0,
             };
         }
-        if( mode == grab::SessionMode::offscreen )
+        if( mode == grab::SessionMode::Offscreen )
         {
             return grab::Availability{
-                .state   = grab::AvailabilityState::unavailable,
+                .state   = grab::AvailabilityState::Unavailable,
                 .reason  = "X11 has no offscreen isolation; use --mode shared or "
                            "the Wayland provider",
                 .quality = 0,
             };
         }
         return grab::Availability{
-            .state   = grab::AvailabilityState::available,
+            .state   = grab::AvailabilityState::Available,
             .reason  = "",
             .quality = x11_seat_quality,
         };
@@ -86,7 +86,7 @@ namespace grab::session
         auto connection = grab::platform::x11::XcbConnection::open( "" );
         if( !connection.has_value() )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "X11 seat: display unavailable" );
         }
         auto conn = std::make_unique<grab::platform::x11::XcbConnection>(
@@ -129,7 +129,7 @@ namespace grab::session
                                   } );
         if( match == active.end() )
         {
-            return grab::fail( grab::ErrorCode::session_not_found,
+            return grab::fail( grab::ErrorCode::SessionNotFound,
                                "X11 seat: unknown session runtime" );
         }
         active.erase( match );    // ~XiSeat removes the master device pair

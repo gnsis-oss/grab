@@ -21,25 +21,25 @@ namespace grab::log
 
     // Compile levels: 0 disables all log calls; 1 enables nominal lifecycle
     // events; 2 adds verbose branch/candidate detail; 3 adds debug detail.
-    inline constexpr int kOffLevel     = GRAB_LOG_LEVEL_OFF;
-    inline constexpr int kNominalLevel = GRAB_LOG_LEVEL_NOMINAL;
-    inline constexpr int kVerboseLevel = GRAB_LOG_LEVEL_VERBOSE;
-    inline constexpr int kDebugLevel   = GRAB_LOG_LEVEL_DEBUG;
-    inline constexpr int kCompileLevel = LOG_COMPILE_LEVEL;
+    inline constexpr int offLevel     = GRAB_LOG_LEVEL_OFF;
+    inline constexpr int nominalLevel = GRAB_LOG_LEVEL_NOMINAL;
+    inline constexpr int verboseLevel = GRAB_LOG_LEVEL_VERBOSE;
+    inline constexpr int debugLevel   = GRAB_LOG_LEVEL_DEBUG;
+    inline constexpr int compileLevel = LOG_COMPILE_LEVEL;
 
     enum class Level : int
     {
-        off     = kOffLevel,
-        nominal = kNominalLevel,
-        verbose = kVerboseLevel,
-        debug   = kDebugLevel,
+        Off     = offLevel,
+        Nominal = nominalLevel,
+        Verbose = verboseLevel,
+        Debug   = debugLevel,
     };
 
     [[nodiscard]]
     consteval bool
     enabled( Level level ) noexcept
     {
-        return kCompileLevel >= static_cast<int>( level );
+        return compileLevel >= static_cast<int>( level );
     }
 
     class Event
@@ -184,21 +184,21 @@ namespace grab::log
     void
     nominal( Emit&& emit_event )
     {
-        emit<Level::nominal>( std::forward<Emit>( emit_event ) );
+        emit<Level::Nominal>( std::forward<Emit>( emit_event ) );
     }
 
     template<typename Emit>
     void
     verbose( Emit&& emit_event )
     {
-        emit<Level::verbose>( std::forward<Emit>( emit_event ) );
+        emit<Level::Verbose>( std::forward<Emit>( emit_event ) );
     }
 
     template<typename Emit>
     void
     debug( Emit&& emit_event )
     {
-        emit<Level::debug>( std::forward<Emit>( emit_event ) );
+        emit<Level::Debug>( std::forward<Emit>( emit_event ) );
     }
 
 }    // namespace grab::log

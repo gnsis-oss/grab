@@ -21,7 +21,7 @@ namespace grab::core
 
     struct CapabilityRequest
     {
-            Capability     capability = Capability::screen_display_image;
+            Capability     capability = Capability::ScreenDisplayImage;
             std::string    target_class;    // empty = targetless
             std::string    target_key;
             ResolveOptions options;
@@ -49,7 +49,7 @@ namespace grab::core
             struct CacheKey
             {
                     std::uint64_t generation = 0;
-                    Capability    capability = Capability::screen_display_image;
+                    Capability    capability = Capability::ScreenDisplayImage;
                     std::string   target_class;
                     std::string   target_key;
                     bool          prefer_permission_over_degraded = true;

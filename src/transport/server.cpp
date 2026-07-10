@@ -55,7 +55,7 @@ namespace grab::transport
         auto server = builder.BuildAndStart();
         if( server == nullptr )
         {
-            return grab::fail( grab::ErrorCode::protocol_error,
+            return grab::fail( grab::ErrorCode::ProtocolError,
                                "failed to start transport server at " + endpoint );
         }
 

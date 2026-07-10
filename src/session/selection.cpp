@@ -28,14 +28,14 @@ namespace grab::session
         {
             switch( state )
             {
-                case AvailabilityState::available :
+                case AvailabilityState::Available :
                     return 3;
-                case AvailabilityState::degraded :
+                case AvailabilityState::Degraded :
                     return 2;
-                case AvailabilityState::needs_permission :
+                case AvailabilityState::NeedsPermission :
                     return 1;
-                case AvailabilityState::count :
-                case AvailabilityState::unavailable :
+                case AvailabilityState::Count :
+                case AvailabilityState::Unavailable :
                     return 0;
             }
             return 0;
@@ -146,7 +146,7 @@ namespace grab::session
         if( best == nullptr || rank( best->availability.state ) == 0 )
         {
             return std::unexpected( Error{
-                .code       = ErrorCode::capability_unavailable,
+                .code       = ErrorCode::CapabilityUnavailable,
                 .message    = no_provider_message( mode, candidates ),
                 .capability = {},
                 .target     = std::string{ mode_name( mode ) },
@@ -162,8 +162,8 @@ namespace grab::session
                                  const grab::core::Environment&          env )
     {
         constexpr std::array<SessionMode, 2U> modes{
-            SessionMode::shared,
-            SessionMode::offscreen,
+            SessionMode::Shared,
+            SessionMode::Offscreen,
         };
 
         std::vector<SessionModeReport> report;
@@ -178,7 +178,7 @@ namespace grab::session
                 report.push_back( SessionModeReport{
                     .mode     = mode,
                     .provider = {},
-                    .state    = AvailabilityState::unavailable,
+                    .state    = AvailabilityState::Unavailable,
                     .reason   = "no provider",
                 } );
                 continue;

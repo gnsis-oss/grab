@@ -23,14 +23,14 @@ namespace grab::platform::x11
             const xcb_setup_t* setup = xcb_get_setup( connection );
             if( setup == nullptr )
             {
-                return grab::fail( grab::ErrorCode::display_unavailable,
+                return grab::fail( grab::ErrorCode::DisplayUnavailable,
                                    "X display setup is unavailable" );
             }
 
             const xcb_screen_iterator_t screens = xcb_setup_roots_iterator( setup );
             if( screens.rem == 0 || screens.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::display_unavailable,
+                return grab::fail( grab::ErrorCode::DisplayUnavailable,
                                    "X display has no screens" );
             }
             return screens.data->root;
@@ -152,7 +152,7 @@ namespace grab::platform::x11
             {
                 xcb_disconnect( connection );
             }
-            return grab::fail( grab::ErrorCode::display_unavailable,
+            return grab::fail( grab::ErrorCode::DisplayUnavailable,
                                "unable to open X display" );
         }
 

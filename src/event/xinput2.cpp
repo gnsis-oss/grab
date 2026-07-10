@@ -27,25 +27,24 @@ namespace grab::event
     namespace
     {
 
-        constexpr int           kInvalidFd                 = -1;
-        constexpr int           kXcbOk                     = 0;
-        constexpr int           kFlushFailed               = 0;
-        constexpr std::uint64_t kNoToken                   = 0U;
-        constexpr std::uint8_t  kResponseTypeMask          = 0X7FU;
-        constexpr std::uint16_t kRequiredXiMajorVersion    = 2U;
-        constexpr std::uint16_t kRequiredXiMinorVersion    = 0U;
-        constexpr std::uint16_t kRawMaskCount              = 1U;
-        constexpr std::uint16_t kRawMaskWords              = 1U;
-        constexpr int           kXAxisValuator             = 0;
-        constexpr int           kYAxisValuator             = 1;
-        constexpr int           kBitsPerMaskWord           = 32;
-        constexpr double        kFp3232FractionDenominator = 4'294'967'296.0;
-        constexpr std::uint32_t kNoEvents                  = 0U;
-        constexpr std::uint32_t kReadableEvents =
-            static_cast<std::uint32_t>( EPOLLIN ) |
-            static_cast<std::uint32_t>( EPOLLERR ) |
-            static_cast<std::uint32_t>( EPOLLHUP );
-        constexpr std::uint32_t kRawEventMask =
+        constexpr int           invalidFd                 = -1;
+        constexpr int           xcbOk                     = 0;
+        constexpr int           flushFailed               = 0;
+        constexpr std::uint64_t noToken                   = 0U;
+        constexpr std::uint8_t  responseTypeMask          = 0X7FU;
+        constexpr std::uint16_t requiredXiMajorVersion    = 2U;
+        constexpr std::uint16_t requiredXiMinorVersion    = 0U;
+        constexpr std::uint16_t rawMaskCount              = 1U;
+        constexpr std::uint16_t rawMaskWords              = 1U;
+        constexpr int           xAxisValuator             = 0;
+        constexpr int           yAxisValuator             = 1;
+        constexpr int           bitsPerMaskWord           = 32;
+        constexpr double        fp3232FractionDenominator = 4'294'967'296.0;
+        constexpr std::uint32_t noEvents                  = 0U;
+        constexpr std::uint32_t readableEvents = static_cast<std::uint32_t>( EPOLLIN ) |
+                                                 static_cast<std::uint32_t>( EPOLLERR ) |
+                                                 static_cast<std::uint32_t>( EPOLLHUP );
+        constexpr std::uint32_t rawEventMask =
             static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_KEY_PRESS ) |
             static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_KEY_RELEASE ) |
             static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_BUTTON_PRESS ) |
@@ -60,8 +59,8 @@ namespace grab::event
 
         struct RawEventSelection
         {
-                xcb_input_event_mask_t                   event_mask;
-                std::array<std::uint32_t, kRawMaskWords> mask_words;
+                xcb_input_event_mask_t                  event_mask;
+                std::array<std::uint32_t, rawMaskWords> mask_words;
         };
 
         template<typename T>
@@ -88,7 +87,7 @@ namespace grab::event
 
             if( iterator.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB default screen is unavailable" );
             }
 
@@ -103,7 +102,7 @@ namespace grab::event
                 xcb_get_extension_data( connection, &xcb_input_id );
             if( extension == nullptr || extension->present == 0U )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XInput extension is unavailable" );
             }
 
@@ -117,10 +116,10 @@ namespace grab::event
         ) noexcept
         {
             return version.major_version >
-                   kRequiredXiMajorVersion ||
+                   requiredXiMajorVersion ||
                    ( version.major_version ==
-                     kRequiredXiMajorVersion &&
-                     version.minor_version >= kRequiredXiMinorVersion );
+                     requiredXiMajorVersion &&
+                     version.minor_version >= requiredXiMinorVersion );
         }
 
         [[nodiscard]]
@@ -131,21 +130,21 @@ namespace grab::event
             const auto reply = take_xcb_owned( xcb_input_xi_query_version_reply(
                 connection,
                 xcb_input_xi_query_version( connection,
-                                            kRequiredXiMajorVersion,
-                                            kRequiredXiMinorVersion ),
+                                            requiredXiMajorVersion,
+                                            requiredXiMinorVersion ),
                 &raw_error
             ) );
             const auto error = take_xcb_owned( raw_error );
 
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XInput2 version query failed" );
             }
 
             if( !supports_required_xi_version( *reply ) )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XInput2 2.0 is unavailable" );
             }
 
@@ -161,7 +160,7 @@ namespace grab::event
             const auto error = take_xcb_owned( xcb_request_check( connection, cookie ) );
             if( error != nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    std::string{ operation } +
                                        " failed with X error " +
                                        std::to_string( error->error_code ) );
@@ -180,8 +179,8 @@ namespace grab::event
                 RawEventSelection value{};
                 value.event_mask.deviceid =
                     static_cast<xcb_input_device_id_t>( XCB_INPUT_DEVICE_ALL_MASTER );
-                value.event_mask.mask_len = kRawMaskWords;
-                value.mask_words          = { kRawEventMask };
+                value.event_mask.mask_len = rawMaskWords;
+                value.mask_words          = { rawEventMask };
                 return value;
             }();
 
@@ -189,7 +188,7 @@ namespace grab::event
                 connection,
                 xcb_input_xi_select_events_checked( connection,
                                                     root,
-                                                    kRawMaskCount,
+                                                    rawMaskCount,
                                                     &selection.event_mask ),
                 "XISelectEvents raw input"
             );
@@ -199,10 +198,10 @@ namespace grab::event
             }
 
             if( xcb_flush( connection ) <=
-                kFlushFailed ||
-                xcb_connection_has_error( connection ) != kXcbOk )
+                flushFailed ||
+                xcb_connection_has_error( connection ) != xcbOk )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XInput2 raw event selection flush failed" );
             }
 
@@ -214,7 +213,7 @@ namespace grab::event
         fp3232_to_double( xcb_input_fp3232_t value ) noexcept
         {
             return static_cast<double>( value.integral ) +
-                   ( static_cast<double>( value.frac ) / kFp3232FractionDenominator );
+                   ( static_cast<double>( value.frac ) / fp3232FractionDenominator );
         }
 
         [[nodiscard]]
@@ -226,7 +225,7 @@ namespace grab::event
                 .timestamp = static_cast<double>( raw.time ),
                 .sequence  = 0U,
                 .kind      = kind,
-                .category  = grab::EventCategory::input,
+                .category  = grab::EventCategory::Input,
                 .payload   = grab::Payload{ grab::InputKey{
                     .code = raw.detail,
                     .name = {},
@@ -241,8 +240,8 @@ namespace grab::event
             return grab::Event{
                 .timestamp = static_cast<double>( raw.time ),
                 .sequence  = 0U,
-                .kind      = grab::EventKind::mouse_click,
-                .category  = grab::EventCategory::input,
+                .kind      = grab::EventKind::MouseClick,
+                .category  = grab::EventCategory::Input,
                 .payload   = grab::Payload{ grab::MouseClick{
                     .button = raw.detail,
                     .name   = {},
@@ -259,8 +258,8 @@ namespace grab::event
             return grab::Event{
                 .timestamp = timestamp,
                 .sequence  = 0U,
-                .kind      = grab::EventKind::mouse_move,
-                .category  = grab::EventCategory::input,
+                .kind      = grab::EventKind::MouseMove,
+                .category  = grab::EventCategory::Input,
                 .payload   = grab::Payload{ grab::MouseMove{
                     .axis  = std::string{ axis },
                     .delta = delta,
@@ -274,13 +273,13 @@ namespace grab::event
                             int                       axis,
                             double                    delta )
         {
-            if( axis == kXAxisValuator )
+            if( axis == xAxisValuator )
             {
                 events.push_back( make_motion_event( timestamp, "x", delta ) );
                 return;
             }
 
-            if( axis == kYAxisValuator )
+            if( axis == yAxisValuator )
             {
                 events.push_back( make_motion_event( timestamp, "y", delta ) );
             }
@@ -328,17 +327,17 @@ namespace grab::event
             {
                 const std::uint32_t word = *std::next( mask_words.begin(), word_index );
                 for( int bit_index = 0;
-                     bit_index < kBitsPerMaskWord && value_index < values_length;
+                     bit_index < bitsPerMaskWord && value_index < values_length;
                      ++bit_index )
                 {
                     const std::uint32_t bit = static_cast<std::uint32_t>( 1U )
                                            << bit_index;
-                    if( ( word & bit ) == kNoEvents )
+                    if( ( word & bit ) == noEvents )
                     {
                         continue;
                     }
 
-                    const int axis = ( word_index * kBitsPerMaskWord ) + bit_index;
+                    const int axis = ( word_index * bitsPerMaskWord ) + bit_index;
                     append_motion_axis(
                         events,
                         timestamp,
@@ -362,7 +361,7 @@ namespace grab::event
                               std::vector<grab::Event>&  events )
         {
             const auto response_type =
-                static_cast<std::uint8_t>( raw_event.response_type & kResponseTypeMask );
+                static_cast<std::uint8_t>( raw_event.response_type & responseTypeMask );
             if( response_type != XCB_GE_GENERIC )
             {
                 return;
@@ -384,7 +383,7 @@ namespace grab::event
                             static_cast<const xcb_input_raw_key_press_event_t*>(
                                 event_storage
                             );
-                        events.push_back( make_key_event( grab::EventKind::key_down,
+                        events.push_back( make_key_event( grab::EventKind::KeyDown,
                                                           *raw ) );
                         break;
                     }
@@ -394,7 +393,7 @@ namespace grab::event
                             static_cast<const xcb_input_raw_key_release_event_t*>(
                                 event_storage
                             );
-                        events.push_back( make_key_event( grab::EventKind::key_up,
+                        events.push_back( make_key_event( grab::EventKind::KeyUp,
                                                           *raw ) );
                         break;
                     }
@@ -462,7 +461,7 @@ namespace grab::event
         reactor_( std::exchange( other.reactor_,
                                  nullptr ) ),
         token_( std::exchange( other.token_,
-                               kNoToken ) ),
+                               noToken ) ),
         state_( std::move( other.state_ ) )
     {
     }
@@ -474,7 +473,7 @@ namespace grab::event
         {
             stop();
             reactor_ = std::exchange( other.reactor_, nullptr );
-            token_   = std::exchange( other.token_, kNoToken );
+            token_   = std::exchange( other.token_, noToken );
             state_   = std::move( other.state_ );
         }
         return *this;
@@ -492,9 +491,9 @@ namespace grab::event
         };
         if( connection ==
             nullptr ||
-            xcb_connection_has_error( connection.get() ) != kXcbOk )
+            xcb_connection_has_error( connection.get() ) != xcbOk )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "XCB display connection failed" );
         }
 
@@ -523,9 +522,9 @@ namespace grab::event
         }
 
         const int fd = xcb_get_file_descriptor( connection.get() );
-        if( fd == kInvalidFd )
+        if( fd == invalidFd )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "XCB connection file descriptor is unavailable" );
         }
 
@@ -549,7 +548,7 @@ namespace grab::event
     XInput2Monitor::handle_fd( const std::shared_ptr<State>& state,
                                std::uint32_t                 events )
     {
-        if( ( events & kReadableEvents ) == kNoEvents )
+        if( ( events & readableEvents ) == noEvents )
         {
             return;
         }
@@ -576,7 +575,7 @@ namespace grab::event
                 append_decoded_event( *event, state->extension_opcode, pending_events );
             }
 
-            if( xcb_connection_has_error( state->connection ) != kXcbOk )
+            if( xcb_connection_has_error( state->connection ) != xcbOk )
             {
                 state->active = false;
             }
@@ -592,10 +591,10 @@ namespace grab::event
     XInput2Monitor::stop() noexcept
     {
         grab::core::Reactor* const reactor = std::exchange( reactor_, nullptr );
-        const std::uint64_t        token   = std::exchange( token_, kNoToken );
+        const std::uint64_t        token   = std::exchange( token_, noToken );
         auto                       state   = std::move( state_ );
 
-        if( reactor != nullptr && token != kNoToken )
+        if( reactor != nullptr && token != noToken )
         {
             bool remove_failed = false;
             try

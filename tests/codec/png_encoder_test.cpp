@@ -171,7 +171,7 @@ TEST( PngEncoder,
             .width  = entry.width,
             .height = entry.height,
             .stride = static_cast<std::size_t>( entry.width ) * rgb24_stride,
-            .format = grab::PixelFormat::rgb24,
+            .format = grab::PixelFormat::Rgb24,
         };
 
         const auto encoded = grab::codec::encode_png( image );
@@ -204,14 +204,14 @@ TEST( PngEncoder,
         .width  = bgr0_test_width,
         .height = bgr0_test_height,
         .stride = static_cast<std::size_t>( bgr0_test_width ) * rgb24_stride,
-        .format = grab::PixelFormat::rgb24,
+        .format = grab::PixelFormat::Rgb24,
     };
     const grab::ImageView bgr0_image{
         .data   = bgr0.data(),
         .width  = bgr0_test_width,
         .height = bgr0_test_height,
         .stride = static_cast<std::size_t>( bgr0_test_width ) * bgr0_stride,
-        .format = grab::PixelFormat::bgr0,
+        .format = grab::PixelFormat::Bgr0,
     };
 
     const auto rgb_png  = grab::codec::encode_png( rgb_image );

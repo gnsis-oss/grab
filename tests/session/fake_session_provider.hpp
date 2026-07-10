@@ -114,7 +114,7 @@ namespace grab::test
             static constexpr grab::Pid   no_supervisor_pid{};
             static constexpr const char* endpoint_prefix = ":fake-";
             static constexpr std::size_t mode_count =
-                static_cast<std::size_t>( grab::SessionMode::count );
+                static_cast<std::size_t>( grab::SessionMode::Count );
 
             [[nodiscard]]
             static constexpr std::size_t
@@ -137,7 +137,7 @@ namespace grab::test
             default_availability()
             {
                 return grab::Availability{
-                    .state   = grab::AvailabilityState::available,
+                    .state   = grab::AvailabilityState::Available,
                     .reason  = {},
                     .quality = quality,
                 };

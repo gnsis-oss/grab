@@ -16,18 +16,18 @@
 namespace
 {
 
-    constexpr int           kInvalidFd           = -1;
-    constexpr int           kPosixSuccess        = 0;
-    constexpr unsigned int  kEventfdInitialValue = 0U;
-    constexpr eventfd_t     kEventfdSignalValue  = 1U;
-    constexpr std::uint64_t kNoToken             = 0U;
-    constexpr std::uint32_t kNoEvents            = 0U;
-    constexpr int           kNoCallbacks         = 0;
-    constexpr int           kOneCallback         = 1;
-    constexpr auto          kThreadReadyTimeout  = std::chrono::seconds{ 2 };
-    constexpr auto          kCallbackTimeout     = std::chrono::seconds{ 2 };
-    constexpr auto          kTimerDelay          = std::chrono::milliseconds{ 20 };
-    constexpr auto          kNoCallbackWindow    = std::chrono::milliseconds{ 30 };
+    constexpr int           invalidFd           = -1;
+    constexpr int           posixSuccess        = 0;
+    constexpr unsigned int  eventfdInitialValue = 0U;
+    constexpr eventfd_t     eventfdSignalValue  = 1U;
+    constexpr std::uint64_t noToken             = 0U;
+    constexpr std::uint32_t noEvents            = 0U;
+    constexpr int           noCallbacks         = 0;
+    constexpr int           oneCallback         = 1;
+    constexpr auto          threadReadyTimeout  = std::chrono::seconds{ 2 };
+    constexpr auto          callbackTimeout     = std::chrono::seconds{ 2 };
+    constexpr auto          timerDelay          = std::chrono::milliseconds{ 20 };
+    constexpr auto          noCallbackWindow    = std::chrono::milliseconds{ 30 };
 
     class UniqueFd
     {
@@ -62,15 +62,15 @@ namespace
             void
             reset() noexcept
             {
-                if( fd_ != kInvalidFd )
+                if( fd_ != invalidFd )
                 {
                     const auto close_result = ::close( fd_ );
                     static_cast<void>( close_result );
-                    fd_ = kInvalidFd;
+                    fd_ = invalidFd;
                 }
             }
 
-            int fd_ = kInvalidFd;
+            int fd_ = invalidFd;
     };
 
 }    // namespace
@@ -79,13 +79,13 @@ TEST( Reactor,
       ReadableFdFiresCallbackWithReadableEvent )
 {
     grab::core::Reactor reactor;
-    UniqueFd            event_fd( ::eventfd( kEventfdInitialValue, EFD_CLOEXEC ) );
-    ASSERT_NE( event_fd.get(), kInvalidFd );
+    UniqueFd            event_fd( ::eventfd( eventfdInitialValue, EFD_CLOEXEC ) );
+    ASSERT_NE( event_fd.get(), invalidFd );
 
     std::promise<void>            callback_ran;
     auto                          callback_future = callback_ran.get_future();
-    std::atomic<int>              callback_count{ kNoCallbacks };
-    std::uint32_t                 seen_events = kNoEvents;
+    std::atomic<int>              callback_count{ noCallbacks };
+    std::uint32_t                 seen_events = noEvents;
     grab::Result<void>            run_result;
     std::promise<std::thread::id> reactor_started;
     auto                          reactor_started_future = reactor_started.get_future();
@@ -96,15 +96,15 @@ TEST( Reactor,
         [&]( std::uint32_t events )
         {
             seen_events = events;
-            callback_count.fetch_add( kOneCallback, std::memory_order_relaxed );
+            callback_count.fetch_add( oneCallback, std::memory_order_relaxed );
 
-            eventfd_t value = kEventfdInitialValue;
-            EXPECT_EQ( ::eventfd_read( event_fd.get(), &value ), kPosixSuccess );
+            eventfd_t value = eventfdInitialValue;
+            EXPECT_EQ( ::eventfd_read( event_fd.get(), &value ), posixSuccess );
             callback_ran.set_value();
             reactor.stop();
         }
     );
-    EXPECT_NE( token, kNoToken );
+    EXPECT_NE( token, noToken );
 
     std::thread reactor_thread(
         [&]
@@ -114,16 +114,16 @@ TEST( Reactor,
         }
     );
 
-    if( reactor_started_future.wait_for( kThreadReadyTimeout ) !=
+    if( reactor_started_future.wait_for( threadReadyTimeout ) !=
         std::future_status::ready )
     {
         reactor.stop();
         reactor_thread.join();
         FAIL() << "reactor thread did not start";
     }
-    EXPECT_EQ( ::eventfd_write( event_fd.get(), kEventfdSignalValue ), kPosixSuccess );
+    EXPECT_EQ( ::eventfd_write( event_fd.get(), eventfdSignalValue ), posixSuccess );
 
-    if( callback_future.wait_for( kCallbackTimeout ) != std::future_status::ready )
+    if( callback_future.wait_for( callbackTimeout ) != std::future_status::ready )
     {
         reactor.stop();
         reactor_thread.join();
@@ -132,8 +132,8 @@ TEST( Reactor,
 
     reactor_thread.join();
     EXPECT_TRUE( run_result.has_value() );
-    EXPECT_EQ( callback_count.load( std::memory_order_relaxed ), kOneCallback );
-    EXPECT_NE( seen_events & EPOLLIN, kNoEvents );
+    EXPECT_EQ( callback_count.load( std::memory_order_relaxed ), oneCallback );
+    EXPECT_NE( seen_events & EPOLLIN, noEvents );
 }
 
 TEST( Reactor,
@@ -155,7 +155,7 @@ TEST( Reactor,
         }
     );
 
-    if( reactor_started_future.wait_for( kThreadReadyTimeout ) !=
+    if( reactor_started_future.wait_for( threadReadyTimeout ) !=
         std::future_status::ready )
     {
         reactor.stop();
@@ -178,8 +178,7 @@ TEST( Reactor,
     );
     poster_thread.join();
 
-    if( callback_thread_future.wait_for( kCallbackTimeout ) !=
-        std::future_status::ready )
+    if( callback_thread_future.wait_for( callbackTimeout ) != std::future_status::ready )
     {
         reactor.stop();
         reactor_thread.join();
@@ -202,14 +201,14 @@ TEST( Reactor,
     std::promise<void>            timer_fired;
     auto                          timer_fired_future = timer_fired.get_future();
     grab::Result<void>            run_result;
-    int                           timer_count = kNoCallbacks;
+    int                           timer_count = noCallbacks;
     std::thread::id               timer_thread_id;
     std::chrono::steady_clock::duration elapsed =
         std::chrono::steady_clock::duration::zero();
     const auto started_at = std::chrono::steady_clock::now();
 
     const auto token =
-        reactor.add_timer( kTimerDelay,
+        reactor.add_timer( timerDelay,
                            [&]
                            {
                                ++timer_count;
@@ -218,7 +217,7 @@ TEST( Reactor,
                                timer_fired.set_value();
                                reactor.stop();
                            } );
-    EXPECT_NE( token, kNoToken );
+    EXPECT_NE( token, noToken );
 
     std::thread reactor_thread(
         [&]
@@ -228,7 +227,7 @@ TEST( Reactor,
         }
     );
 
-    if( reactor_started_future.wait_for( kThreadReadyTimeout ) !=
+    if( reactor_started_future.wait_for( threadReadyTimeout ) !=
         std::future_status::ready )
     {
         reactor.stop();
@@ -237,7 +236,7 @@ TEST( Reactor,
     }
     const auto reactor_thread_id = reactor_started_future.get();
 
-    if( timer_fired_future.wait_for( kCallbackTimeout ) != std::future_status::ready )
+    if( timer_fired_future.wait_for( callbackTimeout ) != std::future_status::ready )
     {
         reactor.stop();
         reactor_thread.join();
@@ -246,17 +245,17 @@ TEST( Reactor,
 
     reactor_thread.join();
     EXPECT_TRUE( run_result.has_value() );
-    EXPECT_EQ( timer_count, kOneCallback );
+    EXPECT_EQ( timer_count, oneCallback );
     EXPECT_EQ( timer_thread_id, reactor_thread_id );
-    EXPECT_GE( elapsed, kTimerDelay );
+    EXPECT_GE( elapsed, timerDelay );
 }
 
 TEST( Reactor,
       RemoveFdStopsFurtherCallbacks )
 {
     grab::core::Reactor reactor;
-    UniqueFd            event_fd( ::eventfd( kEventfdInitialValue, EFD_CLOEXEC ) );
-    ASSERT_NE( event_fd.get(), kInvalidFd );
+    UniqueFd            event_fd( ::eventfd( eventfdInitialValue, EFD_CLOEXEC ) );
+    ASSERT_NE( event_fd.get(), invalidFd );
 
     std::promise<std::thread::id> reactor_started;
     auto                          reactor_started_future = reactor_started.get_future();
@@ -265,22 +264,22 @@ TEST( Reactor,
     std::promise<void> remove_drained;
     auto               remove_drained_future = remove_drained.get_future();
     grab::Result<void> run_result;
-    std::atomic<int>   callback_count{ kNoCallbacks };
+    std::atomic<int>   callback_count{ noCallbacks };
 
     const auto         token = reactor.add_fd(
         event_fd.get(),
         EPOLLIN,
         [&]( std::uint32_t events )
         {
-            EXPECT_NE( events & EPOLLIN, kNoEvents );
-            callback_count.fetch_add( kOneCallback, std::memory_order_relaxed );
+            EXPECT_NE( events & EPOLLIN, noEvents );
+            callback_count.fetch_add( oneCallback, std::memory_order_relaxed );
 
-            eventfd_t value = kEventfdInitialValue;
-            EXPECT_EQ( ::eventfd_read( event_fd.get(), &value ), kPosixSuccess );
+            eventfd_t value = eventfdInitialValue;
+            EXPECT_EQ( ::eventfd_read( event_fd.get(), &value ), posixSuccess );
             first_callback_ran.set_value();
         }
     );
-    EXPECT_NE( token, kNoToken );
+    EXPECT_NE( token, noToken );
 
     std::thread reactor_thread(
         [&]
@@ -290,7 +289,7 @@ TEST( Reactor,
         }
     );
 
-    if( reactor_started_future.wait_for( kThreadReadyTimeout ) !=
+    if( reactor_started_future.wait_for( threadReadyTimeout ) !=
         std::future_status::ready )
     {
         reactor.stop();
@@ -298,8 +297,8 @@ TEST( Reactor,
         FAIL() << "reactor thread did not start";
     }
 
-    EXPECT_EQ( ::eventfd_write( event_fd.get(), kEventfdSignalValue ), kPosixSuccess );
-    if( first_callback_future.wait_for( kCallbackTimeout ) != std::future_status::ready )
+    EXPECT_EQ( ::eventfd_write( event_fd.get(), eventfdSignalValue ), posixSuccess );
+    if( first_callback_future.wait_for( callbackTimeout ) != std::future_status::ready )
     {
         reactor.stop();
         reactor_thread.join();
@@ -313,20 +312,20 @@ TEST( Reactor,
             remove_drained.set_value();
         }
     );
-    if( remove_drained_future.wait_for( kCallbackTimeout ) != std::future_status::ready )
+    if( remove_drained_future.wait_for( callbackTimeout ) != std::future_status::ready )
     {
         reactor.stop();
         reactor_thread.join();
         FAIL() << "remove_fd did not drain";
     }
 
-    EXPECT_EQ( ::eventfd_write( event_fd.get(), kEventfdSignalValue ), kPosixSuccess );
-    std::this_thread::sleep_for( kNoCallbackWindow );
+    EXPECT_EQ( ::eventfd_write( event_fd.get(), eventfdSignalValue ), posixSuccess );
+    std::this_thread::sleep_for( noCallbackWindow );
     reactor.stop();
     reactor_thread.join();
 
     EXPECT_TRUE( run_result.has_value() );
-    EXPECT_EQ( callback_count.load( std::memory_order_relaxed ), kOneCallback );
+    EXPECT_EQ( callback_count.load( std::memory_order_relaxed ), oneCallback );
 }
 
 TEST( Reactor,
@@ -346,7 +345,7 @@ TEST( Reactor,
         }
     );
 
-    if( reactor_started_future.wait_for( kThreadReadyTimeout ) !=
+    if( reactor_started_future.wait_for( threadReadyTimeout ) !=
         std::future_status::ready )
     {
         reactor.stop();

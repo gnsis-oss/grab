@@ -32,38 +32,37 @@ namespace grab::storage
     namespace
     {
 
-        constexpr int            kInvalidFd        = -1;
-        constexpr int            kPosixFailure     = -1;
-        constexpr int            kWriteFailure     = -1;
-        constexpr int            kNoBytesWritten   = 0;
-        constexpr int            kYearWidth        = 4;
-        constexpr int            kMonthDayWidth    = 2;
-        constexpr std::uintmax_t kBytesPerKilobyte = 1'024U;
-        constexpr std::uintmax_t kBytesPerMegabyte =
-            kBytesPerKilobyte * kBytesPerKilobyte;
-        constexpr std::int64_t     kSecondsPerDay              = 86'400;
-        constexpr std::int64_t     kUnixEpochToCivilOffsetDays = 719'468;
-        constexpr std::int64_t     kDaysPerEra                 = 146'097;
-        constexpr std::int64_t     kYearsPerEra                = 400;
-        constexpr std::int64_t     kDaysPerNormalYear          = 365;
-        constexpr std::int64_t     kDaysPerFourYears           = 1'460;
-        constexpr std::int64_t     kDaysPerCentury             = 36'524;
-        constexpr std::int64_t     kLeapYearCycle              = 4;
-        constexpr std::int64_t     kCenturyCycle               = 100;
-        constexpr std::int64_t     kMarchMonthNumerator        = 5;
-        constexpr std::int64_t     kMarchMonthOffset           = 2;
-        constexpr std::int64_t     kDaysPerMarchMonthBlock     = 153;
-        constexpr std::int64_t     kCalendarOrdinalBase        = 1;
-        constexpr std::int64_t     kMarchMonthCutoff           = 10;
-        constexpr std::int64_t     kMarchToJanuaryOffset       = 3;
-        constexpr std::int64_t     kMarchToCalendarOffset      = 9;
-        constexpr std::int64_t     kFebruaryNumber             = 2;
-        constexpr std::string_view kJsonlExtension             = ".jsonl";
-        constexpr std::string_view kJsonlSuffix                = ".jsonl";
-        constexpr std::string_view kSinkClosedMessage          = "jsonl sink is closed";
-        constexpr std::string_view kMovedFromMessage = "jsonl sink is moved-from";
+        constexpr int            invalidFd        = -1;
+        constexpr int            posixFailure     = -1;
+        constexpr int            writeFailure     = -1;
+        constexpr int            noBytesWritten   = 0;
+        constexpr int            yearWidth        = 4;
+        constexpr int            monthDayWidth    = 2;
+        constexpr std::uintmax_t bytesPerKilobyte = 1'024U;
+        constexpr std::uintmax_t bytesPerMegabyte = bytesPerKilobyte * bytesPerKilobyte;
+        constexpr std::int64_t   secondsPerDay    = 86'400;
+        constexpr std::int64_t   unixEpochToCivilOffsetDays = 719'468;
+        constexpr std::int64_t   daysPerEra                 = 146'097;
+        constexpr std::int64_t   yearsPerEra                = 400;
+        constexpr std::int64_t   daysPerNormalYear          = 365;
+        constexpr std::int64_t   daysPerFourYears           = 1'460;
+        constexpr std::int64_t   daysPerCentury             = 36'524;
+        constexpr std::int64_t   leapYearCycle              = 4;
+        constexpr std::int64_t   centuryCycle               = 100;
+        constexpr std::int64_t   marchMonthNumerator        = 5;
+        constexpr std::int64_t   marchMonthOffset           = 2;
+        constexpr std::int64_t   daysPerMarchMonthBlock     = 153;
+        constexpr std::int64_t   calendarOrdinalBase        = 1;
+        constexpr std::int64_t   marchMonthCutoff           = 10;
+        constexpr std::int64_t   marchToJanuaryOffset       = 3;
+        constexpr std::int64_t   marchToCalendarOffset      = 9;
+        constexpr std::int64_t   februaryNumber             = 2;
+        constexpr std::string_view jsonlExtension           = ".jsonl";
+        constexpr std::string_view jsonlSuffix              = ".jsonl";
+        constexpr std::string_view sinkClosedMessage        = "jsonl sink is closed";
+        constexpr std::string_view movedFromMessage         = "jsonl sink is moved-from";
 
-        using OrderedJson                            = nlohmann::ordered_json;
+        using OrderedJson                                   = nlohmann::ordered_json;
 
         struct CivilDate
         {
@@ -122,7 +121,7 @@ namespace grab::storage
         exception_error( std::string_view      step,
                          const std::exception& exception )
         {
-            return unexpected_error( grab::ErrorCode::internal_fault,
+            return unexpected_error( grab::ErrorCode::InternalFault,
                                      std::string{ step } + ": " + exception.what() );
         }
 
@@ -130,7 +129,7 @@ namespace grab::storage
         std::unexpected<grab::Error>
         unknown_exception_error( std::string_view step )
         {
-            return unexpected_error( grab::ErrorCode::internal_fault,
+            return unexpected_error( grab::ErrorCode::InternalFault,
                                      std::string{ step } + ": unknown exception" );
         }
 
@@ -138,16 +137,16 @@ namespace grab::storage
         std::unexpected<grab::Error>
         closed_error()
         {
-            return unexpected_error( grab::ErrorCode::session_closed,
-                                     std::string{ kSinkClosedMessage } );
+            return unexpected_error( grab::ErrorCode::SessionClosed,
+                                     std::string{ sinkClosedMessage } );
         }
 
         [[nodiscard]]
         std::unexpected<grab::Error>
         moved_from_error()
         {
-            return unexpected_error( grab::ErrorCode::session_closed,
-                                     std::string{ kMovedFromMessage } );
+            return unexpected_error( grab::ErrorCode::SessionClosed,
+                                     std::string{ movedFromMessage } );
         }
 
         [[nodiscard]]
@@ -156,19 +155,19 @@ namespace grab::storage
         {
             switch( category )
             {
-                case grab::EventCategory::unspecified :
+                case grab::EventCategory::Unspecified :
                     return "unspecified";
-                case grab::EventCategory::input :
+                case grab::EventCategory::Input :
                     return "input";
-                case grab::EventCategory::window :
+                case grab::EventCategory::Window :
                     return "window";
-                case grab::EventCategory::accessibility :
+                case grab::EventCategory::Accessibility :
                     return "accessibility";
-                case grab::EventCategory::integration :
+                case grab::EventCategory::Integration :
                     return "integration";
-                case grab::EventCategory::browser :
+                case grab::EventCategory::Browser :
                     return "browser";
-                case grab::EventCategory::state :
+                case grab::EventCategory::State :
                     return "state";
             }
 
@@ -181,7 +180,7 @@ namespace grab::storage
         {
             if( !std::isfinite( value ) )
             {
-                return unexpected_error( grab::ErrorCode::invalid_argument,
+                return unexpected_error( grab::ErrorCode::InvalidArgument,
                                          "jsonl numeric value is not finite" );
             }
             return {};
@@ -349,8 +348,8 @@ namespace grab::storage
         std::int64_t
         days_since_unix_epoch( std::int64_t seconds ) noexcept
         {
-            auto       days = seconds / kSecondsPerDay;
-            const auto rem  = seconds % kSecondsPerDay;
+            auto       days = seconds / secondsPerDay;
+            const auto rem  = seconds % secondsPerDay;
             if( seconds < 0 && rem != 0 )
             {
                 --days;
@@ -362,33 +361,31 @@ namespace grab::storage
         CivilDate
         civil_from_days( std::int64_t days_since_epoch ) noexcept
         {
-            const auto z = days_since_epoch + kUnixEpochToCivilOffsetDays;
+            const auto z = days_since_epoch + unixEpochToCivilOffsetDays;
             const auto era =
-                ( z >= 0 ? z : z - ( kDaysPerEra - kCalendarOrdinalBase ) ) /
-                kDaysPerEra;
-            const auto day_of_era  = z - ( era * kDaysPerEra );
+                ( z >= 0 ? z : z - ( daysPerEra - calendarOrdinalBase ) ) / daysPerEra;
+            const auto day_of_era  = z - ( era * daysPerEra );
             const auto year_of_era = ( day_of_era -
-                                       ( day_of_era / kDaysPerFourYears ) +
-                                       ( day_of_era / kDaysPerCentury ) -
-                                       ( day_of_era / kDaysPerEra ) ) /
-                                     kDaysPerNormalYear;
-            auto       year        = year_of_era + ( era * kYearsPerEra );
-            const auto day_of_year =
-                day_of_era - ( ( kDaysPerNormalYear * year_of_era ) +
-                               ( year_of_era / kLeapYearCycle ) -
-                               ( year_of_era / kCenturyCycle ) );
+                                       ( day_of_era / daysPerFourYears ) +
+                                       ( day_of_era / daysPerCentury ) -
+                                       ( day_of_era / daysPerEra ) ) /
+                                     daysPerNormalYear;
+            auto       year        = year_of_era + ( era * yearsPerEra );
+            const auto day_of_year = day_of_era - ( ( daysPerNormalYear * year_of_era ) +
+                                                    ( year_of_era / leapYearCycle ) -
+                                                    ( year_of_era / centuryCycle ) );
             const auto month_prime =
-                ( ( ( kMarchMonthNumerator * day_of_year ) + kMarchMonthOffset ) /
-                  kDaysPerMarchMonthBlock );
+                ( ( ( marchMonthNumerator * day_of_year ) + marchMonthOffset ) /
+                  daysPerMarchMonthBlock );
             const auto day =
                 day_of_year -
-                ( ( ( kDaysPerMarchMonthBlock * month_prime ) + kMarchMonthOffset ) /
-                  kMarchMonthNumerator ) +
-                kCalendarOrdinalBase;
-            const auto month = month_prime < kMarchMonthCutoff
-                                 ? month_prime + kMarchToJanuaryOffset
-                                 : month_prime - kMarchToCalendarOffset;
-            if( month <= kFebruaryNumber )
+                ( ( ( daysPerMarchMonthBlock * month_prime ) + marchMonthOffset ) /
+                  marchMonthNumerator ) +
+                calendarOrdinalBase;
+            const auto month = month_prime < marchMonthCutoff
+                                 ? month_prime + marchToJanuaryOffset
+                                 : month_prime - marchToCalendarOffset;
+            if( month <= februaryNumber )
             {
                 ++year;
             }
@@ -406,17 +403,17 @@ namespace grab::storage
         {
             if( !std::isfinite( timestamp ) )
             {
-                return unexpected_error( grab::ErrorCode::invalid_argument,
+                return unexpected_error( grab::ErrorCode::InvalidArgument,
                                          "jsonl event timestamp is not finite" );
             }
 
-            constexpr auto kMinSeconds =
+            constexpr auto minSeconds =
                 static_cast<double>( std::numeric_limits<std::int64_t>::lowest() );
-            constexpr auto kMaxSeconds =
+            constexpr auto maxSeconds =
                 static_cast<double>( std::numeric_limits<std::int64_t>::max() );
-            if( timestamp < kMinSeconds || timestamp > kMaxSeconds )
+            if( timestamp < minSeconds || timestamp > maxSeconds )
             {
-                return unexpected_error( grab::ErrorCode::invalid_argument,
+                return unexpected_error( grab::ErrorCode::InvalidArgument,
                                          "jsonl event timestamp is out of range" );
             }
 
@@ -424,9 +421,9 @@ namespace grab::storage
             const CivilDate date = civil_from_days( days_since_unix_epoch( seconds ) );
 
             std::ostringstream output;
-            output << std::setfill( '0' ) << std::setw( kYearWidth ) << date.year << '-'
-                   << std::setw( kMonthDayWidth ) << date.month << '-'
-                   << std::setw( kMonthDayWidth ) << date.day;
+            output << std::setfill( '0' ) << std::setw( yearWidth ) << date.year << '-'
+                   << std::setw( monthDayWidth ) << date.month << '-'
+                   << std::setw( monthDayWidth ) << date.day;
             return output.str();
         }
 
@@ -435,7 +432,7 @@ namespace grab::storage
         path_for_date( const std::filesystem::path& dir,
                        std::string_view             date )
         {
-            return dir / ( std::string{ date } + std::string{ kJsonlSuffix } );
+            return dir / ( std::string{ date } + std::string{ jsonlSuffix } );
         }
 
     }    // namespace
@@ -501,7 +498,7 @@ namespace grab::storage
 
             JsonlOptions              options_;
             std::vector<BufferedLine> buffer_;
-            int                       fd_ = kInvalidFd;
+            int                       fd_ = invalidFd;
             std::string               current_date_;
             std::filesystem::path     current_path_;
             bool                      closed_ = false;
@@ -522,12 +519,12 @@ namespace grab::storage
     {
         if( options_.dir.empty() )
         {
-            return unexpected_error( grab::ErrorCode::invalid_argument,
+            return unexpected_error( grab::ErrorCode::InvalidArgument,
                                      "jsonl directory is empty" );
         }
         if( options_.buffer_limit == 0U )
         {
-            return unexpected_error( grab::ErrorCode::invalid_argument,
+            return unexpected_error( grab::ErrorCode::InvalidArgument,
                                      "jsonl buffer limit must be greater than zero" );
         }
 
@@ -535,19 +532,19 @@ namespace grab::storage
         std::filesystem::create_directories( options_.dir, ec );
         if( ec )
         {
-            return unexpected_error( grab::ErrorCode::device_inaccessible,
+            return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                      "create_directories: " + ec.message() );
         }
 
         const bool is_directory = std::filesystem::is_directory( options_.dir, ec );
         if( ec )
         {
-            return unexpected_error( grab::ErrorCode::device_inaccessible,
+            return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                      "is_directory: " + ec.message() );
         }
         if( !is_directory )
         {
-            return unexpected_error( grab::ErrorCode::device_inaccessible,
+            return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                      "jsonl path is not a directory" );
         }
 
@@ -648,7 +645,7 @@ namespace grab::storage
     grab::Result<void>
     JsonlSink::Impl::open_for_date( std::string_view date )
     {
-        if( fd_ != kInvalidFd && current_date_ == date )
+        if( fd_ != invalidFd && current_date_ == date )
         {
             return {};
         }
@@ -666,15 +663,15 @@ namespace grab::storage
             return ensure_result;
         }
 
-        constexpr auto kOpenFlags =
+        constexpr auto openFlags =
             static_cast<int>( static_cast<unsigned int>( O_WRONLY ) |
                               static_cast<unsigned int>( O_APPEND ) |
                               static_cast<unsigned int>( O_CLOEXEC ) );
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): POSIX open(2).
-        const int fd = ::open( path.c_str(), kOpenFlags );
-        if( fd == kPosixFailure )
+        const int fd = ::open( path.c_str(), openFlags );
+        if( fd == posixFailure )
         {
-            return unexpected_error( grab::ErrorCode::device_inaccessible,
+            return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                      posix_message( "open", errno ) );
         }
 
@@ -691,7 +688,7 @@ namespace grab::storage
         const bool      exists = std::filesystem::exists( path, ec );
         if( ec )
         {
-            return unexpected_error( grab::ErrorCode::device_inaccessible,
+            return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                      "exists: " + ec.message() );
         }
         if( exists )
@@ -715,21 +712,21 @@ namespace grab::storage
         while( !unwritten.empty() )
         {
             const auto count = std::min( unwritten.size(),
-                                         static_cast<std::size_t>( kBytesPerMegabyte ) );
+                                         static_cast<std::size_t>( bytesPerMegabyte ) );
             const auto written = ::write( fd_, unwritten.data(), count );
-            if( written == kWriteFailure )
+            if( written == writeFailure )
             {
                 const int error_number = errno;
                 if( error_number == EINTR )
                 {
                     continue;
                 }
-                return unexpected_error( grab::ErrorCode::device_inaccessible,
+                return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                          posix_message( "write", error_number ) );
             }
-            if( written == kNoBytesWritten )
+            if( written == noBytesWritten )
             {
-                return unexpected_error( grab::ErrorCode::internal_fault,
+                return unexpected_error( grab::ErrorCode::InternalFault,
                                          "write: wrote zero bytes" );
             }
             unwritten.remove_prefix( static_cast<std::size_t>( written ) );
@@ -740,14 +737,14 @@ namespace grab::storage
     grab::Result<void>
     JsonlSink::Impl::fsync_current_file() const
     {
-        while( ::fsync( fd_ ) == kPosixFailure )
+        while( ::fsync( fd_ ) == posixFailure )
         {
             const int error_number = errno;
             if( error_number == EINTR )
             {
                 continue;
             }
-            return unexpected_error( grab::ErrorCode::device_inaccessible,
+            return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                      posix_message( "fsync", error_number ) );
         }
         return {};
@@ -756,7 +753,7 @@ namespace grab::storage
     grab::Result<void>
     JsonlSink::Impl::close_current_file()
     {
-        if( fd_ == kInvalidFd )
+        if( fd_ == invalidFd )
         {
             current_date_.clear();
             current_path_.clear();
@@ -764,12 +761,12 @@ namespace grab::storage
         }
 
         const int close_result = ::close( fd_ );
-        fd_                    = kInvalidFd;
+        fd_                    = invalidFd;
         current_date_.clear();
         current_path_.clear();
-        if( close_result == kPosixFailure )
+        if( close_result == posixFailure )
         {
-            return unexpected_error( grab::ErrorCode::device_inaccessible,
+            return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                      posix_message( "close", errno ) );
         }
         return {};
@@ -784,7 +781,7 @@ namespace grab::storage
         for( const std::filesystem::directory_entry& entry :
              std::filesystem::directory_iterator( options_.dir ) )
         {
-            if( entry.path().extension() != kJsonlExtension )
+            if( entry.path().extension() != jsonlExtension )
             {
                 continue;
             }
@@ -793,7 +790,7 @@ namespace grab::storage
             const bool      regular_file = entry.is_regular_file( ec );
             if( ec )
             {
-                return unexpected_error( grab::ErrorCode::device_inaccessible,
+                return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                          "is_regular_file: " + ec.message() );
             }
             if( !regular_file )
@@ -804,7 +801,7 @@ namespace grab::storage
             const std::uintmax_t size = entry.file_size( ec );
             if( ec )
             {
-                return unexpected_error( grab::ErrorCode::device_inaccessible,
+                return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                          "file_size: " + ec.message() );
             }
 
@@ -840,7 +837,7 @@ namespace grab::storage
             std::filesystem::remove( oldest.path, ec );
             if( ec )
             {
-                return unexpected_error( grab::ErrorCode::device_inaccessible,
+                return unexpected_error( grab::ErrorCode::DeviceInaccessible,
                                          "remove: " + ec.message() );
             }
 
@@ -854,14 +851,14 @@ namespace grab::storage
     std::uintmax_t
     JsonlSink::Impl::disk_budget_bytes() const noexcept
     {
-        constexpr auto kMaxBytes = std::numeric_limits<std::uintmax_t>::max();
-        const auto     max_mb    = kMaxBytes / kBytesPerMegabyte;
-        const auto     disk_mb   = static_cast<std::uintmax_t>( options_.max_disk_mb );
+        constexpr auto maxBytes = std::numeric_limits<std::uintmax_t>::max();
+        const auto     max_mb   = maxBytes / bytesPerMegabyte;
+        const auto     disk_mb  = static_cast<std::uintmax_t>( options_.max_disk_mb );
         if( disk_mb > max_mb )
         {
-            return kMaxBytes;
+            return maxBytes;
         }
-        return disk_mb * kBytesPerMegabyte;
+        return disk_mb * bytesPerMegabyte;
     }
 
     JsonlSink::JsonlSink( std::unique_ptr<Impl> impl ) noexcept :

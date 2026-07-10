@@ -25,52 +25,50 @@ namespace grab::event
     namespace
     {
 
-        constexpr int           kDbusNoWait        = 0;
-        constexpr int           kDbusCallTimeoutMs = 1'000;
-        constexpr int           kInvalidFd         = -1;
-        constexpr std::uint64_t kNoToken           = 0U;
-        constexpr std::uint32_t kNoEvents          = 0U;
-        constexpr std::uint32_t kReadableEvents =
-            static_cast<std::uint32_t>( EPOLLIN ) |
-            static_cast<std::uint32_t>( EPOLLERR ) |
-            static_cast<std::uint32_t>( EPOLLHUP );
-        constexpr std::uint32_t kWritableEvents =
-            static_cast<std::uint32_t>( EPOLLOUT ) |
-            static_cast<std::uint32_t>( EPOLLERR ) |
-            static_cast<std::uint32_t>( EPOLLHUP );
-        constexpr const char* kA11yBusName          = "org.a11y.Bus";
-        constexpr const char* kA11yBusPath          = "/org/a11y/bus";
-        constexpr const char* kA11yBusInterface     = "org.a11y.Bus";
-        constexpr const char* kGetAddressMethod     = "GetAddress";
-        constexpr const char* kRegistryName         = "org.a11y.atspi.Registry";
-        constexpr const char* kRegistryPath         = "/org/a11y/atspi/registry";
-        constexpr const char* kRegistryInterface    = "org.a11y.atspi.Registry";
-        constexpr const char* kRegisterEventMethod  = "RegisterEvent";
-        constexpr const char* kObjectEventInterface = "org.a11y.atspi.Event.Object";
-        constexpr const char* kObjectEventMatch =
+        constexpr int           dbusNoWait        = 0;
+        constexpr int           dbusCallTimeoutMs = 1'000;
+        constexpr int           invalidFd         = -1;
+        constexpr std::uint64_t noToken           = 0U;
+        constexpr std::uint32_t noEvents          = 0U;
+        constexpr std::uint32_t readableEvents = static_cast<std::uint32_t>( EPOLLIN ) |
+                                                 static_cast<std::uint32_t>( EPOLLERR ) |
+                                                 static_cast<std::uint32_t>( EPOLLHUP );
+        constexpr std::uint32_t writableEvents = static_cast<std::uint32_t>( EPOLLOUT ) |
+                                                 static_cast<std::uint32_t>( EPOLLERR ) |
+                                                 static_cast<std::uint32_t>( EPOLLHUP );
+        constexpr const char*   a11yBusName    = "org.a11y.Bus";
+        constexpr const char*   a11yBusPath    = "/org/a11y/bus";
+        constexpr const char*   a11yBusInterface     = "org.a11y.Bus";
+        constexpr const char*   getAddressMethod     = "GetAddress";
+        constexpr const char*   registryName         = "org.a11y.atspi.Registry";
+        constexpr const char*   registryPath         = "/org/a11y/atspi/registry";
+        constexpr const char*   registryInterface    = "org.a11y.atspi.Registry";
+        constexpr const char*   registerEventMethod  = "RegisterEvent";
+        constexpr const char*   objectEventInterface = "org.a11y.atspi.Event.Object";
+        constexpr const char*   objectEventMatch =
             "type='signal',interface='org.a11y.atspi.Event.Object'";
-        constexpr std::string_view                 kStateChangedMember = "StateChanged";
-        constexpr std::string_view                 kTextChangedMember  = "TextChanged";
-        constexpr std::string_view                 kActionMember       = "Action";
-        constexpr std::string_view                 kClickedMember      = "Clicked";
-        constexpr std::string_view                 kFocusedDetail      = "focused";
-        constexpr std::string_view                 kPressedDetail      = "pressed";
-        constexpr std::string_view                 kClickedDetail      = "clicked";
-        constexpr std::string_view                 kClickDetail        = "click";
-        constexpr std::string_view                 kActivateDetail     = "activate";
-        constexpr std::string_view                 kActionDetail       = "action";
-        constexpr std::string_view                 kMenuOpenedDetail   = "menu-opened";
-        constexpr std::string_view                 kMenuClosedDetail   = "menu-closed";
-        constexpr std::string_view                 kShowingDetail      = "showing";
-        constexpr std::string_view                 kVisibleDetail      = "visible";
-        constexpr std::string_view                 kHiddenDetail       = "hidden";
-        constexpr std::string_view                 kCollapsedDetail    = "collapsed";
-        constexpr std::string_view                 kMenuRoleNeedle     = "menu";
-        constexpr std::string_view                 kButtonRoleNeedle   = "button";
-        constexpr std::string_view                 kPushRoleNeedle     = "push";
-        constexpr std::string_view                 kTextChangedPrefix  = "text-changed";
+        constexpr std::string_view                 stateChangedMember = "StateChanged";
+        constexpr std::string_view                 textChangedMember  = "TextChanged";
+        constexpr std::string_view                 actionMember       = "Action";
+        constexpr std::string_view                 clickedMember      = "Clicked";
+        constexpr std::string_view                 focusedDetail      = "focused";
+        constexpr std::string_view                 pressedDetail      = "pressed";
+        constexpr std::string_view                 clickedDetail      = "clicked";
+        constexpr std::string_view                 clickDetail        = "click";
+        constexpr std::string_view                 activateDetail     = "activate";
+        constexpr std::string_view                 actionDetail       = "action";
+        constexpr std::string_view                 menuOpenedDetail   = "menu-opened";
+        constexpr std::string_view                 menuClosedDetail   = "menu-closed";
+        constexpr std::string_view                 showingDetail      = "showing";
+        constexpr std::string_view                 visibleDetail      = "visible";
+        constexpr std::string_view                 hiddenDetail       = "hidden";
+        constexpr std::string_view                 collapsedDetail    = "collapsed";
+        constexpr std::string_view                 menuRoleNeedle     = "menu";
+        constexpr std::string_view                 buttonRoleNeedle   = "button";
+        constexpr std::string_view                 pushRoleNeedle     = "push";
+        constexpr std::string_view                 textChangedPrefix  = "text-changed";
 
-        constexpr std::array<std::string_view, 6U> kRegisteredEvents{
+        constexpr std::array<std::string_view, 6U> registeredEvents{
             "object:state-changed:focused",
             "object:state-changed:pressed",
             "object:state-changed:checked",
@@ -82,7 +80,7 @@ namespace grab::event
         struct WatchRegistration
         {
                 DBusWatch*    watch = nullptr;
-                std::uint64_t token = kNoToken;
+                std::uint64_t token = noToken;
         };
 
         struct DbusError
@@ -204,19 +202,19 @@ namespace grab::event
         bool
         is_button_signal( const AtspiSignal& signal )
         {
-            return contains_ascii( signal.role, kButtonRoleNeedle ) ||
-                   contains_ascii( signal.role, kPushRoleNeedle ) ||
-                   contains_ascii( signal.detail, kClickedDetail ) ||
-                   contains_ascii( signal.detail, kClickDetail ) ||
-                   contains_ascii( signal.detail, kActivateDetail ) ||
-                   contains_ascii( signal.detail, kActionDetail );
+            return contains_ascii( signal.role, buttonRoleNeedle ) ||
+                   contains_ascii( signal.role, pushRoleNeedle ) ||
+                   contains_ascii( signal.detail, clickedDetail ) ||
+                   contains_ascii( signal.detail, clickDetail ) ||
+                   contains_ascii( signal.detail, activateDetail ) ||
+                   contains_ascii( signal.detail, actionDetail );
         }
 
         [[nodiscard]]
         bool
         is_menu_signal( const AtspiSignal& signal )
         {
-            return contains_ascii( signal.role, kMenuRoleNeedle );
+            return contains_ascii( signal.role, menuRoleNeedle );
         }
 
         [[nodiscard]]
@@ -243,62 +241,62 @@ namespace grab::event
         std::optional<grab::EventKind>
         mapped_kind( const AtspiSignal& signal )
         {
-            if( signal.interface != kObjectEventInterface )
+            if( signal.interface != objectEventInterface )
             {
                 return std::nullopt;
             }
 
             if( signal.member ==
-                kTextChangedMember ||
-                starts_with_ascii( signal.detail, kTextChangedPrefix ) )
+                textChangedMember ||
+                starts_with_ascii( signal.detail, textChangedPrefix ) )
             {
-                return grab::EventKind::a11y_text_changed;
+                return grab::EventKind::A11yTextChanged;
             }
 
             if( signal.detail ==
-                kMenuOpenedDetail ||
+                menuOpenedDetail ||
                 ( signal.member ==
-                  kStateChangedMember &&
+                  stateChangedMember &&
                   is_menu_signal( signal ) &&
                   ( signal.detail ==
-                    kShowingDetail ||
-                    signal.detail == kVisibleDetail ) ) )
+                    showingDetail ||
+                    signal.detail == visibleDetail ) ) )
             {
-                return grab::EventKind::a11y_menu_opened;
+                return grab::EventKind::A11yMenuOpened;
             }
 
             if( signal.detail ==
-                kMenuClosedDetail ||
+                menuClosedDetail ||
                 ( signal.member ==
-                  kStateChangedMember &&
+                  stateChangedMember &&
                   is_menu_signal( signal ) &&
                   ( signal.detail ==
-                    kHiddenDetail ||
-                    signal.detail == kCollapsedDetail ) ) )
+                    hiddenDetail ||
+                    signal.detail == collapsedDetail ) ) )
             {
-                return grab::EventKind::a11y_menu_closed;
+                return grab::EventKind::A11yMenuClosed;
             }
 
-            if( signal.member == kStateChangedMember && signal.detail == kFocusedDetail )
+            if( signal.member == stateChangedMember && signal.detail == focusedDetail )
             {
-                return grab::EventKind::a11y_focus_changed;
+                return grab::EventKind::A11yFocusChanged;
             }
 
             if( ( signal.member ==
-                  kStateChangedMember &&
+                  stateChangedMember &&
                   signal.detail ==
-                  kPressedDetail &&
+                  pressedDetail &&
                   is_button_signal( signal ) ) ||
                 signal.member ==
-                kActionMember ||
-                signal.member == kClickedMember )
+                actionMember ||
+                signal.member == clickedMember )
             {
-                return grab::EventKind::a11y_button_clicked;
+                return grab::EventKind::A11yButtonClicked;
             }
 
-            if( signal.member == kStateChangedMember )
+            if( signal.member == stateChangedMember )
             {
-                return grab::EventKind::a11y_state_changed;
+                return grab::EventKind::A11yStateChanged;
             }
 
             return std::nullopt;
@@ -383,7 +381,7 @@ namespace grab::event
                 .name      = {},
             };
 
-            if( signal.interface != kObjectEventInterface )
+            if( signal.interface != objectEventInterface )
             {
                 return events;
             }
@@ -439,7 +437,7 @@ namespace grab::event
         remove_fd_noexcept( grab::core::Reactor* reactor,
                             std::uint64_t        token ) noexcept
         {
-            if( reactor == nullptr || token == kNoToken )
+            if( reactor == nullptr || token == noToken )
             {
                 return;
             }
@@ -462,7 +460,7 @@ namespace grab::event
                            const DbusError& error )
         {
             return grab::Error{
-                .code       = grab::ErrorCode::device_inaccessible,
+                .code       = grab::ErrorCode::DeviceInaccessible,
                 .message    = std::string{ step } +
                               ": " +
                               error.message_or( "D-Bus operation failed" ),
@@ -488,14 +486,14 @@ namespace grab::event
             dbus_connection_set_exit_on_disconnect( session.get(), 0 );
 
             const DbusMessage request{
-                dbus_message_new_method_call( kA11yBusName,
-                                              kA11yBusPath,
-                                              kA11yBusInterface,
-                                              kGetAddressMethod )
+                dbus_message_new_method_call( a11yBusName,
+                                              a11yBusPath,
+                                              a11yBusInterface,
+                                              getAddressMethod )
             };
             if( request == nullptr )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    "AT-SPI GetAddress request allocation failed" );
             }
 
@@ -503,7 +501,7 @@ namespace grab::event
             const DbusMessage reply{
                 dbus_connection_send_with_reply_and_block( session.get(),
                                                            request.get(),
-                                                           kDbusCallTimeoutMs,
+                                                           dbusCallTimeoutMs,
                                                            &reply_error.value )
             };
             if( reply == nullptr )
@@ -517,7 +515,7 @@ namespace grab::event
                 0 ||
                 dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_STRING )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "AT-SPI bus address response: missing address" );
             }
 
@@ -525,7 +523,7 @@ namespace grab::event
             dbus_message_iter_get_basic( &iterator, static_cast<void*>( &address ) );
             if( address == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "AT-SPI bus address response: null address" );
             }
 
@@ -563,14 +561,14 @@ namespace grab::event
                         std::string_view event_name )
         {
             const DbusMessage request{
-                dbus_message_new_method_call( kRegistryName,
-                                              kRegistryPath,
-                                              kRegistryInterface,
-                                              kRegisterEventMethod )
+                dbus_message_new_method_call( registryName,
+                                              registryPath,
+                                              registryInterface,
+                                              registerEventMethod )
             };
             if( request == nullptr )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    "AT-SPI RegisterEvent request allocation failed" );
             }
 
@@ -584,7 +582,7 @@ namespace grab::event
                     static_cast<const void*>( &event_text )
                 ) == 0 )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    "AT-SPI RegisterEvent argument allocation failed" );
             }
 
@@ -592,7 +590,7 @@ namespace grab::event
             const DbusMessage reply{
                 dbus_connection_send_with_reply_and_block( connection,
                                                            request.get(),
-                                                           kDbusCallTimeoutMs,
+                                                           dbusCallTimeoutMs,
                                                            &reply_error.value )
             };
             if( reply == nullptr )
@@ -608,7 +606,7 @@ namespace grab::event
         grab::Result<void>
         register_events( DBusConnection* connection )
         {
-            for( const std::string_view event_name : kRegisteredEvents )
+            for( const std::string_view event_name : registeredEvents )
             {
                 auto registered = register_event( connection, event_name );
                 if( !registered.has_value() )
@@ -624,7 +622,7 @@ namespace grab::event
         add_object_event_match( DBusConnection* connection )
         {
             DbusError match_error;
-            dbus_bus_add_match( connection, kObjectEventMatch, &match_error.value );
+            dbus_bus_add_match( connection, objectEventMatch, &match_error.value );
             if( dbus_error_is_set( &match_error.value ) != 0 )
             {
                 return std::unexpected( dbus_device_error( "AT-SPI signal match",
@@ -690,13 +688,13 @@ namespace grab::event
             nullptr ||
             dbus_watch_get_enabled( watch ) == 0 )
         {
-            return kNoToken;
+            return noToken;
         }
 
         const int fd = dbus_watch_get_unix_fd( watch );
-        if( fd == kInvalidFd )
+        if( fd == invalidFd )
         {
-            return kNoToken;
+            return noToken;
         }
 
         const auto shared_state = state.shared_from_this();
@@ -719,7 +717,7 @@ namespace grab::event
                                      {
                                          return candidate.watch ==
                                                 watch &&
-                                                candidate.token != kNoToken;
+                                                candidate.token != noToken;
                                      } ) != state.watches.end();
     }
 
@@ -760,7 +758,7 @@ namespace grab::event
         }
 
         grab::core::Reactor* reactor = nullptr;
-        std::uint64_t        token   = kNoToken;
+        std::uint64_t        token   = noToken;
         try
         {
             const std::scoped_lock lock( state->mutex );
@@ -798,7 +796,7 @@ namespace grab::event
         }
 
         grab::core::Reactor* reactor      = nullptr;
-        std::uint64_t        remove_token = kNoToken;
+        std::uint64_t        remove_token = noToken;
         try
         {
             const std::scoped_lock lock( state->mutex );
@@ -820,7 +818,7 @@ namespace grab::event
 
             if( dbus_watch_get_enabled( watch ) != 0 )
             {
-                if( registration->token == kNoToken )
+                if( registration->token == noToken )
                 {
                     registration->token = register_watch_locked( *state, watch );
                 }
@@ -829,7 +827,7 @@ namespace grab::event
 
             reactor             = state->reactor;
             remove_token        = registration->token;
-            registration->token = kNoToken;
+            registration->token = noToken;
         }
         catch( ... )
         {
@@ -845,7 +843,7 @@ namespace grab::event
     {
         if( dbus_threads_init_default() == 0 )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
+            return grab::fail( grab::ErrorCode::InternalFault,
                                "libdbus thread support initialization failed" );
         }
 
@@ -893,7 +891,7 @@ namespace grab::event
                 state->reactor = nullptr;
                 for( const auto& watch : state->watches )
                 {
-                    if( watch.token != kNoToken )
+                    if( watch.token != noToken )
                     {
                         tokens.push_back( watch.token );
                     }
@@ -904,7 +902,7 @@ namespace grab::event
             {
                 remove_fd_noexcept( &reactor, token );
             }
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "AT-SPI D-Bus watch registration failed" );
         }
 
@@ -921,7 +919,7 @@ namespace grab::event
             nullptr ||
             watch ==
             nullptr ||
-            ( events & ( kReadableEvents | kWritableEvents ) ) == kNoEvents )
+            ( events & ( readableEvents | writableEvents ) ) == noEvents )
         {
             return;
         }
@@ -955,7 +953,7 @@ namespace grab::event
                 }
 
                 bus = state->bus;
-                if( dbus_connection_read_write( state->connection, kDbusNoWait ) == 0 )
+                if( dbus_connection_read_write( state->connection, dbusNoWait ) == 0 )
                 {
                     state->active = false;
                     return;
@@ -1006,7 +1004,7 @@ namespace grab::event
                 connection     = std::exchange( state->connection, nullptr );
                 for( const auto& watch : state->watches )
                 {
-                    if( watch.token != kNoToken )
+                    if( watch.token != noToken )
                     {
                         tokens.push_back( watch.token );
                     }

@@ -16,8 +16,8 @@ namespace grab::platform::x11
 
     enum class XcbAtomMode : std::uint8_t
     {
-        only_if_exists,
-        create_if_missing,
+        OnlyIfExists,
+        CreateIfMissing,
     };
 
     [[nodiscard]]
@@ -26,7 +26,7 @@ namespace grab::platform::x11
     {
         if( name.size() > std::numeric_limits<std::uint16_t>::max() )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "X atom name is too long" );
         }
         return static_cast<std::uint16_t>( name.size() );
@@ -41,9 +41,9 @@ namespace grab::platform::x11
 
         switch( mode )
         {
-            case XcbAtomMode::only_if_exists :
+            case XcbAtomMode::OnlyIfExists :
                 return atom_only_if_exists;
-            case XcbAtomMode::create_if_missing :
+            case XcbAtomMode::CreateIfMissing :
                 return atom_create_missing;
         }
         return atom_create_missing;
@@ -74,7 +74,7 @@ namespace grab::platform::x11
 
         if( error != nullptr || reply == nullptr )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "xcb_intern_atom failed" );
         }
         return reply->atom;

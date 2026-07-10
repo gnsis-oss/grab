@@ -9,34 +9,34 @@
 namespace
 {
 
-    constexpr int              kNoCalls             = 0;
-    constexpr int              kOneCall             = 1;
-    constexpr std::size_t      kImpossibleEventSize = 0U;
-    constexpr int              kSmokeCount          = 1;
-    constexpr std::string_view kSmokeTag            = "log.smoke";
-    constexpr std::string_view kCompileTag          = "log.compile";
-    constexpr std::string_view kLevelKey            = "level";
-    constexpr std::string_view kCountKey            = "count";
-    constexpr std::string_view kNominalText         = "nominal";
-    constexpr std::string_view kVerboseText         = "verbose";
-    constexpr std::string_view kDebugText           = "debug";
+    constexpr int              noCalls             = 0;
+    constexpr int              oneCall             = 1;
+    constexpr std::size_t      impossibleEventSize = 0U;
+    constexpr int              smokeCount          = 1;
+    constexpr std::string_view smokeTag            = "log.smoke";
+    constexpr std::string_view compileTag          = "log.compile";
+    constexpr std::string_view levelKey            = "level";
+    constexpr std::string_view countKey            = "count";
+    constexpr std::string_view nominalText         = "nominal";
+    constexpr std::string_view verboseText         = "verbose";
+    constexpr std::string_view debugText           = "debug";
 
 }    // namespace
 
 TEST( Log,
       LevelConstantsMatchCompileDefinitions )
 {
-    static_assert( grab::log::kOffLevel == GRAB_LOG_LEVEL_OFF );
-    static_assert( grab::log::kNominalLevel == GRAB_LOG_LEVEL_NOMINAL );
-    static_assert( grab::log::kVerboseLevel == GRAB_LOG_LEVEL_VERBOSE );
-    static_assert( grab::log::kDebugLevel == GRAB_LOG_LEVEL_DEBUG );
-    static_assert( grab::log::kCompileLevel == LOG_COMPILE_LEVEL );
+    static_assert( grab::log::offLevel == GRAB_LOG_LEVEL_OFF );
+    static_assert( grab::log::nominalLevel == GRAB_LOG_LEVEL_NOMINAL );
+    static_assert( grab::log::verboseLevel == GRAB_LOG_LEVEL_VERBOSE );
+    static_assert( grab::log::debugLevel == GRAB_LOG_LEVEL_DEBUG );
+    static_assert( grab::log::compileLevel == LOG_COMPILE_LEVEL );
 
-    static_assert( grab::log::enabled( grab::log::Level::nominal ) ==
+    static_assert( grab::log::enabled( grab::log::Level::Nominal ) ==
                    ( LOG_COMPILE_LEVEL >= GRAB_LOG_LEVEL_NOMINAL ) );
-    static_assert( grab::log::enabled( grab::log::Level::verbose ) ==
+    static_assert( grab::log::enabled( grab::log::Level::Verbose ) ==
                    ( LOG_COMPILE_LEVEL >= GRAB_LOG_LEVEL_VERBOSE ) );
-    static_assert( grab::log::enabled( grab::log::Level::debug ) ==
+    static_assert( grab::log::enabled( grab::log::Level::Debug ) ==
                    ( LOG_COMPILE_LEVEL >= GRAB_LOG_LEVEL_DEBUG ) );
 }
 
@@ -47,7 +47,7 @@ TEST( Log,
     grab::log::debug(
         []<typename Event>( Event& )
         {
-            static_assert( sizeof( Event ) == kImpossibleEventSize );
+            static_assert( sizeof( Event ) == impossibleEventSize );
         }
     );
     SUCCEED();
@@ -57,22 +57,22 @@ TEST( Log,
 TEST( Log,
       DisabledDebugEmitterDoesNotRun )
 {
-    int calls = kNoCalls;
+    int calls = noCalls;
     grab::log::debug(
         [&calls]( auto& event )
         {
             ++calls;
-            event.tag( kCompileTag );
+            event.tag( compileTag );
         }
     );
 
-    if constexpr( grab::log::enabled( grab::log::Level::debug ) )
+    if constexpr( grab::log::enabled( grab::log::Level::Debug ) )
     {
-        EXPECT_EQ( calls, kOneCall );
+        EXPECT_EQ( calls, oneCall );
     }
     else
     {
-        EXPECT_EQ( calls, kNoCalls );
+        EXPECT_EQ( calls, noCalls );
     }
 }
 
@@ -82,21 +82,21 @@ TEST( Log,
     grab::log::nominal(
         []( auto& event )
         {
-            event.tag( kSmokeTag )
-                .value( kLevelKey, kNominalText )
-                .value( kCountKey, kSmokeCount );
+            event.tag( smokeTag )
+                .value( levelKey, nominalText )
+                .value( countKey, smokeCount );
         }
     );
     grab::log::verbose(
         []( auto& event )
         {
-            event.tag( kSmokeTag ).value( kLevelKey, kVerboseText );
+            event.tag( smokeTag ).value( levelKey, verboseText );
         }
     );
     grab::log::debug(
         []( auto& event )
         {
-            event.tag( kSmokeTag ).value( kLevelKey, kDebugText );
+            event.tag( smokeTag ).value( levelKey, debugText );
         }
     );
     SUCCEED();

@@ -354,7 +354,7 @@ namespace grab::session
         {
             std::string message{ "missing or malformed session record field: " };
             message += field;
-            return grab::fail( ErrorCode::protocol_error, std::move( message ) );
+            return grab::fail( ErrorCode::ProtocolError, std::move( message ) );
         }
 
     }    // namespace

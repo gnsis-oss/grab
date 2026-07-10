@@ -11,20 +11,20 @@
 namespace
 {
 
-    constexpr std::string_view kDisplayName              = "DISPLAY";
-    constexpr std::string_view kDisplayValue             = ":0";
-    constexpr std::string_view kSessionTypeName          = "XDG_SESSION_TYPE";
-    constexpr std::string_view kX11SessionTypeValue      = "x11";
-    constexpr std::string_view kWaylandDisplayName       = "WAYLAND_DISPLAY";
-    constexpr std::string_view kWaylandDisplayValue      = "wayland-0";
-    constexpr std::string_view kCurrentDesktopName       = "XDG_CURRENT_DESKTOP";
-    constexpr std::string_view kKdeDesktopValue          = "KDE";
-    constexpr std::string_view kUinputPath               = "/dev/uinput";
-    constexpr std::string_view kFirstInputDevicePath     = "/dev/input/event0";
-    constexpr std::string_view kSecondInputDevicePath    = "/dev/input/event1";
-    constexpr auto             kExpectedInputDeviceCount = 2U;
-    constexpr auto             kFirstInputDeviceIndex    = 0U;
-    constexpr auto             kSecondInputDeviceIndex   = 1U;
+    constexpr std::string_view displayName              = "DISPLAY";
+    constexpr std::string_view displayValue             = ":0";
+    constexpr std::string_view sessionTypeName          = "XDG_SESSION_TYPE";
+    constexpr std::string_view x11SessionTypeValue      = "x11";
+    constexpr std::string_view waylandDisplayName       = "WAYLAND_DISPLAY";
+    constexpr std::string_view waylandDisplayValue      = "wayland-0";
+    constexpr std::string_view currentDesktopName       = "XDG_CURRENT_DESKTOP";
+    constexpr std::string_view kdeDesktopValue          = "KDE";
+    constexpr std::string_view uinputPath               = "/dev/uinput";
+    constexpr std::string_view firstInputDevicePath     = "/dev/input/event0";
+    constexpr std::string_view secondInputDevicePath    = "/dev/input/event1";
+    constexpr auto             expectedInputDeviceCount = 2U;
+    constexpr auto             firstInputDeviceIndex    = 0U;
+    constexpr auto             secondInputDeviceIndex   = 1U;
 
     using EnvVars = std::vector<std::pair<std::string, std::string>>;
 
@@ -74,10 +74,10 @@ TEST( Prober,
       DetectsPureX11 )
 {
     const grab::core::Environment env = grab::core::probe_environment( facts_with_env( {
-        env_var( kDisplayName, kDisplayValue ),
-        env_var( kSessionTypeName, kX11SessionTypeValue ),
+        env_var( displayName, displayValue ),
+        env_var( sessionTypeName, x11SessionTypeValue ),
     } ) );
-    EXPECT_EQ( env.session, grab::core::SessionType::x11 );
+    EXPECT_EQ( env.session, grab::core::SessionType::X11 );
     EXPECT_FALSE( env.xwayland_present );
 }
 
@@ -85,22 +85,22 @@ TEST( Prober,
       DetectsWaylandWithXwayland )
 {
     const grab::core::Environment env = grab::core::probe_environment( facts_with_env( {
-        env_var( kWaylandDisplayName, kWaylandDisplayValue ),
-        env_var( kDisplayName, kDisplayValue ),
-        env_var( kCurrentDesktopName, kKdeDesktopValue ),
+        env_var( waylandDisplayName, waylandDisplayValue ),
+        env_var( displayName, displayValue ),
+        env_var( currentDesktopName, kdeDesktopValue ),
     } ) );
-    EXPECT_EQ( env.session, grab::core::SessionType::wayland );
+    EXPECT_EQ( env.session, grab::core::SessionType::Wayland );
     EXPECT_TRUE( env.xwayland_present );
-    EXPECT_EQ( env.desktop, kKdeDesktopValue );
+    EXPECT_EQ( env.desktop, kdeDesktopValue );
 }
 
 TEST( Prober,
       DetectsPureWaylandWithoutXwayland )
 {
     const grab::core::Environment env = grab::core::probe_environment( facts_with_env( {
-        env_var( kWaylandDisplayName, kWaylandDisplayValue ),
+        env_var( waylandDisplayName, waylandDisplayValue ),
     } ) );
-    EXPECT_EQ( env.session, grab::core::SessionType::wayland );
+    EXPECT_EQ( env.session, grab::core::SessionType::Wayland );
     EXPECT_FALSE( env.xwayland_present );
 }
 
@@ -109,17 +109,17 @@ TEST( Prober,
 {
     const grab::core::Environment env =
         grab::core::probe_environment( facts_with_env( {} ) );
-    EXPECT_EQ( env.session, grab::core::SessionType::headless );
+    EXPECT_EQ( env.session, grab::core::SessionType::Headless );
 }
 
 TEST( Prober,
       ProbesUinputWriteAccess )
 {
     grab::core::SystemFacts writable =
-        facts_with_env( { env_var( kDisplayName, kDisplayValue ) } );
+        facts_with_env( { env_var( displayName, displayValue ) } );
     writable.path_writable = []( const std::string& path )
     {
-        return path == std::string{ kUinputPath };
+        return path == std::string{ uinputPath };
     };
 
     const grab::core::Environment writable_env =
@@ -127,7 +127,7 @@ TEST( Prober,
     EXPECT_TRUE( writable_env.uinput_writable );
 
     grab::core::SystemFacts unwritable =
-        facts_with_env( { env_var( kDisplayName, kDisplayValue ) } );
+        facts_with_env( { env_var( displayName, displayValue ) } );
     unwritable.path_writable = []( const std::string& )
     {
         return false;
@@ -142,21 +142,21 @@ TEST( Prober,
       ProbesInputDeviceAccessPerDevice )
 {
     grab::core::SystemFacts facts =
-        facts_with_env( { env_var( kDisplayName, kDisplayValue ) } );
+        facts_with_env( { env_var( displayName, displayValue ) } );
     facts.list_input_devices = []
     {
         return std::vector<std::string>{
-            std::string{ kFirstInputDevicePath },
-            std::string{ kSecondInputDevicePath },
+            std::string{ firstInputDevicePath },
+            std::string{ secondInputDevicePath },
         };
     };
     facts.path_readable = []( const std::string& path )
     {
-        return path == kFirstInputDevicePath;
+        return path == firstInputDevicePath;
     };
 
     const grab::core::Environment env = grab::core::probe_environment( facts );
-    ASSERT_EQ( env.input_devices.size(), kExpectedInputDeviceCount );
-    EXPECT_TRUE( env.input_devices.at( kFirstInputDeviceIndex ).readable );
-    EXPECT_FALSE( env.input_devices.at( kSecondInputDeviceIndex ).readable );
+    ASSERT_EQ( env.input_devices.size(), expectedInputDeviceCount );
+    EXPECT_TRUE( env.input_devices.at( firstInputDeviceIndex ).readable );
+    EXPECT_FALSE( env.input_devices.at( secondInputDeviceIndex ).readable );
 }

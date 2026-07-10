@@ -19,9 +19,9 @@ namespace grab
     namespace
     {
 
-        constexpr std::string_view kSessionClosedMessage = "session is closed";
-        constexpr std::string_view kThreadStartStep = "session reactor thread start";
-        constexpr std::string_view kReactorRunStep  = "session reactor run";
+        constexpr std::string_view sessionClosedMessage = "session is closed";
+        constexpr std::string_view threadStartStep      = "session reactor thread start";
+        constexpr std::string_view reactorRunStep       = "session reactor run";
 
         [[nodiscard]]
         grab::Error
@@ -29,7 +29,7 @@ namespace grab
                         std::string_view message )
         {
             return grab::Error{
-                .code       = grab::ErrorCode::internal_fault,
+                .code       = grab::ErrorCode::InternalFault,
                 .message    = std::string{ step } + ": " + std::string{ message },
                 .capability = {},
                 .target     = {},
@@ -57,8 +57,8 @@ namespace grab
         session_closed_error()
         {
             return grab::Error{
-                .code       = grab::ErrorCode::session_closed,
-                .message    = std::string{ kSessionClosedMessage },
+                .code       = grab::ErrorCode::SessionClosed,
+                .message    = std::string{ sessionClosedMessage },
                 .capability = {},
                 .target     = {},
                 .attempts   = {},
@@ -186,12 +186,12 @@ namespace grab
         catch( const std::exception& exception )
         {
             close();
-            return std::unexpected( exception_error( kThreadStartStep, exception ) );
+            return std::unexpected( exception_error( threadStartStep, exception ) );
         }
         catch( ... )
         {
             close();
-            return std::unexpected( unknown_exception_error( kThreadStartStep ) );
+            return std::unexpected( unknown_exception_error( threadStartStep ) );
         }
 
         auto start_result = ready.get();
@@ -250,11 +250,11 @@ namespace grab
         }
         catch( const std::exception& exception )
         {
-            return std::unexpected( exception_error( kReactorRunStep, exception ) );
+            return std::unexpected( exception_error( reactorRunStep, exception ) );
         }
         catch( ... )
         {
-            return std::unexpected( unknown_exception_error( kReactorRunStep ) );
+            return std::unexpected( unknown_exception_error( reactorRunStep ) );
         }
     }
 

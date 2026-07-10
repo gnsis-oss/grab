@@ -26,17 +26,17 @@ namespace grab::input
     namespace
     {
 
-        constexpr int              kXcbOk                = 0;
-        constexpr std::uint32_t    kPropertyOffsetZero   = 0U;
-        constexpr std::uint32_t    kPropertyLengthProbe  = 0U;
-        constexpr std::uint32_t    kBytesPerPropertyUnit = 4U;
-        constexpr std::uint32_t    kMaxPropertyBytes     = 1U * 1'024U * 1'024U;
-        constexpr std::uint8_t     kFormat8Bits          = 8U;
-        constexpr std::uint8_t     kFormat32Bits         = 32U;
-        constexpr std::string_view kNetClientListAtom    = "_NET_CLIENT_LIST";
-        constexpr std::string_view kNetWmNameAtom        = "_NET_WM_NAME";
-        constexpr std::string_view kUtf8StringAtom       = "UTF8_STRING";
-        constexpr std::string_view kLocatorContext       = "XCB window locator";
+        constexpr int              xcbOk                = 0;
+        constexpr std::uint32_t    propertyOffsetZero   = 0U;
+        constexpr std::uint32_t    propertyLengthProbe  = 0U;
+        constexpr std::uint32_t    bytesPerPropertyUnit = 4U;
+        constexpr std::uint32_t    maxPropertyBytes     = 1U * 1'024U * 1'024U;
+        constexpr std::uint8_t     format8Bits          = 8U;
+        constexpr std::uint8_t     format32Bits         = 32U;
+        constexpr std::string_view netClientListAtom    = "_NET_CLIENT_LIST";
+        constexpr std::string_view netWmNameAtom        = "_NET_WM_NAME";
+        constexpr std::string_view utf8StringAtom       = "UTF8_STRING";
+        constexpr std::string_view locatorContext       = "XCB window locator";
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -78,7 +78,7 @@ namespace grab::input
         {
             if( connection == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB window locator connection is not open" );
             }
             return {};
@@ -100,7 +100,7 @@ namespace grab::input
 
             if( iterator.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB default screen is unavailable" );
             }
 
@@ -125,8 +125,8 @@ namespace grab::input
             const auto           error     = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
-                                   std::string{ kLocatorContext } +
+                return grab::fail( grab::ErrorCode::ProtocolError,
+                                   std::string{ locatorContext } +
                                        " atom lookup failed for " +
                                        std::string{ name } );
             }
@@ -138,19 +138,19 @@ namespace grab::input
         grab::Result<Atoms>
         intern_atoms( xcb_connection_t* connection )
         {
-            auto net_client_list = intern_atom( connection, kNetClientListAtom, true );
+            auto net_client_list = intern_atom( connection, netClientListAtom, true );
             if( !net_client_list.has_value() )
             {
                 return std::unexpected( std::move( net_client_list.error() ) );
             }
 
-            auto net_wm_name = intern_atom( connection, kNetWmNameAtom, true );
+            auto net_wm_name = intern_atom( connection, netWmNameAtom, true );
             if( !net_wm_name.has_value() )
             {
                 return std::unexpected( std::move( net_wm_name.error() ) );
             }
 
-            auto utf8_string = intern_atom( connection, kUtf8StringAtom, true );
+            auto utf8_string = intern_atom( connection, utf8StringAtom, true );
             if( !utf8_string.has_value() )
             {
                 return std::unexpected( std::move( utf8_string.error() ) );
@@ -190,8 +190,8 @@ namespace grab::input
                                                           window,
                                                           property,
                                                           type,
-                                                          kPropertyOffsetZero,
-                                                          kPropertyLengthProbe ),
+                                                          propertyOffsetZero,
+                                                          propertyLengthProbe ),
                                         &raw_probe_error )
             );
             const auto probe_error = take_xcb_owned( raw_probe_error );
@@ -201,22 +201,22 @@ namespace grab::input
                 {
                     return std::optional<PropertyData>{};
                 }
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB property probe failed" );
             }
             if( probe_reply == nullptr || probe_reply->type == XCB_ATOM_NONE )
             {
                 return std::optional<PropertyData>{};
             }
-            if( probe_reply->bytes_after > kMaxPropertyBytes )
+            if( probe_reply->bytes_after > maxPropertyBytes )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB property exceeds locator read limit" );
             }
 
             const std::uint32_t total_units =
-                ( probe_reply->bytes_after + kBytesPerPropertyUnit - 1U ) /
-                kBytesPerPropertyUnit;
+                ( probe_reply->bytes_after + bytesPerPropertyUnit - 1U ) /
+                bytesPerPropertyUnit;
 
             xcb_generic_error_t* raw_value_error = nullptr;
             const auto           value_reply     = take_xcb_owned(
@@ -226,7 +226,7 @@ namespace grab::input
                                                           window,
                                                           property,
                                                           type,
-                                                          kPropertyOffsetZero,
+                                                          propertyOffsetZero,
                                                           total_units ),
                                         &raw_value_error )
             );
@@ -237,7 +237,7 @@ namespace grab::input
                 {
                     return std::optional<PropertyData>{};
                 }
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB property read failed" );
             }
             if( value_reply == nullptr || value_reply->type == XCB_ATOM_NONE )
@@ -289,7 +289,7 @@ namespace grab::input
         std::optional<WindowClass>
         parse_wm_class( const PropertyData& property )
         {
-            if( property.format != kFormat8Bits || property.bytes.empty() )
+            if( property.format != format8Bits || property.bytes.empty() )
             {
                 return std::nullopt;
             }
@@ -401,8 +401,7 @@ namespace grab::input
                 {
                     return std::unexpected( std::move( net_wm_name.error() ) );
                 }
-                if( net_wm_name->has_value() &&
-                    ( *net_wm_name )->format == kFormat8Bits )
+                if( net_wm_name->has_value() && ( *net_wm_name )->format == format8Bits )
                 {
                     return bytes_to_string( ( *net_wm_name )->bytes );
                 }
@@ -414,7 +413,7 @@ namespace grab::input
             {
                 return std::unexpected( std::move( wm_name.error() ) );
             }
-            if( wm_name->has_value() && ( *wm_name )->format == kFormat8Bits )
+            if( wm_name->has_value() && ( *wm_name )->format == format8Bits )
             {
                 return bytes_to_string( ( *wm_name )->bytes );
             }
@@ -435,7 +434,7 @@ namespace grab::input
             }
             if( !property->has_value() ||
                 ( *property )->format !=
-                kFormat32Bits ||
+                format32Bits ||
                 ( *property )->bytes.empty() )
             {
                 return std::vector<xcb_window_t>{};
@@ -472,7 +471,7 @@ namespace grab::input
             const auto error = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB root tree query failed" );
             }
 
@@ -540,7 +539,7 @@ namespace grab::input
             located.bounds.y                         = geometry->y;
             located.bounds.width                     = geometry->width;
             located.bounds.height                    = geometry->height;
-            located.trust                            = GeometryTrust::estimated;
+            located.trust                            = GeometryTrust::Estimated;
 
             xcb_generic_error_t* raw_translate_error = nullptr;
             const auto translation     = take_xcb_owned( xcb_translate_coordinates_reply(
@@ -556,7 +555,7 @@ namespace grab::input
 
             located.bounds.x = translation->dst_x;
             located.bounds.y = translation->dst_y;
-            located.trust    = GeometryTrust::trusted;
+            located.trust    = GeometryTrust::Trusted;
             return located;
         }
 
@@ -610,9 +609,9 @@ namespace grab::input
         };
         if( connection ==
             nullptr ||
-            xcb_connection_has_error( connection.get() ) != kXcbOk )
+            xcb_connection_has_error( connection.get() ) != xcbOk )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "XCB display connection failed" );
         }
 
@@ -676,7 +675,7 @@ namespace grab::input
             return located_geometry( connection_, root_, window );
         }
 
-        return grab::fail( grab::ErrorCode::window_not_found,
+        return grab::fail( grab::ErrorCode::WindowNotFound,
                            "No top-level X11 window matched the requested WM_CLASS" );
     }
 

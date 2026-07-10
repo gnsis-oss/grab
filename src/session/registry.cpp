@@ -153,12 +153,12 @@ namespace grab::session
                     {
                         continue;
                     }
-                    return grab::fail( ErrorCode::internal_fault,
+                    return grab::fail( ErrorCode::InternalFault,
                                        posix_error( "write", error_number ) );
                 }
                 if( written == 0 )
                 {
-                    return grab::fail( ErrorCode::internal_fault,
+                    return grab::fail( ErrorCode::InternalFault,
                                        "write: wrote zero bytes" );
                 }
                 remaining.remove_prefix( static_cast<std::size_t>( written ) );
@@ -178,10 +178,10 @@ namespace grab::session
                 const int error_number = errno;
                 if( error_number == ENOENT )
                 {
-                    return grab::fail( ErrorCode::session_not_found,
+                    return grab::fail( ErrorCode::SessionNotFound,
                                        "session record not found: " + file_text );
                 }
-                return grab::fail( ErrorCode::internal_fault,
+                return grab::fail( ErrorCode::InternalFault,
                                    posix_error( "open", error_number ) );
             }
 
@@ -199,7 +199,7 @@ namespace grab::session
                     {
                         continue;
                     }
-                    return grab::fail( ErrorCode::internal_fault,
+                    return grab::fail( ErrorCode::InternalFault,
                                        posix_error( "read", error_number ) );
                 }
                 if( bytes_read == 0 )
@@ -252,10 +252,10 @@ namespace grab::session
                 const int error_number = errno;
                 if( error_number == EEXIST )
                 {
-                    return grab::fail( ErrorCode::session_exists,
+                    return grab::fail( ErrorCode::SessionExists,
                                        "session already exists: " + record.name );
                 }
-                return grab::fail( ErrorCode::internal_fault,
+                return grab::fail( ErrorCode::InternalFault,
                                    posix_error( "open", error_number ) );
             }
 
@@ -270,7 +270,7 @@ namespace grab::session
         }
         catch( const std::exception& error )
         {
-            return grab::fail( ErrorCode::internal_fault,
+            return grab::fail( ErrorCode::InternalFault,
                                std::string{ "create: " } + error.what() );
         }
     }
@@ -289,7 +289,7 @@ namespace grab::session
             const int   fd             = core::posix::mkstemp( temp_path_text.data() );
             if( fd == posix_failure )
             {
-                return grab::fail( ErrorCode::internal_fault,
+                return grab::fail( ErrorCode::InternalFault,
                                    posix_error( "mkstemp", errno ) );
             }
 
@@ -307,14 +307,14 @@ namespace grab::session
             {
                 const int error_number = errno;
                 static_cast<void>( ::unlink( temp_path_text.c_str() ) );
-                return grab::fail( ErrorCode::internal_fault,
+                return grab::fail( ErrorCode::InternalFault,
                                    posix_error( "rename", error_number ) );
             }
             return {};
         }
         catch( const std::exception& error )
         {
-            return grab::fail( ErrorCode::internal_fault,
+            return grab::fail( ErrorCode::InternalFault,
                                std::string{ "write: " } + error.what() );
         }
     }
@@ -333,7 +333,7 @@ namespace grab::session
         }
         catch( const std::exception& error )
         {
-            return grab::fail( ErrorCode::internal_fault,
+            return grab::fail( ErrorCode::InternalFault,
                                std::string{ "read: " } + error.what() );
         }
     }
@@ -352,7 +352,7 @@ namespace grab::session
             );
             if( fd == posix_failure )
             {
-                return grab::fail( ErrorCode::internal_fault,
+                return grab::fail( ErrorCode::InternalFault,
                                    posix_error( "open", errno ) );
             }
 
@@ -362,11 +362,11 @@ namespace grab::session
                 const int error_number = errno;
                 if( lock_is_held_error( error_number ) )
                 {
-                    return grab::fail( ErrorCode::session_exists,
+                    return grab::fail( ErrorCode::SessionExists,
                                        "session is already live: " +
                                            std::string{ name } );
                 }
-                return grab::fail( ErrorCode::internal_fault,
+                return grab::fail( ErrorCode::InternalFault,
                                    posix_error( "flock", error_number ) );
             }
 
@@ -374,7 +374,7 @@ namespace grab::session
         }
         catch( const std::exception& error )
         {
-            return grab::fail( ErrorCode::internal_fault,
+            return grab::fail( ErrorCode::InternalFault,
                                std::string{ "acquire_liveness_lock: " } + error.what() );
         }
     }
@@ -464,11 +464,11 @@ namespace grab::session
                 const int error_number = errno;
                 if( error_number == ENOENT )
                 {
-                    return grab::fail( ErrorCode::session_not_found,
+                    return grab::fail( ErrorCode::SessionNotFound,
                                        "session record not found: " +
                                            std::string{ name } );
                 }
-                return grab::fail( ErrorCode::internal_fault,
+                return grab::fail( ErrorCode::InternalFault,
                                    posix_error( "unlink", error_number ) );
             }
 
@@ -479,7 +479,7 @@ namespace grab::session
                 const int error_number = errno;
                 if( error_number != ENOENT )
                 {
-                    return grab::fail( ErrorCode::internal_fault,
+                    return grab::fail( ErrorCode::InternalFault,
                                        posix_error( "unlink", error_number ) );
                 }
             }
@@ -487,7 +487,7 @@ namespace grab::session
         }
         catch( const std::exception& error )
         {
-            return grab::fail( ErrorCode::internal_fault,
+            return grab::fail( ErrorCode::InternalFault,
                                std::string{ "remove: " } + error.what() );
         }
     }
@@ -520,14 +520,14 @@ namespace grab::session
                 read_live_environment( "XDG_RUNTIME_DIR" );
             if( !runtime_dir.has_value() || runtime_dir->empty() )
             {
-                return grab::fail( ErrorCode::environment_changed,
+                return grab::fail( ErrorCode::EnvironmentChanged,
                                    "XDG_RUNTIME_DIR is unset" );
             }
             return std::filesystem::path{ *runtime_dir } / "grab" / "sessions";
         }
         catch( const std::exception& error )
         {
-            return grab::fail( ErrorCode::internal_fault,
+            return grab::fail( ErrorCode::InternalFault,
                                std::string{ "default_root: " } + error.what() );
         }
     }

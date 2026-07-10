@@ -119,7 +119,7 @@ namespace grab::platform::x11
         const auto error = make_xcb_reply( xcb_request_check( conn.get(), cookie ) );
         if( error )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "XIChangeHierarchy AddMaster failed" );
         }
 
@@ -134,7 +134,7 @@ namespace grab::platform::x11
         const auto owned_error = make_xcb_reply( query_error );
         if( !reply )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "XIQueryDevice failed after AddMaster" );
         }
 
@@ -172,7 +172,7 @@ namespace grab::platform::x11
 
         if( pointer_id == invalid_device_id || keyboard_id == invalid_device_id )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "created master seat not found in device list" );
         }
 
@@ -249,8 +249,7 @@ namespace grab::platform::x11
         const auto error = make_xcb_reply( xcb_request_check( conn->get(), cookie ) );
         if( error )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
-                               "XIWarpPointer failed" );
+            return grab::fail( grab::ErrorCode::ProviderFailed, "XIWarpPointer failed" );
         }
         return {};
     }
@@ -267,7 +266,7 @@ namespace grab::platform::x11
         const auto error = make_xcb_reply( error_raw );
         if( !reply )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "XIQueryPointer failed" );
         }
         return PointerPos{

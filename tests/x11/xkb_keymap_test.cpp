@@ -224,7 +224,7 @@ TEST( XkbKeymap,
     auto strokes = keymap->text_to_keystrokes( unsupported_text );
 
     ASSERT_FALSE( strokes.has_value() );
-    EXPECT_EQ( strokes.error().code, grab::ErrorCode::unsupported_character );
+    EXPECT_EQ( strokes.error().code, grab::ErrorCode::UnsupportedCharacter );
 }
 
 TEST( InputCommand,
@@ -243,5 +243,5 @@ TEST( InputCommand,
     auto parsed = grab::cli::parse_fraction_pair( malformed_fraction_pair );
 
     ASSERT_FALSE( parsed.has_value() );
-    EXPECT_EQ( parsed.error().code, grab::ErrorCode::invalid_argument );
+    EXPECT_EQ( parsed.error().code, grab::ErrorCode::InvalidArgument );
 }

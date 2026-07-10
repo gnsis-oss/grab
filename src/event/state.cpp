@@ -17,12 +17,12 @@ namespace grab::event
     namespace
     {
 
-        constexpr std::uint64_t    kUnsetSequence = 0U;
-        constexpr std::string_view kOpenKey       = "open";
-        constexpr std::string_view kFocusedKey    = "focused";
-        constexpr std::string_view kAppKey        = "app";
-        constexpr std::string_view kPidKey        = "pid";
-        constexpr std::string_view kTitleKey      = "title";
+        constexpr std::uint64_t    unsetSequence = 0U;
+        constexpr std::string_view openKey       = "open";
+        constexpr std::string_view focusedKey    = "focused";
+        constexpr std::string_view appKey        = "app";
+        constexpr std::string_view pidKey        = "pid";
+        constexpr std::string_view titleKey      = "title";
 
         using detail::WindowRecord;
 
@@ -59,9 +59,9 @@ namespace grab::event
         window_to_json( const WindowRecord& window )
         {
             return OrderedJson{
-                {  std::string{ kAppKey },             window.app},
-                {  std::string{ kPidKey }, window.pid.to_string()},
-                {std::string{ kTitleKey },           window.title},
+                {  std::string{ appKey },             window.app},
+                {  std::string{ pidKey }, window.pid.to_string()},
+                {std::string{ titleKey },           window.title},
             };
         }
 
@@ -80,7 +80,7 @@ namespace grab::event
 
         switch( event.kind )
         {
-            case grab::EventKind::window_created :
+            case grab::EventKind::WindowCreated :
                 {
                     auto existing =
                         std::ranges::find_if( open_windows_,
@@ -99,7 +99,7 @@ namespace grab::event
                     }
                     break;
                 }
-            case grab::EventKind::window_closed :
+            case grab::EventKind::WindowClosed :
                 {
                     const auto removed =
                         std::ranges::remove_if( open_windows_,
@@ -117,7 +117,7 @@ namespace grab::event
                     }
                     break;
                 }
-            case grab::EventKind::window_focus_changed :
+            case grab::EventKind::WindowFocusChanged :
                 if( is_empty_window( *change ) )
                 {
                     focused_            = WindowRecord{};
@@ -147,15 +147,15 @@ namespace grab::event
                                                   : window_to_json( WindowRecord{} );
 
         const OrderedJson root{
-            {   std::string{ kOpenKey },    std::move( open )},
-            {std::string{ kFocusedKey }, std::move( focused )},
+            {   std::string{ openKey },    std::move( open )},
+            {std::string{ focusedKey }, std::move( focused )},
         };
 
         return grab::Event{
             .timestamp = timestamp,
-            .sequence  = kUnsetSequence,
-            .kind      = grab::EventKind::state_snapshot,
-            .category  = grab::category_of( grab::EventKind::state_snapshot ),
+            .sequence  = unsetSequence,
+            .kind      = grab::EventKind::StateSnapshot,
+            .category  = grab::category_of( grab::EventKind::StateSnapshot ),
             .payload   = grab::Payload{ grab::StateSnapshot{
                 .json = root.dump(),
             } },

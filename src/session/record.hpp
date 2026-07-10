@@ -17,9 +17,9 @@ namespace grab::session
             std::string     provider;
             std::string     endpoint;    // display / wayland socket
             std::string     control_socket;
-            SessionMode     mode = SessionMode::offscreen;
+            SessionMode     mode = SessionMode::Offscreen;
             SessionGeometry geometry;
-            SessionState    state = SessionState::starting;
+            SessionState    state = SessionState::Starting;
             grab::Pid       supervisor_pid;
             std::uint64_t   created_monotonic = 0U;
     };

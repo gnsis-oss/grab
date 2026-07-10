@@ -74,12 +74,12 @@ namespace grab
     };
 
     template<>
-    struct PixelTraits<PixelFormat::rgb24> : RgbBytePixelTraits<3U, 0U, 1U, 2U>
+    struct PixelTraits<PixelFormat::Rgb24> : RgbBytePixelTraits<3U, 0U, 1U, 2U>
     {
     };
 
     template<>
-    struct PixelTraits<PixelFormat::bgr0> : RgbBytePixelTraits<4U, 2U, 1U, 0U>
+    struct PixelTraits<PixelFormat::Bgr0> : RgbBytePixelTraits<4U, 2U, 1U, 0U>
     {
     };
 

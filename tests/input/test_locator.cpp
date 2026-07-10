@@ -19,32 +19,32 @@
 namespace
 {
 
-    constexpr const char*      kXvfbDisplay         = ":98";
-    constexpr int              kXcbOk               = 0;
+    constexpr const char*      xvfbDisplay         = ":98";
+    constexpr int              xcbOk               = 0;
 
-    constexpr std::int16_t     kFirstWindowX        = 140;
-    constexpr std::int16_t     kFirstWindowY        = 180;
-    constexpr std::int16_t     kSecondWindowX       = 360;
-    constexpr std::int16_t     kSecondWindowY       = 240;
-    constexpr std::uint16_t    kWindowWidth         = 220U;
-    constexpr std::uint16_t    kWindowHeight        = 130U;
-    constexpr std::uint16_t    kWindowBorderWidth   = 0U;
-    constexpr std::uint32_t    kWindowValueMask     = XCB_CW_BACK_PIXEL;
-    constexpr std::uint32_t    kPropertyReplaceMode = XCB_PROP_MODE_REPLACE;
-    constexpr std::uint8_t     kFormat8Bits         = 8U;
-    constexpr std::uint8_t     kResponseTypeMask    = 0X7FU;
-    constexpr auto             kMapTimeout          = std::chrono::seconds{ 2 };
-    constexpr auto             kMapPollInterval     = std::chrono::milliseconds{ 10 };
+    constexpr std::int16_t     firstWindowX        = 140;
+    constexpr std::int16_t     firstWindowY        = 180;
+    constexpr std::int16_t     secondWindowX       = 360;
+    constexpr std::int16_t     secondWindowY       = 240;
+    constexpr std::uint16_t    windowWidth         = 220U;
+    constexpr std::uint16_t    windowHeight        = 130U;
+    constexpr std::uint16_t    windowBorderWidth   = 0U;
+    constexpr std::uint32_t    windowValueMask     = XCB_CW_BACK_PIXEL;
+    constexpr std::uint32_t    propertyReplaceMode = XCB_PROP_MODE_REPLACE;
+    constexpr std::uint8_t     format8Bits         = 8U;
+    constexpr std::uint8_t     responseTypeMask    = 0X7FU;
+    constexpr auto             mapTimeout          = std::chrono::seconds{ 2 };
+    constexpr auto             mapPollInterval     = std::chrono::milliseconds{ 10 };
 
-    constexpr std::string_view kKnownInstance       = "grab-locator-instance";
-    constexpr std::string_view kKnownClass          = "GrabLocatorKnownClass";
-    constexpr std::string_view kSharedInstance      = "grab-locator-shared-instance";
-    constexpr std::string_view kSharedClass         = "GrabLocatorSharedClass";
-    constexpr std::string_view kNonTargetTitle      = "ordinary locator title";
-    constexpr std::string_view kTargetTitle         = "prefix the-target-title suffix";
-    constexpr std::string_view kTargetNeedle        = "the-target-title";
-    constexpr std::string_view kMissingClassName    = "class-that-does-not-exist";
-    constexpr auto             kWindowNotFoundCode  = grab::ErrorCode::window_not_found;
+    constexpr std::string_view knownInstance       = "grab-locator-instance";
+    constexpr std::string_view knownClass          = "GrabLocatorKnownClass";
+    constexpr std::string_view sharedInstance      = "grab-locator-shared-instance";
+    constexpr std::string_view sharedClass         = "GrabLocatorSharedClass";
+    constexpr std::string_view nonTargetTitle      = "ordinary locator title";
+    constexpr std::string_view targetTitle         = "prefix the-target-title suffix";
+    constexpr std::string_view targetNeedle        = "the-target-title";
+    constexpr std::string_view missingClassName    = "class-that-does-not-exist";
+    constexpr auto             windowNotFoundCode  = grab::ErrorCode::WindowNotFound;
 
     template<typename T>
     using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -137,7 +137,7 @@ namespace
     {
         if( xcb_flush( connection ) <=
             0 ||
-            xcb_connection_has_error( connection ) != kXcbOk )
+            xcb_connection_has_error( connection ) != xcbOk )
         {
             return testing::AssertionFailure() << "xcb_flush failed";
         }
@@ -190,11 +190,11 @@ namespace
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          XCB_ATOM_WM_CLASS,
                                          XCB_ATOM_STRING,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( value.size() ),
                                          value.data() )
         ) );
@@ -208,11 +208,11 @@ namespace
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          XCB_ATOM_WM_NAME,
                                          XCB_ATOM_STRING,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( title.size() ),
                                          title.data() )
         ) );
@@ -224,11 +224,11 @@ namespace
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          net_wm_name,
                                          utf8_string,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( title.size() ),
                                          title.data() )
         ) );
@@ -239,15 +239,14 @@ namespace
     wait_for_map_notify( xcb_connection_t* connection,
                          xcb_window_t      window )
     {
-        const auto deadline = std::chrono::steady_clock::now() + kMapTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + mapTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             const auto event = take_xcb_owned( xcb_poll_for_event( connection ) );
             if( event != nullptr )
             {
                 const auto response_type =
-                    static_cast<std::uint8_t>( event->response_type &
-                                               kResponseTypeMask );
+                    static_cast<std::uint8_t>( event->response_type & responseTypeMask );
                 if( response_type == XCB_MAP_NOTIFY )
                 {
                     const void* const raw_event = event.get();
@@ -261,11 +260,11 @@ namespace
                 continue;
             }
 
-            if( xcb_connection_has_error( connection ) != kXcbOk )
+            if( xcb_connection_has_error( connection ) != xcbOk )
             {
                 return false;
             }
-            std::this_thread::sleep_for( kMapPollInterval );
+            std::this_thread::sleep_for( mapPollInterval );
         }
         return false;
     }
@@ -291,12 +290,12 @@ namespace
                                                           screen.root,
                                                           x,
                                                           y,
-                                                          kWindowWidth,
-                                                          kWindowHeight,
-                                                          kWindowBorderWidth,
+                                                          windowWidth,
+                                                          windowHeight,
+                                                          windowBorderWidth,
                                                           XCB_WINDOW_CLASS_INPUT_OUTPUT,
                                                           screen.root_visual,
-                                                          kWindowValueMask,
+                                                          windowValueMask,
                                                           values.data() ) )
         );
         set_wm_class( connection, window, instance, class_name );
@@ -312,14 +311,14 @@ namespace
     setup_root_event_mask( xcb_connection_t*   connection,
                            const xcb_screen_t& screen )
     {
-        constexpr std::uint32_t kRootEventMask = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
-        constexpr std::uint32_t kRootValueMask = XCB_CW_EVENT_MASK;
+        constexpr std::uint32_t rootEventMask = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
+        constexpr std::uint32_t rootValueMask = XCB_CW_EVENT_MASK;
         return request_succeeded(
             connection,
             xcb_change_window_attributes_checked( connection,
                                                   screen.root,
-                                                  kRootValueMask,
-                                                  &kRootEventMask )
+                                                  rootValueMask,
+                                                  &rootEventMask )
         );
     }
 
@@ -328,9 +327,9 @@ namespace
 TEST( Locator,
       LocatesWindowByWmClass )
 {
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen, nullptr );
@@ -338,33 +337,33 @@ TEST( Locator,
 
     const xcb_window_t window = create_test_window( connection.get(),
                                                     *screen,
-                                                    kFirstWindowX,
-                                                    kFirstWindowY,
-                                                    kKnownInstance,
-                                                    kKnownClass,
-                                                    kNonTargetTitle );
+                                                    firstWindowX,
+                                                    firstWindowY,
+                                                    knownInstance,
+                                                    knownClass,
+                                                    nonTargetTitle );
     ASSERT_TRUE( wait_for_map_notify( connection.get(), window ) );
 
-    auto locator = grab::input::WindowLocator::open( kXvfbDisplay );
+    auto locator = grab::input::WindowLocator::open( xvfbDisplay );
     ASSERT_TRUE( locator.has_value() ) << locator.error().message;
 
-    auto located = locator->locate( { std::string{ kKnownClass } } );
+    auto located = locator->locate( { std::string{ knownClass } } );
 
     ASSERT_TRUE( located.has_value() ) << located.error().message;
     EXPECT_EQ( located->window, window );
-    EXPECT_EQ( located->bounds.x, kFirstWindowX );
-    EXPECT_EQ( located->bounds.y, kFirstWindowY );
-    EXPECT_EQ( located->bounds.width, kWindowWidth );
-    EXPECT_EQ( located->bounds.height, kWindowHeight );
-    EXPECT_EQ( located->trust, grab::input::GeometryTrust::trusted );
+    EXPECT_EQ( located->bounds.x, firstWindowX );
+    EXPECT_EQ( located->bounds.y, firstWindowY );
+    EXPECT_EQ( located->bounds.width, windowWidth );
+    EXPECT_EQ( located->bounds.height, windowHeight );
+    EXPECT_EQ( located->trust, grab::input::GeometryTrust::Trusted );
 }
 
 TEST( Locator,
       TitleFilterNarrowsMatch )
 {
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen, nullptr );
@@ -372,43 +371,43 @@ TEST( Locator,
 
     const xcb_window_t non_target = create_test_window( connection.get(),
                                                         *screen,
-                                                        kFirstWindowX,
-                                                        kFirstWindowY,
-                                                        kSharedInstance,
-                                                        kSharedClass,
-                                                        kNonTargetTitle );
+                                                        firstWindowX,
+                                                        firstWindowY,
+                                                        sharedInstance,
+                                                        sharedClass,
+                                                        nonTargetTitle );
     ASSERT_TRUE( wait_for_map_notify( connection.get(), non_target ) );
     const xcb_window_t target = create_test_window( connection.get(),
                                                     *screen,
-                                                    kSecondWindowX,
-                                                    kSecondWindowY,
-                                                    kSharedInstance,
-                                                    kSharedClass,
-                                                    kTargetTitle );
+                                                    secondWindowX,
+                                                    secondWindowY,
+                                                    sharedInstance,
+                                                    sharedClass,
+                                                    targetTitle );
     ASSERT_TRUE( wait_for_map_notify( connection.get(), target ) );
 
-    auto locator = grab::input::WindowLocator::open( kXvfbDisplay );
+    auto locator = grab::input::WindowLocator::open( xvfbDisplay );
     ASSERT_TRUE( locator.has_value() ) << locator.error().message;
 
-    auto located = locator->locate( { std::string{ kSharedClass } }, kTargetNeedle );
+    auto located = locator->locate( { std::string{ sharedClass } }, targetNeedle );
 
     ASSERT_TRUE( located.has_value() ) << located.error().message;
     EXPECT_EQ( located->window, target );
-    EXPECT_EQ( located->bounds.x, kSecondWindowX );
-    EXPECT_EQ( located->bounds.y, kSecondWindowY );
-    EXPECT_EQ( located->bounds.width, kWindowWidth );
-    EXPECT_EQ( located->bounds.height, kWindowHeight );
-    EXPECT_EQ( located->trust, grab::input::GeometryTrust::trusted );
+    EXPECT_EQ( located->bounds.x, secondWindowX );
+    EXPECT_EQ( located->bounds.y, secondWindowY );
+    EXPECT_EQ( located->bounds.width, windowWidth );
+    EXPECT_EQ( located->bounds.height, windowHeight );
+    EXPECT_EQ( located->trust, grab::input::GeometryTrust::Trusted );
 }
 
 TEST( Locator,
       NotFoundReturnsError )
 {
-    auto locator = grab::input::WindowLocator::open( kXvfbDisplay );
+    auto locator = grab::input::WindowLocator::open( xvfbDisplay );
     ASSERT_TRUE( locator.has_value() ) << locator.error().message;
 
-    auto located = locator->locate( { std::string{ kMissingClassName } } );
+    auto located = locator->locate( { std::string{ missingClassName } } );
 
     ASSERT_FALSE( located.has_value() );
-    EXPECT_EQ( located.error().code, kWindowNotFoundCode );
+    EXPECT_EQ( located.error().code, windowNotFoundCode );
 }

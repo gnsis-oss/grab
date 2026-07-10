@@ -19,28 +19,28 @@
 namespace
 {
 
-    constexpr const char*        kUsLayout                = "us";
-    constexpr char32_t           kLowercaseA              = U'a';
-    constexpr char32_t           kUppercaseA              = U'A';
-    constexpr char32_t           kUnmappableCodepoint     = U'\U00004E2D';
-    constexpr std::string_view   kUnmappableCodepointName = "U+4E2D";
-    constexpr std::string_view   kLowercaseAText          = "a";
-    constexpr std::string_view   kUppercaseAText          = "A";
-    constexpr std::string_view   kRoundTripText           = "Ab";
-    constexpr std::size_t        kRoundTripKeystrokeCount = 2U;
-    constexpr const char*        kAltgrModifierName       = "Mod5";
-    constexpr xkb_mod_mask_t     kNoModifierMask          = 0U;
-    constexpr xkb_layout_index_t kDefaultLayout           = 0U;
-    constexpr std::size_t        kNullTerminatorSize      = 1U;
-    constexpr std::size_t        kSingleKeystrokeCount    = 1U;
-    constexpr int                kNoProducedBytes         = 0;
-    constexpr auto               kContextFlags = XKB_CONTEXT_NO_ENVIRONMENT_NAMES;
-    constexpr auto kUnsupportedCharacterCode   = grab::ErrorCode::unsupported_character;
+    constexpr const char*        usLayout                = "us";
+    constexpr char32_t           lowercaseA              = U'a';
+    constexpr char32_t           uppercaseA              = U'A';
+    constexpr char32_t           unmappableCodepoint     = U'\U00004E2D';
+    constexpr std::string_view   unmappableCodepointName = "U+4E2D";
+    constexpr std::string_view   lowercaseAText          = "a";
+    constexpr std::string_view   uppercaseAText          = "A";
+    constexpr std::string_view   roundTripText           = "Ab";
+    constexpr std::size_t        roundTripKeystrokeCount = 2U;
+    constexpr const char*        altgrModifierName       = "Mod5";
+    constexpr xkb_mod_mask_t     noModifierMask          = 0U;
+    constexpr xkb_layout_index_t defaultLayout           = 0U;
+    constexpr std::size_t        nullTerminatorSize      = 1U;
+    constexpr std::size_t        singleKeystrokeCount    = 1U;
+    constexpr int                noProducedBytes         = 0;
+    constexpr auto               contextFlags = XKB_CONTEXT_NO_ENVIRONMENT_NAMES;
+    constexpr auto unsupportedCharacterCode   = grab::ErrorCode::UnsupportedCharacter;
 
     using XkbContext      = std::unique_ptr<xkb_context, decltype( &xkb_context_unref )>;
     using XkbKeymap       = std::unique_ptr<xkb_keymap, decltype( &xkb_keymap_unref )>;
     using XkbState        = std::unique_ptr<xkb_state, decltype( &xkb_state_unref )>;
-    using SingleKeystroke = std::array<grab::Keystroke, kSingleKeystrokeCount>;
+    using SingleKeystroke = std::array<grab::Keystroke, singleKeystrokeCount>;
 
     struct TestXkb
     {
@@ -52,7 +52,7 @@ namespace
     testing::AssertionResult
     open_test_keymap( TestXkb& output )
     {
-        XkbContext context{ xkb_context_new( kContextFlags ), &xkb_context_unref };
+        XkbContext context{ xkb_context_new( contextFlags ), &xkb_context_unref };
         if( context == nullptr )
         {
             return testing::AssertionFailure() << "xkb_context_new failed";
@@ -61,7 +61,7 @@ namespace
         const xkb_rule_names names{
             .rules   = nullptr,
             .model   = nullptr,
-            .layout  = kUsLayout,
+            .layout  = usLayout,
             .variant = nullptr,
             .options = nullptr,
         };
@@ -87,11 +87,11 @@ namespace
                   const char* name ) noexcept
     {
         const xkb_mod_index_t index = xkb_keymap_mod_get_index( &keymap, name );
-        constexpr auto        kModifierMaskDigits =
+        constexpr auto        modifierMaskDigits =
             static_cast<xkb_mod_index_t>( std::numeric_limits<xkb_mod_mask_t>::digits );
-        if( index == XKB_MOD_INVALID || index >= kModifierMaskDigits )
+        if( index == XKB_MOD_INVALID || index >= modifierMaskDigits )
         {
-            return kNoModifierMask;
+            return noModifierMask;
         }
 
         return static_cast<xkb_mod_mask_t>( 1U ) << index;
@@ -102,14 +102,14 @@ namespace
     modifiers_for( xkb_keymap&            keymap,
                    const grab::Keystroke& keystroke ) noexcept
     {
-        xkb_mod_mask_t mask = kNoModifierMask;
+        xkb_mod_mask_t mask = noModifierMask;
         if( keystroke.shift )
         {
             mask |= modifier_bit( keymap, XKB_MOD_NAME_SHIFT );
         }
         if( keystroke.altgr )
         {
-            mask |= modifier_bit( keymap, kAltgrModifierName );
+            mask |= modifier_bit( keymap, altgrModifierName );
         }
         return mask;
     }
@@ -141,21 +141,21 @@ namespace
             static_cast<void>( xkb_state_update_mask( state.get(),
                                                       modifiers_for( *oracle.keymap,
                                                                      keystroke ),
-                                                      kNoModifierMask,
-                                                      kNoModifierMask,
-                                                      kDefaultLayout,
-                                                      kDefaultLayout,
-                                                      kDefaultLayout ) );
+                                                      noModifierMask,
+                                                      noModifierMask,
+                                                      defaultLayout,
+                                                      defaultLayout,
+                                                      defaultLayout ) );
 
             const int required_bytes =
                 xkb_state_key_get_utf8( state.get(), keystroke.keycode, nullptr, 0U );
-            if( required_bytes <= kNoProducedBytes )
+            if( required_bytes <= noProducedBytes )
             {
                 return testing::AssertionFailure() << "keystroke produced no UTF-8 text";
             }
 
             std::string buffer( static_cast<std::size_t>( required_bytes ) +
-                                    kNullTerminatorSize,
+                                    nullTerminatorSize,
                                 '\0' );
             const int   written_bytes = xkb_state_key_get_utf8( state.get(),
                                                                 keystroke.keycode,
@@ -186,10 +186,10 @@ namespace
 TEST( Keymap,
       MapsLowercaseAscii )
 {
-    auto keymap = grab::platform::x11::make_keymap_from_layout( kUsLayout );
+    auto keymap = grab::platform::x11::make_keymap_from_layout( usLayout );
     ASSERT_TRUE( keymap.has_value() ) << keymap.error().message;
 
-    auto keystroke = keymap->codepoint_to_keystroke( kLowercaseA );
+    auto keystroke = keymap->codepoint_to_keystroke( lowercaseA );
     ASSERT_TRUE( keystroke.has_value() ) << keystroke.error().message;
     EXPECT_FALSE( keystroke->shift );
     EXPECT_FALSE( keystroke->altgr );
@@ -198,18 +198,18 @@ TEST( Keymap,
 
     std::string produced;
     ASSERT_TRUE( render_keystroke( *keystroke, produced ) );
-    EXPECT_EQ( produced, kLowercaseAText );
+    EXPECT_EQ( produced, lowercaseAText );
 }
 
 TEST( Keymap,
       UppercaseNeedsShift )
 {
-    auto keymap = grab::platform::x11::make_keymap_from_layout( kUsLayout );
+    auto keymap = grab::platform::x11::make_keymap_from_layout( usLayout );
     ASSERT_TRUE( keymap.has_value() ) << keymap.error().message;
 
-    auto lowercase = keymap->codepoint_to_keystroke( kLowercaseA );
+    auto lowercase = keymap->codepoint_to_keystroke( lowercaseA );
     ASSERT_TRUE( lowercase.has_value() ) << lowercase.error().message;
-    auto uppercase = keymap->codepoint_to_keystroke( kUppercaseA );
+    auto uppercase = keymap->codepoint_to_keystroke( uppercaseA );
     ASSERT_TRUE( uppercase.has_value() ) << uppercase.error().message;
 
     EXPECT_EQ( uppercase->keycode, lowercase->keycode );
@@ -218,33 +218,33 @@ TEST( Keymap,
 
     std::string produced;
     ASSERT_TRUE( render_keystroke( *uppercase, produced ) );
-    EXPECT_EQ( produced, kUppercaseAText );
+    EXPECT_EQ( produced, uppercaseAText );
 }
 
 TEST( Keymap,
       TextToKeystrokesRoundTrips )
 {
-    auto keymap = grab::platform::x11::make_keymap_from_layout( kUsLayout );
+    auto keymap = grab::platform::x11::make_keymap_from_layout( usLayout );
     ASSERT_TRUE( keymap.has_value() ) << keymap.error().message;
 
-    auto keystrokes = keymap->text_to_keystrokes( kRoundTripText );
+    auto keystrokes = keymap->text_to_keystrokes( roundTripText );
     ASSERT_TRUE( keystrokes.has_value() ) << keystrokes.error().message;
-    ASSERT_EQ( keystrokes->size(), kRoundTripKeystrokeCount );
+    ASSERT_EQ( keystrokes->size(), roundTripKeystrokeCount );
 
     std::string produced;
     ASSERT_TRUE( render_keystrokes( *keystrokes, produced ) );
-    EXPECT_EQ( produced, kRoundTripText );
+    EXPECT_EQ( produced, roundTripText );
 }
 
 TEST( Keymap,
       UnmappableReturnsError )
 {
-    auto keymap = grab::platform::x11::make_keymap_from_layout( kUsLayout );
+    auto keymap = grab::platform::x11::make_keymap_from_layout( usLayout );
     ASSERT_TRUE( keymap.has_value() ) << keymap.error().message;
 
-    auto result = keymap->codepoint_to_keystroke( kUnmappableCodepoint );
+    auto result = keymap->codepoint_to_keystroke( unmappableCodepoint );
     ASSERT_FALSE( result.has_value() );
-    EXPECT_EQ( result.error().code, kUnsupportedCharacterCode );
-    EXPECT_NE( result.error().message.find( kUnmappableCodepointName ),
+    EXPECT_EQ( result.error().code, unsupportedCharacterCode );
+    EXPECT_NE( result.error().message.find( unmappableCodepointName ),
                std::string::npos );
 }

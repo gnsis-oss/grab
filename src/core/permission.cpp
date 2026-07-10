@@ -20,7 +20,7 @@ namespace grab::core
     PermissionState
     NoPermissionBroker::query( std::string_view /*permission*/ )
     {
-        return PermissionState::granted;
+        return PermissionState::Granted;
     }
 
     grab::Result<void>
@@ -47,8 +47,8 @@ namespace grab::core
     {
         try
         {
-            constexpr int     kPosixFailure = -1;
-            constexpr ssize_t kWriteFailure = -1;
+            constexpr int     posixFailure = -1;
+            constexpr ssize_t writeFailure = -1;
 
             const auto        posix_error = []( std::string_view step,
                                                 int              error_number ) -> std::string
@@ -66,7 +66,7 @@ namespace grab::core
                 std::filesystem::create_directories( parent, ec );
                 if( ec )
                 {
-                    return grab::fail( grab::ErrorCode::internal_fault,
+                    return grab::fail( grab::ErrorCode::InternalFault,
                                        "create_directories: " + ec.message() );
                 }
             }
@@ -75,23 +75,23 @@ namespace grab::core
             // unique temp (mkstemp) + fsync-before-rename (legacy screengrab pattern).
             std::string temp = file.string() + ".tmp.XXXXXX";
             int         fd   = posix::mkstemp( temp.data() );
-            if( fd == kPosixFailure )
+            if( fd == posixFailure )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    posix_error( "mkstemp", errno ) );
             }
 
             const auto cleanup_temp = [&]( std::string message ) -> std::string
             {
-                if( fd != kPosixFailure )
+                if( fd != posixFailure )
                 {
-                    if( ::close( fd ) == kPosixFailure )
+                    if( ::close( fd ) == posixFailure )
                     {
                         message += "; " + posix_error( "close", errno );
                     }
-                    fd = kPosixFailure;
+                    fd = posixFailure;
                 }
-                if( ::unlink( temp.c_str() ) == kPosixFailure )
+                if( ::unlink( temp.c_str() ) == posixFailure )
                 {
                     message += "; " + posix_error( "unlink", errno );
                 }
@@ -106,55 +106,55 @@ namespace grab::core
                     static_cast<std::size_t>( std::numeric_limits<ssize_t>::max() )
                 );
                 const auto written = ::write( fd, unwritten.data(), count );
-                if( written == kWriteFailure )
+                if( written == writeFailure )
                 {
                     const int error_number = errno;
                     if( error_number == EINTR )
                     {
                         continue;
                     }
-                    return grab::fail( grab::ErrorCode::internal_fault,
+                    return grab::fail( grab::ErrorCode::InternalFault,
                                        cleanup_temp( posix_error( "write",
                                                                   error_number ) ) );
                 }
                 if( written == 0 )
                 {
-                    return grab::fail( grab::ErrorCode::internal_fault,
+                    return grab::fail( grab::ErrorCode::InternalFault,
                                        cleanup_temp( "write: wrote zero bytes" ) );
                 }
                 unwritten.remove_prefix( static_cast<std::size_t>( written ) );
             }
 
-            if( ::fsync( fd ) == kPosixFailure )
+            if( ::fsync( fd ) == posixFailure )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    cleanup_temp( posix_error( "fsync", errno ) ) );
             }
-            if( ::close( fd ) == kPosixFailure )
+            if( ::close( fd ) == posixFailure )
             {
-                fd = kPosixFailure;
-                return grab::fail( grab::ErrorCode::internal_fault,
+                fd = posixFailure;
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    cleanup_temp( posix_error( "close", errno ) ) );
             }
-            fd = kPosixFailure;
+            fd = posixFailure;
 
             std::filesystem::rename( temp, file, ec );
             if( ec )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    cleanup_temp( "rename: " + ec.message() ) );
             }
             const std::string sync_parent = parent.empty() ? "." : parent.string();
             if( grab_fsync_dir( sync_parent.c_str() ) == 0 )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    posix_error( "fsync dir", errno ) );
             }
             return {};
         }
         catch( ... )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
+            return grab::fail( grab::ErrorCode::InternalFault,
                                "write_atomic: unexpected exception" );
         }
     }

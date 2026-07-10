@@ -10,25 +10,25 @@
 namespace
 {
 
-    constexpr const char*  kNotifyMember      = "Notify";
-    constexpr const char*  kNotificationsPath = "/org/freedesktop/Notifications";
-    constexpr const char*  kNotifySignature   = "susssasa{sv}i";
-    constexpr const char*  kTestAppName       = "grab-test";
-    constexpr const char*  kTestSummary       = "hi";
-    constexpr const char*  kTestBody          = "b";
-    constexpr std::int32_t kShortTimeoutMs    = 1;
-    constexpr auto kDeviceInaccessibleCode    = grab::ErrorCode::device_inaccessible;
+    constexpr const char*  notifyMember           = "Notify";
+    constexpr const char*  notificationsPath      = "/org/freedesktop/Notifications";
+    constexpr const char*  notifySignature        = "susssasa{sv}i";
+    constexpr const char*  testAppName            = "grab-test";
+    constexpr const char*  testSummary            = "hi";
+    constexpr const char*  testBody               = "b";
+    constexpr std::int32_t shortTimeoutMs         = 1;
+    constexpr auto         deviceInaccessibleCode = grab::ErrorCode::DeviceInaccessible;
 
     [[nodiscard]]
     grab::notify::Notification
     test_notification()
     {
         return grab::notify::Notification{
-            .app_name   = std::string{ kTestAppName },
-            .summary    = std::string{ kTestSummary },
-            .body       = std::string{ kTestBody },
+            .app_name   = std::string{ testAppName },
+            .summary    = std::string{ testSummary },
+            .body       = std::string{ testBody },
             .icon       = {},
-            .timeout_ms = kShortTimeoutMs,
+            .timeout_ms = shortTimeoutMs,
         };
     }
 
@@ -36,7 +36,7 @@ namespace
     bool
     bus_is_unavailable( const grab::Result<grab::notify::Notifier>& notifier )
     {
-        return !notifier.has_value() && notifier.error().code == kDeviceInaccessibleCode;
+        return !notifier.has_value() && notifier.error().code == deviceInaccessibleCode;
     }
 
 }    // namespace
@@ -79,7 +79,7 @@ TEST( Notifier,
     auto message = grab::notify::build_notify_message( test_notification() );
 
     ASSERT_TRUE( message.has_value() ) << message.error().message;
-    EXPECT_TRUE( dbus_message_has_member( message->get(), kNotifyMember ) );
-    EXPECT_TRUE( dbus_message_has_path( message->get(), kNotificationsPath ) );
-    EXPECT_TRUE( dbus_message_has_signature( message->get(), kNotifySignature ) );
+    EXPECT_TRUE( dbus_message_has_member( message->get(), notifyMember ) );
+    EXPECT_TRUE( dbus_message_has_path( message->get(), notificationsPath ) );
+    EXPECT_TRUE( dbus_message_has_signature( message->get(), notifySignature ) );
 }

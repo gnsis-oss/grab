@@ -26,21 +26,21 @@ namespace grab::screen
     namespace
     {
 
-        constexpr int              kXcbOk                 = 0;
-        constexpr std::uint8_t     kX11SuccessResponse    = 1U;
-        constexpr std::uint32_t    kPropertyOffsetZero    = 0U;
-        constexpr std::uint32_t    kPropertyLengthProbe   = 0U;
-        constexpr std::uint32_t    kBytesPerPropertyUnit  = 4U;
-        constexpr std::uint32_t    kMaxPropertyBytes      = 1U * 1'024U * 1'024U;
-        constexpr std::uint8_t     kFormat8Bits           = 8U;
-        constexpr std::uint8_t     kFormat32Bits          = 32U;
-        constexpr std::int16_t     kRootOrigin            = 0;
-        constexpr std::string_view kNetClientListAtom     = "_NET_CLIENT_LIST";
-        constexpr std::string_view kNetWmNameAtom         = "_NET_WM_NAME";
-        constexpr std::string_view kUtf8StringAtom        = "UTF8_STRING";
-        constexpr std::string_view kRandrExtensionName    = "RANDR";
-        constexpr std::string_view kFallbackOutputName    = "screen";
-        constexpr std::string_view kGeneratedOutputPrefix = "output-";
+        constexpr int              xcbOk                 = 0;
+        constexpr std::uint8_t     x11SuccessResponse    = 1U;
+        constexpr std::uint32_t    propertyOffsetZero    = 0U;
+        constexpr std::uint32_t    propertyLengthProbe   = 0U;
+        constexpr std::uint32_t    bytesPerPropertyUnit  = 4U;
+        constexpr std::uint32_t    maxPropertyBytes      = 1U * 1'024U * 1'024U;
+        constexpr std::uint8_t     format8Bits           = 8U;
+        constexpr std::uint8_t     format32Bits          = 32U;
+        constexpr std::int16_t     rootOrigin            = 0;
+        constexpr std::string_view netClientListAtom     = "_NET_CLIENT_LIST";
+        constexpr std::string_view netWmNameAtom         = "_NET_WM_NAME";
+        constexpr std::string_view utf8StringAtom        = "UTF8_STRING";
+        constexpr std::string_view randrExtensionName    = "RANDR";
+        constexpr std::string_view fallbackOutputName    = "screen";
+        constexpr std::string_view generatedOutputPrefix = "output-";
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -98,9 +98,9 @@ namespace grab::screen
                              int               screen_index )
         {
             const xcb_setup_t* const setup = xcb_get_setup( connection );
-            if( setup == nullptr || setup->status != kX11SuccessResponse )
+            if( setup == nullptr || setup->status != x11SuccessResponse )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB setup is unavailable" );
             }
 
@@ -114,7 +114,7 @@ namespace grab::screen
 
             if( iterator.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB default screen is unavailable" );
             }
 
@@ -136,9 +136,9 @@ namespace grab::screen
             };
             if( connection ==
                 nullptr ||
-                xcb_connection_has_error( connection.get() ) != kXcbOk )
+                xcb_connection_has_error( connection.get() ) != xcbOk )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB display connection failed" );
             }
 
@@ -172,7 +172,7 @@ namespace grab::screen
             const auto           error     = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB atom lookup failed for " + std::string{ name } );
             }
 
@@ -183,19 +183,19 @@ namespace grab::screen
         grab::Result<Atoms>
         intern_atoms( xcb_connection_t* connection )
         {
-            auto net_client_list = intern_atom( connection, kNetClientListAtom, true );
+            auto net_client_list = intern_atom( connection, netClientListAtom, true );
             if( !net_client_list.has_value() )
             {
                 return std::unexpected( std::move( net_client_list.error() ) );
             }
 
-            auto net_wm_name = intern_atom( connection, kNetWmNameAtom, true );
+            auto net_wm_name = intern_atom( connection, netWmNameAtom, true );
             if( !net_wm_name.has_value() )
             {
                 return std::unexpected( std::move( net_wm_name.error() ) );
             }
 
-            auto utf8_string = intern_atom( connection, kUtf8StringAtom, true );
+            auto utf8_string = intern_atom( connection, utf8StringAtom, true );
             if( !utf8_string.has_value() )
             {
                 return std::unexpected( std::move( utf8_string.error() ) );
@@ -228,8 +228,8 @@ namespace grab::screen
                                                           window,
                                                           property,
                                                           type,
-                                                          kPropertyOffsetZero,
-                                                          kPropertyLengthProbe ),
+                                                          propertyOffsetZero,
+                                                          propertyLengthProbe ),
                                         &raw_probe_error )
             );
             const auto probe_error = take_xcb_owned( raw_probe_error );
@@ -239,22 +239,22 @@ namespace grab::screen
                 {
                     return std::optional<PropertyData>{};
                 }
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB property probe failed" );
             }
             if( probe_reply == nullptr || probe_reply->type == XCB_ATOM_NONE )
             {
                 return std::optional<PropertyData>{};
             }
-            if( probe_reply->bytes_after > kMaxPropertyBytes )
+            if( probe_reply->bytes_after > maxPropertyBytes )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB property exceeds enumeration read limit" );
             }
 
             const std::uint32_t total_units =
-                ( probe_reply->bytes_after + kBytesPerPropertyUnit - 1U ) /
-                kBytesPerPropertyUnit;
+                ( probe_reply->bytes_after + bytesPerPropertyUnit - 1U ) /
+                bytesPerPropertyUnit;
 
             xcb_generic_error_t* raw_value_error = nullptr;
             const auto           value_reply     = take_xcb_owned(
@@ -264,7 +264,7 @@ namespace grab::screen
                                                           window,
                                                           property,
                                                           type,
-                                                          kPropertyOffsetZero,
+                                                          propertyOffsetZero,
                                                           total_units ),
                                         &raw_value_error )
             );
@@ -275,7 +275,7 @@ namespace grab::screen
                 {
                     return std::optional<PropertyData>{};
                 }
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB property read failed" );
             }
             if( value_reply == nullptr || value_reply->type == XCB_ATOM_NONE )
@@ -286,7 +286,7 @@ namespace grab::screen
             const int value_length = xcb_get_property_value_length( value_reply.get() );
             if( value_length < 0 )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB property returned a negative length" );
             }
             if( value_length == 0 )
@@ -343,7 +343,7 @@ namespace grab::screen
         std::string
         parse_wm_class( const PropertyData& property )
         {
-            if( property.format != kFormat8Bits || property.bytes.empty() )
+            if( property.format != format8Bits || property.bytes.empty() )
             {
                 return {};
             }
@@ -387,7 +387,7 @@ namespace grab::screen
                 return std::unexpected( std::move( property_data.error() ) );
             }
             if( !property_data->has_value() ||
-                ( *property_data )->format != kFormat8Bits )
+                ( *property_data )->format != format8Bits )
             {
                 return {};
             }
@@ -457,7 +457,7 @@ namespace grab::screen
             }
             if( !property->has_value() ||
                 ( *property )->format !=
-                kFormat32Bits ||
+                format32Bits ||
                 ( *property )->bytes.empty() )
             {
                 return std::vector<xcb_window_t>{};
@@ -501,7 +501,7 @@ namespace grab::screen
                 {
                     return std::optional<Geometry>{};
                 }
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB GetGeometry failed" );
             }
             if( geometry == nullptr )
@@ -517,15 +517,15 @@ namespace grab::screen
             };
 
             xcb_generic_error_t* raw_translate_error = nullptr;
-            const auto translation     = take_xcb_owned( xcb_translate_coordinates_reply(
-                connection,
-                xcb_translate_coordinates( connection,
-                                           window,
-                                           root,
-                                           kRootOrigin,
-                                           kRootOrigin ),
-                &raw_translate_error
-            ) );
+            const auto           translation         = take_xcb_owned(
+                xcb_translate_coordinates_reply( connection,
+                                                 xcb_translate_coordinates( connection,
+                                                                            window,
+                                                                            root,
+                                                                            rootOrigin,
+                                                                            rootOrigin ),
+                                                 &raw_translate_error )
+            );
             const auto translate_error = take_xcb_owned( raw_translate_error );
             if( translate_error != nullptr )
             {
@@ -533,7 +533,7 @@ namespace grab::screen
                 {
                     return std::optional<Geometry>{};
                 }
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB TranslateCoordinates failed" );
             }
             if( translation != nullptr )
@@ -554,8 +554,8 @@ namespace grab::screen
                 connection,
                 xcb_query_extension(
                     connection,
-                    static_cast<std::uint16_t>( kRandrExtensionName.size() ),
-                    kRandrExtensionName.data()
+                    static_cast<std::uint16_t>( randrExtensionName.size() ),
+                    randrExtensionName.data()
                 ),
                 &raw_error
             ) );
@@ -574,7 +574,7 @@ namespace grab::screen
                 .height = screen.height,
             };
             return OutputInfo{
-                .name   = std::string{ kFallbackOutputName },
+                .name   = std::string{ fallbackOutputName },
                 .bounds = bounds,
             };
         }
@@ -588,7 +588,7 @@ namespace grab::screen
                 xcb_randr_get_output_info_name_length( &output_info );
             if( name_length <= 0 )
             {
-                return std::string{ kGeneratedOutputPrefix } +
+                return std::string{ generatedOutputPrefix } +
                        std::to_string( static_cast<std::uint32_t>( output ) );
             }
 
@@ -626,7 +626,7 @@ namespace grab::screen
             const auto resources_error = take_xcb_owned( raw_resources_error );
             if( resources_error != nullptr || resources == nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "RandR screen resources query failed" );
             }
 
@@ -657,7 +657,7 @@ namespace grab::screen
                 const auto output_error = take_xcb_owned( raw_output_error );
                 if( output_error != nullptr || output_info == nullptr )
                 {
-                    return grab::fail( grab::ErrorCode::protocol_error,
+                    return grab::fail( grab::ErrorCode::ProtocolError,
                                        "RandR output info query failed" );
                 }
                 if( output_info->connection !=
@@ -678,7 +678,7 @@ namespace grab::screen
                 const auto crtc_error = take_xcb_owned( raw_crtc_error );
                 if( crtc_error != nullptr || crtc_info == nullptr )
                 {
-                    return grab::fail( grab::ErrorCode::protocol_error,
+                    return grab::fail( grab::ErrorCode::ProtocolError,
                                        "RandR CRTC info query failed" );
                 }
 

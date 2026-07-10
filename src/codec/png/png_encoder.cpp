@@ -29,7 +29,7 @@ namespace grab::codec
         constexpr std::size_t   png_chunk_overhead =
             png_chunk_length_size + png_chunk_tag_size + png_chunk_crc_size;
         constexpr std::size_t png_bytes_per_pixel =
-            grab::PixelTraits<grab::PixelFormat::rgb24>::bytes_per_pixel;
+            grab::PixelTraits<grab::PixelFormat::Rgb24>::bytes_per_pixel;
         constexpr std::size_t   ihdr_payload_size            = 13U;
         constexpr std::size_t   phys_payload_size            = 9U;
         constexpr std::size_t   row_filter_byte_count        = 1U;
@@ -125,7 +125,7 @@ namespace grab::codec
                         deflateInit( &zlib_stream, zlib_compression_level );
                     if( status != zlib_ok )
                     {
-                        return grab::fail( grab::ErrorCode::internal_fault,
+                        return grab::fail( grab::ErrorCode::InternalFault,
                                            "zlib deflate initialization failed" );
                     }
                     initialized = true;
@@ -150,7 +150,7 @@ namespace grab::codec
         checked_zlib_size( std::size_t value )
         {
             return grab::checked_cast<uInt>( value,
-                                             grab::ErrorCode::invalid_argument,
+                                             grab::ErrorCode::InvalidArgument,
                                              "png input is too large for zlib" );
         }
 
@@ -159,7 +159,7 @@ namespace grab::codec
         checked_zlib_long_size( std::size_t value )
         {
             return grab::checked_cast<uLong>( value,
-                                              grab::ErrorCode::invalid_argument,
+                                              grab::ErrorCode::InvalidArgument,
                                               "png input is too large for zlib" );
         }
 
@@ -169,7 +169,7 @@ namespace grab::codec
         {
             return grab::checked_cast<std::size_t>(
                 value,
-                grab::ErrorCode::invalid_argument,
+                grab::ErrorCode::InvalidArgument,
                 "png compressed stream is too large"
             );
         }
@@ -225,7 +225,7 @@ namespace grab::codec
                 static_cast<std::size_t>( image.width ) * Traits::bytes_per_pixel;
             if( image.stride < row_input_size )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "png image stride is too small" );
             }
 
@@ -261,7 +261,7 @@ namespace grab::codec
 
         struct ScanlineDispatch
         {
-                grab::PixelFormat format = grab::PixelFormat::rgb24;
+                grab::PixelFormat format = grab::PixelFormat::Rgb24;
                 ScanlineBuilder   build  = nullptr;
         };
 
@@ -269,12 +269,12 @@ namespace grab::codec
         constexpr std::array<ScanlineDispatch, scanline_dispatch_count>
             scanline_dispatch{
                 ScanlineDispatch{
-                                 .format = grab::PixelFormat::rgb24,
-                                 .build  = &build_scanline_data_for_format<grab::PixelFormat::rgb24>,
+                                 .format = grab::PixelFormat::Rgb24,
+                                 .build  = &build_scanline_data_for_format<grab::PixelFormat::Rgb24>,
                                  },
                 ScanlineDispatch{
-                                 .format = grab::PixelFormat::bgr0,
-                                 .build  = &build_scanline_data_for_format<grab::PixelFormat::bgr0>,
+                                 .format = grab::PixelFormat::Bgr0,
+                                 .build  = &build_scanline_data_for_format<grab::PixelFormat::Bgr0>,
                                  },
         };
 
@@ -284,12 +284,12 @@ namespace grab::codec
         {
             if( image.width == empty_dimension || image.height == empty_dimension )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "png image dimensions must be non-zero" );
             }
             if( image.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "png image data is null" );
             }
 
@@ -300,7 +300,7 @@ namespace grab::codec
                     return dispatch.build( image );
                 }
             }
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unsupported png pixel format" );
         }
 
@@ -349,7 +349,7 @@ namespace grab::codec
             const int status = deflate( &stream, zlib_finish );
             if( status != zlib_stream_end )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    "zlib deflate failed" );
             }
 

@@ -57,7 +57,7 @@ namespace grab::platform::x11
         {
             if( width == empty_dimension || height == empty_dimension )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "capture geometry dimensions must be non-zero" );
             }
             return {};
@@ -77,7 +77,7 @@ namespace grab::platform::x11
 
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_get_geometry failed for root window" );
             }
             return reply->depth;
@@ -91,7 +91,7 @@ namespace grab::platform::x11
             const xcb_setup_t* setup = xcb_get_setup( conn.get() );
             if( setup == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "X setup is unavailable" );
             }
 
@@ -108,7 +108,7 @@ namespace grab::platform::x11
                 xcb_format_next( &iter );
             }
 
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "no X pixmap format matches root depth" );
         }
 
@@ -119,7 +119,7 @@ namespace grab::platform::x11
             const xcb_setup_t* setup = xcb_get_setup( conn.get() );
             if( setup == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "X setup is unavailable" );
             }
             return setup->image_byte_order;
@@ -132,13 +132,13 @@ namespace grab::platform::x11
         {
             if( bits_per_pixel % bits_per_byte != 0U )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "X pixmap bits_per_pixel is not byte-aligned" );
             }
             const std::size_t bytes_per_pixel = bits_per_pixel / bits_per_byte;
             return grab::checked_mul<std::size_t>( static_cast<std::size_t>( width ),
                                                    bytes_per_pixel,
-                                                   grab::ErrorCode::invalid_argument,
+                                                   grab::ErrorCode::InvalidArgument,
                                                    "capture stride is too large" );
         }
 
@@ -149,7 +149,7 @@ namespace grab::platform::x11
         {
             return grab::checked_mul<std::size_t>( stride,
                                                    static_cast<std::size_t>( height ),
-                                                   grab::ErrorCode::invalid_argument,
+                                                   grab::ErrorCode::InvalidArgument,
                                                    "capture image is too large" );
         }
 
@@ -161,21 +161,21 @@ namespace grab::platform::x11
             const int length = xcb_get_image_data_length( &reply );
             if( length < 0 || !std::in_range<std::size_t>( length ) )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_get_image returned an invalid data length" );
             }
 
             const auto actual_byte_count = static_cast<std::size_t>( length );
             if( actual_byte_count != expected_byte_count )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_get_image returned unexpected data length" );
             }
 
             const std::uint8_t* data = xcb_get_image_data( &reply );
             if( data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_get_image returned null data" );
             }
 
@@ -207,7 +207,7 @@ namespace grab::platform::x11
 
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_get_image failed for root window" );
             }
             return copy_reply_bytes( *reply, expected_byte_count );
@@ -285,7 +285,7 @@ namespace grab::platform::x11
                         ::shmget( IPC_PRIVATE, byte_count, shm_creation_flags() );
                     if( id == posix_failure )
                     {
-                        return grab::fail( grab::ErrorCode::provider_failed,
+                        return grab::fail( grab::ErrorCode::ProviderFailed,
                                            posix_error( "shmget", errno ) );
                     }
 
@@ -294,7 +294,7 @@ namespace grab::platform::x11
                     {
                         const int error_number = errno;
                         ( void )::shmctl( id, IPC_RMID, nullptr );
-                        return grab::fail( grab::ErrorCode::provider_failed,
+                        return grab::fail( grab::ErrorCode::ProviderFailed,
                                            posix_error( "shmat", error_number ) );
                     }
 
@@ -353,7 +353,7 @@ namespace grab::platform::x11
                         make_xcb_reply( xcb_request_check( connection, cookie ) );
                     if( error != nullptr )
                     {
-                        return grab::fail( grab::ErrorCode::provider_failed,
+                        return grab::fail( grab::ErrorCode::ProviderFailed,
                                            "xcb_shm_attach failed" );
                     }
                     attached = true;
@@ -423,7 +423,7 @@ namespace grab::platform::x11
             auto error = make_xcb_reply( error_raw );
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_shm_get_image failed for root window" );
             }
 

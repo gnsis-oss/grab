@@ -30,27 +30,26 @@ namespace grab::event
     namespace
     {
 
-        constexpr int           kInvalidFd         = -1;
-        constexpr int           kNoError           = 0;
-        constexpr int           kPosixFailure      = -1;
-        constexpr int           kOpenFlags         = O_RDONLY | O_NONBLOCK | O_CLOEXEC;
-        constexpr int           kKeyReleaseValue   = 0;
-        constexpr int           kKeyPressValue     = 1;
-        constexpr int           kKeyRepeatValue    = 2;
-        constexpr ssize_t       kEndOfFile         = 0;
-        constexpr std::uint64_t kNoToken           = 0U;
-        constexpr std::uint32_t kNoEvents          = 0U;
-        constexpr std::size_t   kReadChunkBytes    = 4'096U;
-        constexpr double        kMicrosecondsInSec = 1'000'000.0;
-        constexpr std::uint32_t kReadableEvents =
-            static_cast<std::uint32_t>( EPOLLIN ) |
-            static_cast<std::uint32_t>( EPOLLERR ) |
-            static_cast<std::uint32_t>( EPOLLHUP );
+        constexpr int           invalidFd         = -1;
+        constexpr int           noError           = 0;
+        constexpr int           posixFailure      = -1;
+        constexpr int           openFlags         = O_RDONLY | O_NONBLOCK | O_CLOEXEC;
+        constexpr int           keyReleaseValue   = 0;
+        constexpr int           keyPressValue     = 1;
+        constexpr int           keyRepeatValue    = 2;
+        constexpr ssize_t       endOfFile         = 0;
+        constexpr std::uint64_t noToken           = 0U;
+        constexpr std::uint32_t noEvents          = 0U;
+        constexpr std::size_t   readChunkBytes    = 4'096U;
+        constexpr double        microsecondsInSec = 1'000'000.0;
+        constexpr std::uint32_t readableEvents = static_cast<std::uint32_t>( EPOLLIN ) |
+                                                 static_cast<std::uint32_t>( EPOLLERR ) |
+                                                 static_cast<std::uint32_t>( EPOLLHUP );
 
         struct ReadResult
         {
-                ssize_t bytes_read   = kPosixFailure;
-                int     error_number = kNoError;
+                ssize_t bytes_read   = posixFailure;
+                int     error_number = noError;
         };
 
         [[nodiscard]]
@@ -59,7 +58,7 @@ namespace grab::event
                             int              error_number )
         {
             return grab::Error{
-                .code = grab::ErrorCode::device_inaccessible,
+                .code = grab::ErrorCode::DeviceInaccessible,
                 .message =
                     std::string{ step }
                     +
@@ -78,13 +77,13 @@ namespace grab::event
         {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): POSIX fcntl(2).
             const int flags = ::fcntl( fd, F_GETFL );
-            if( flags == kPosixFailure )
+            if( flags == posixFailure )
             {
                 return std::unexpected( posix_device_error( "fcntl F_GETFL", errno ) );
             }
 
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): POSIX fcntl(2).
-            if( ::fcntl( fd, F_SETFL, flags | O_NONBLOCK ) == kPosixFailure )
+            if( ::fcntl( fd, F_SETFL, flags | O_NONBLOCK ) == posixFailure )
             {
                 return std::unexpected( posix_device_error( "fcntl F_SETFL", errno ) );
             }
@@ -114,7 +113,7 @@ namespace grab::event
         event_timestamp( const input_event& raw ) noexcept
         {
             return static_cast<double>( raw.input_event_sec ) +
-                   ( static_cast<double>( raw.input_event_usec ) / kMicrosecondsInSec );
+                   ( static_cast<double>( raw.input_event_usec ) / microsecondsInSec );
         }
 
         [[nodiscard]]
@@ -126,7 +125,7 @@ namespace grab::event
                 .timestamp = event_timestamp( raw ),
                 .sequence  = 0U,
                 .kind      = kind,
-                .category  = grab::EventCategory::input,
+                .category  = grab::EventCategory::Input,
                 .payload   = grab::Payload{ grab::InputKey{
                     .code = raw.code,
                     .name = {},
@@ -141,8 +140,8 @@ namespace grab::event
             return grab::Event{
                 .timestamp = event_timestamp( raw ),
                 .sequence  = 0U,
-                .kind      = grab::EventKind::mouse_move,
-                .category  = grab::EventCategory::input,
+                .kind      = grab::EventKind::MouseMove,
+                .category  = grab::EventCategory::Input,
                 .payload   = grab::Payload{ grab::MouseMove{
                     .axis  = axis_name( raw.code ),
                     .delta = static_cast<double>( raw.value ),
@@ -157,14 +156,14 @@ namespace grab::event
             switch( raw.type )
             {
                 case EV_KEY :
-                    if( raw.value == kKeyPressValue || raw.value == kKeyRepeatValue )
+                    if( raw.value == keyPressValue || raw.value == keyRepeatValue )
                     {
-                        events.push_back( make_key_event( grab::EventKind::key_down,
+                        events.push_back( make_key_event( grab::EventKind::KeyDown,
                                                           raw ) );
                     }
-                    else if( raw.value == kKeyReleaseValue )
+                    else if( raw.value == keyReleaseValue )
                     {
-                        events.push_back( make_key_event( grab::EventKind::key_up,
+                        events.push_back( make_key_event( grab::EventKind::KeyUp,
                                                           raw ) );
                     }
                     break;
@@ -212,9 +211,9 @@ namespace grab::event
 
         [[nodiscard]]
         ReadResult
-        read_once( int                          input_fd,
+        read_once( int                         input_fd,
                    std::array<char,
-                              kReadChunkBytes>& chunk ) noexcept
+                              readChunkBytes>& chunk ) noexcept
         {
             while( true )
             {
@@ -222,12 +221,12 @@ namespace grab::event
                     // NOLINTNEXTLINE(clang-analyzer-unix.BlockInCriticalSection)
                     ::read( input_fd, chunk.data(), chunk.size() );
                 const int error_number = errno;
-                if( bytes_read != kPosixFailure || error_number != EINTR )
+                if( bytes_read != posixFailure || error_number != EINTR )
                 {
                     return ReadResult{
                         .bytes_read = bytes_read,
                         .error_number =
-                            bytes_read == kPosixFailure ? error_number : kNoError,
+                            bytes_read == posixFailure ? error_number : noError,
                     };
                 }
             }
@@ -238,7 +237,7 @@ namespace grab::event
     struct EvdevMonitor::State
     {
             std::mutex        mutex;
-            int               fd  = kInvalidFd;
+            int               fd  = invalidFd;
             grab::EventBus*   bus = nullptr;
             std::vector<char> buffer;
             bool              active = true;
@@ -262,7 +261,7 @@ namespace grab::event
         reactor_( std::exchange( other.reactor_,
                                  nullptr ) ),
         token_( std::exchange( other.token_,
-                               kNoToken ) ),
+                               noToken ) ),
         state_( std::move( other.state_ ) )
     {
     }
@@ -274,7 +273,7 @@ namespace grab::event
         {
             stop();
             reactor_ = std::exchange( other.reactor_, nullptr );
-            token_   = std::exchange( other.token_, kNoToken );
+            token_   = std::exchange( other.token_, noToken );
             state_   = std::move( other.state_ );
         }
         return *this;
@@ -286,8 +285,8 @@ namespace grab::event
                                grab::EventBus&      bus )
     {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): POSIX open(2).
-        const int fd = ::open( path.c_str(), kOpenFlags );
-        if( fd == kPosixFailure )
+        const int fd = ::open( path.c_str(), openFlags );
+        if( fd == posixFailure )
         {
             return std::unexpected( posix_device_error( "open evdev device", errno ) );
         }
@@ -308,10 +307,9 @@ namespace grab::event
                             grab::core::Reactor& reactor,
                             grab::EventBus&      bus )
     {
-        if( fd == kInvalidFd )
+        if( fd == invalidFd )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
-                               "evdev fd is invalid" );
+            return grab::fail( grab::ErrorCode::InvalidArgument, "evdev fd is invalid" );
         }
 
         auto nonblocking = set_nonblocking( fd );
@@ -339,7 +337,7 @@ namespace grab::event
     EvdevMonitor::handle_fd( const std::shared_ptr<State>& state,
                              std::uint32_t                 events )
     {
-        if( ( events & kReadableEvents ) == kNoEvents )
+        if( ( events & readableEvents ) == noEvents )
         {
             return;
         }
@@ -348,24 +346,24 @@ namespace grab::event
         grab::EventBus*          bus = nullptr;
         {
             const std::scoped_lock lock( state->mutex );
-            if( !state->active || state->fd == kInvalidFd || state->bus == nullptr )
+            if( !state->active || state->fd == invalidFd || state->bus == nullptr )
             {
                 return;
             }
 
             bus = state->bus;
 
-            std::array<char, kReadChunkBytes> chunk{};
+            std::array<char, readChunkBytes> chunk{};
             while( true )
             {
                 const ReadResult read_result = read_once( state->fd, chunk );
-                if( read_result.bytes_read == kEndOfFile )
+                if( read_result.bytes_read == endOfFile )
                 {
                     state->active = false;
                     break;
                 }
 
-                if( read_result.bytes_read == kPosixFailure )
+                if( read_result.bytes_read == posixFailure )
                 {
                     if( read_result.error_number !=
                         EAGAIN &&
@@ -387,7 +385,7 @@ namespace grab::event
             }
 
             if( ( events & static_cast<std::uint32_t>( EPOLLERR | EPOLLHUP ) ) !=
-                kNoEvents )
+                noEvents )
             {
                 state->active = false;
             }
@@ -408,10 +406,10 @@ namespace grab::event
     EvdevMonitor::stop() noexcept
     {
         grab::core::Reactor* const reactor = std::exchange( reactor_, nullptr );
-        const std::uint64_t        token   = std::exchange( token_, kNoToken );
+        const std::uint64_t        token   = std::exchange( token_, noToken );
         auto                       state   = std::move( state_ );
 
-        if( reactor != nullptr && token != kNoToken )
+        if( reactor != nullptr && token != noToken )
         {
             bool remove_failed = false;
             try
@@ -430,13 +428,13 @@ namespace grab::event
             return;
         }
 
-        int fd = kInvalidFd;
+        int fd = invalidFd;
         try
         {
             const std::scoped_lock lock( state->mutex );
             state->active = false;
             state->bus    = nullptr;
-            fd            = std::exchange( state->fd, kInvalidFd );
+            fd            = std::exchange( state->fd, invalidFd );
             state->buffer.clear();
         }
         catch( ... )
@@ -444,7 +442,7 @@ namespace grab::event
             return;
         }
 
-        if( fd != kInvalidFd )
+        if( fd != invalidFd )
         {
             const auto close_result = ::close( fd );
             static_cast<void>( close_result );

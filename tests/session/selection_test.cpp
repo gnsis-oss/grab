@@ -46,10 +46,10 @@ TEST( SelectSessionProvider,
 {
     grab::test::FakeSessionProvider weak{ "weak" };
     grab::test::FakeSessionProvider strong{ "strong" };
-    weak.set_availability( SessionMode::shared,
-                           availability( AvailabilityState::available, low_quality ) );
-    strong.set_availability( SessionMode::shared,
-                             availability( AvailabilityState::available,
+    weak.set_availability( SessionMode::Shared,
+                           availability( AvailabilityState::Available, low_quality ) );
+    strong.set_availability( SessionMode::Shared,
+                             availability( AvailabilityState::Available,
                                            high_quality ) );
 
     std::array<const grab::session::SessionProvider*, 2U> providers{};
@@ -58,7 +58,7 @@ TEST( SelectSessionProvider,
     const grab::core::Environment env;
 
     const auto                    chosen =
-        grab::session::select_session_provider( providers, env, SessionMode::shared );
+        grab::session::select_session_provider( providers, env, SessionMode::Shared );
 
     ASSERT_TRUE( chosen.has_value() ) << chosen.error().message;
     EXPECT_EQ( ( *chosen )->info().name, "strong" );
@@ -68,12 +68,12 @@ TEST( SelectSessionProvider,
       UnavailableModeIsCapabilityUnavailable )
 {
     grab::test::FakeSessionProvider only_shared{ "x11" };
-    only_shared.set_availability( SessionMode::shared,
-                                  availability( AvailabilityState::available,
+    only_shared.set_availability( SessionMode::Shared,
+                                  availability( AvailabilityState::Available,
                                                 high_quality ) );
     only_shared.set_availability(
-        SessionMode::offscreen,
-        availability( AvailabilityState::unavailable, 0, no_offscreen_reason )
+        SessionMode::Offscreen,
+        availability( AvailabilityState::Unavailable, 0, no_offscreen_reason )
     );
 
     std::array<const grab::session::SessionProvider*, 1U> providers{};
@@ -81,8 +81,8 @@ TEST( SelectSessionProvider,
     const grab::core::Environment env;
 
     const auto                    chosen =
-        grab::session::select_session_provider( providers, env, SessionMode::offscreen );
+        grab::session::select_session_provider( providers, env, SessionMode::Offscreen );
 
     ASSERT_FALSE( chosen.has_value() );
-    EXPECT_EQ( chosen.error().code, grab::ErrorCode::capability_unavailable );
+    EXPECT_EQ( chosen.error().code, grab::ErrorCode::CapabilityUnavailable );
 }

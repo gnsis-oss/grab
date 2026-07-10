@@ -44,7 +44,7 @@ namespace grab::platform::x11
             padded32_bpp &&
             image_byte_order == lsb_first_order )
         {
-            return grab::PixelFormat::bgr0;
+            return grab::PixelFormat::Bgr0;
         }
 
         if( depth ==
@@ -54,14 +54,14 @@ namespace grab::platform::x11
             image_byte_order == lsb_first_order )
         {
             return grab::fail(
-                grab::ErrorCode::invalid_argument,
+                grab::ErrorCode::InvalidArgument,
                 "24bpp packed capture unsupported; only 32bpp X pixmaps are "
                 "supported for now"
             );
         }
 
         return grab::fail(
-            grab::ErrorCode::invalid_argument,
+            grab::ErrorCode::InvalidArgument,
             unsupported_message( depth, bits_per_pixel, image_byte_order )
         );
     }

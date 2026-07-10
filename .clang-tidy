@@ -11,6 +11,9 @@
 #   bugprone-easily-swappable-parameters  — too noisy on templates
 #   misc-no-recursion                     — recursive algorithms are valid
 #   misc-anonymous-namespace-in-header    — header-only codebase
+#   misc-const-correctness                — segfaults clang-tidy 23
+#   performance-unnecessary-value-param   — segfaults clang-tidy 23
+#                                           (shared ExprMutationAnalyzer crash)
 #
 # Excluded (platform-specific):
 #   abseil-*, altera-*, android-*, boost-*, darwin-*, fuchsia-*,
@@ -355,7 +358,6 @@ Checks: >-
   llvm-qualified-auto,
   llvm-twine-local,
   misc-confusable-identifiers,
-  misc-const-correctness,
   misc-coroutine-hostile-raii,
   misc-header-include-cycle,
   misc-include-cleaner,
@@ -444,7 +446,6 @@ Checks: >-
   performance-trivially-destructible,
   performance-type-promotion-in-math-fn,
   performance-unnecessary-copy-initialization,
-  performance-unnecessary-value-param,
   performance-use-std-move,
   portability-avoid-pragma-once,
   portability-no-assembler,
@@ -512,12 +513,11 @@ Checks: >-
   readability-use-std-min-max
 
 CheckOptions:
-  # Identifier naming: configure per project to match existing conventions.
-  # Uncomment and set the cases that match your project:
-  # readability-identifier-naming.ClassCase:             CamelCase
-  # readability-identifier-naming.FunctionCase:          lower_case
-  # readability-identifier-naming.VariableCase:          lower_case
-  # readability-identifier-naming.MemberSuffix:          '_'
+  # Identifier naming. Enum constants are CamelCase (no k-prefix on constants;
+  # that absence is a convention, not tool-enforced — clang-tidy treats a
+  # leading lowercase 'k' as an ordinary first word).
+  readability-identifier-naming.EnumConstantCase:        CamelCase
+  readability-identifier-naming.ClassCase:               CamelCase
 
   # Thresholds
   readability-function-size.LineThreshold:              120

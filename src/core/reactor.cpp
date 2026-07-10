@@ -29,19 +29,19 @@ namespace grab::core
     namespace
     {
 
-        constexpr int           kInvalidFd         = -1;
-        constexpr int           kPosixFailure      = -1;
-        constexpr int           kPosixSuccess      = 0;
-        constexpr int           kInfiniteWait      = -1;
-        constexpr int           kNoWait            = 0;
-        constexpr int           kFirstReadyIndex   = 0;
-        constexpr std::uint32_t kNoFdEvents        = 0U;
-        constexpr std::uint64_t kWakeToken         = 0U;
-        constexpr std::uint64_t kFirstToken        = 1U;
-        constexpr std::uint64_t kTokenStep         = 1U;
-        constexpr std::size_t   kMaxReadyEvents    = 64U;
-        constexpr eventfd_t     kEmptyEventfdValue = 0U;
-        constexpr eventfd_t     kWakeEventfdValue  = 1U;
+        constexpr int           invalidFd         = -1;
+        constexpr int           posixFailure      = -1;
+        constexpr int           posixSuccess      = 0;
+        constexpr int           infiniteWait      = -1;
+        constexpr int           noWait            = 0;
+        constexpr int           firstReadyIndex   = 0;
+        constexpr std::uint32_t noFdEvents        = 0U;
+        constexpr std::uint64_t wakeToken         = 0U;
+        constexpr std::uint64_t firstToken        = 1U;
+        constexpr std::uint64_t tokenStep         = 1U;
+        constexpr std::size_t   maxReadyEvents    = 64U;
+        constexpr eventfd_t     emptyEventfdValue = 0U;
+        constexpr eventfd_t     wakeEventfdValue  = 1U;
 
         [[nodiscard]]
         constexpr int
@@ -57,7 +57,7 @@ namespace grab::core
                      int              error_number )
         {
             return grab::Error{
-                .code = grab::ErrorCode::internal_fault,
+                .code = grab::ErrorCode::InternalFault,
                 .message =
                     std::string{ step }
                     +
@@ -75,7 +75,7 @@ namespace grab::core
         message_error( std::string message )
         {
             return grab::Error{
-                .code       = grab::ErrorCode::internal_fault,
+                .code       = grab::ErrorCode::InternalFault,
                 .message    = std::move( message ),
                 .capability = {},
                 .target     = {},
@@ -135,18 +135,18 @@ namespace grab::core
 
             enum class PendingKind : std::uint8_t
             {
-                add_fd,
-                remove_fd,
-                add_timer,
-                task,
+                AddFd,
+                RemoveFd,
+                AddTimer,
+                Task,
             };
 
             struct PendingOp
             {
-                    PendingKind                          kind   = PendingKind::task;
-                    std::uint64_t                        token  = kWakeToken;
-                    int                                  fd     = kInvalidFd;
-                    std::uint32_t                        events = kNoFdEvents;
+                    PendingKind                          kind   = PendingKind::Task;
+                    std::uint64_t                        token  = wakeToken;
+                    int                                  fd     = invalidFd;
+                    std::uint32_t                        events = noFdEvents;
                     std::chrono::nanoseconds             delay{};
                     std::function<void( std::uint32_t )> fd_callback;
                     std::function<void()>                void_callback;
@@ -154,8 +154,8 @@ namespace grab::core
 
             struct FdRegistration
             {
-                    std::uint64_t                        token = kWakeToken;
-                    int                                  fd    = kInvalidFd;
+                    std::uint64_t                        token = wakeToken;
+                    int                                  fd    = invalidFd;
                     std::function<void( std::uint32_t )> callback;
             };
 
@@ -217,31 +217,31 @@ namespace grab::core
             bool
                                         consume_cancelled_token( std::uint64_t token );
 
-            int                         epoll_fd_ = kInvalidFd;
-            int                         wake_fd_  = kInvalidFd;
+            int                         epoll_fd_ = invalidFd;
+            int                         wake_fd_  = invalidFd;
             std::mutex                  mutex_;
             std::vector<PendingOp>      pending_ops_;
             std::vector<FdRegistration> fds_;
-            std::vector<TimerRegistration>           timers_;
-            std::vector<std::uint64_t>               cancelled_tokens_;
-            std::atomic_bool                         stop_requested_{ false };
-            std::atomic<std::uint64_t>               next_token_{ kFirstToken };
-            std::optional<grab::Error>               startup_error_;
-            std::array<epoll_event, kMaxReadyEvents> ready_events_{};
+            std::vector<TimerRegistration>          timers_;
+            std::vector<std::uint64_t>              cancelled_tokens_;
+            std::atomic_bool                        stop_requested_{ false };
+            std::atomic<std::uint64_t>              next_token_{ firstToken };
+            std::optional<grab::Error>              startup_error_;
+            std::array<epoll_event, maxReadyEvents> ready_events_{};
     };
 
     Reactor::Impl::Impl() :
         epoll_fd_( ::epoll_create1( EPOLL_CLOEXEC ) ),
-        wake_fd_( ::eventfd( kEmptyEventfdValue,
+        wake_fd_( ::eventfd( emptyEventfdValue,
                              eventfd_flags() ) )
     {
-        if( epoll_fd_ == kPosixFailure )
+        if( epoll_fd_ == posixFailure )
         {
             startup_error_ = posix_error( "epoll_create1", errno );
             return;
         }
 
-        if( wake_fd_ == kPosixFailure )
+        if( wake_fd_ == posixFailure )
         {
             startup_error_ = posix_error( "eventfd", errno );
             return;
@@ -249,8 +249,8 @@ namespace grab::core
 
         epoll_event event{};
         event.events   = EPOLLIN;
-        event.data.u64 = kWakeToken;
-        if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_ADD, wake_fd_, &event ) == kPosixFailure )
+        event.data.u64 = wakeToken;
+        if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_ADD, wake_fd_, &event ) == posixFailure )
         {
             startup_error_ = posix_error( "epoll_ctl wake add", errno );
         }
@@ -259,17 +259,17 @@ namespace grab::core
     Reactor::Impl::~Impl() noexcept
     {
         stop();
-        if( wake_fd_ != kInvalidFd )
+        if( wake_fd_ != invalidFd )
         {
             const auto close_result = ::close( wake_fd_ );
             static_cast<void>( close_result );
-            wake_fd_ = kInvalidFd;
+            wake_fd_ = invalidFd;
         }
-        if( epoll_fd_ != kInvalidFd )
+        if( epoll_fd_ != invalidFd )
         {
             const auto close_result = ::close( epoll_fd_ );
             static_cast<void>( close_result );
-            epoll_fd_ = kInvalidFd;
+            epoll_fd_ = invalidFd;
         }
     }
 
@@ -306,7 +306,7 @@ namespace grab::core
                                   ready_events_.data(),
                                   static_cast<int>( ready_events_.size() ),
                                   timeout );
-                if( ready_count == kPosixFailure )
+                if( ready_count == posixFailure )
                 {
                     const int error_number = errno;
                     if( error_number == EINTR )
@@ -316,7 +316,7 @@ namespace grab::core
                     return std::unexpected( posix_error( "epoll_wait", error_number ) );
                 }
 
-                for( int index = kFirstReadyIndex; index < ready_count; ++index )
+                for( int index = firstReadyIndex; index < ready_count; ++index )
                 {
                     dispatch_ready_event(
                         ready_events_.at( static_cast<std::size_t>( index ) )
@@ -353,10 +353,9 @@ namespace grab::core
                            std::uint32_t                        events,
                            std::function<void( std::uint32_t )> cb )
     {
-        const auto token =
-            next_token_.fetch_add( kTokenStep, std::memory_order_relaxed );
+        const auto token = next_token_.fetch_add( tokenStep, std::memory_order_relaxed );
         enqueue( PendingOp{
-            .kind          = PendingKind::add_fd,
+            .kind          = PendingKind::AddFd,
             .token         = token,
             .fd            = fd,
             .events        = events,
@@ -371,10 +370,10 @@ namespace grab::core
     Reactor::Impl::remove_fd( std::uint64_t token )
     {
         enqueue( PendingOp{
-            .kind          = PendingKind::remove_fd,
+            .kind          = PendingKind::RemoveFd,
             .token         = token,
-            .fd            = kInvalidFd,
-            .events        = kNoFdEvents,
+            .fd            = invalidFd,
+            .events        = noFdEvents,
             .delay         = {},
             .fd_callback   = {},
             .void_callback = {},
@@ -385,13 +384,12 @@ namespace grab::core
     Reactor::Impl::add_timer( std::chrono::nanoseconds delay,
                               std::function<void()>    cb )
     {
-        const auto token =
-            next_token_.fetch_add( kTokenStep, std::memory_order_relaxed );
+        const auto token = next_token_.fetch_add( tokenStep, std::memory_order_relaxed );
         enqueue( PendingOp{
-            .kind          = PendingKind::add_timer,
+            .kind          = PendingKind::AddTimer,
             .token         = token,
-            .fd            = kInvalidFd,
-            .events        = kNoFdEvents,
+            .fd            = invalidFd,
+            .events        = noFdEvents,
             .delay         = delay,
             .fd_callback   = {},
             .void_callback = std::move( cb ),
@@ -403,10 +401,10 @@ namespace grab::core
     Reactor::Impl::post( std::function<void()> fn )
     {
         enqueue( PendingOp{
-            .kind          = PendingKind::task,
-            .token         = kWakeToken,
-            .fd            = kInvalidFd,
-            .events        = kNoFdEvents,
+            .kind          = PendingKind::Task,
+            .token         = wakeToken,
+            .fd            = invalidFd,
+            .events        = noFdEvents,
             .delay         = {},
             .fd_callback   = {},
             .void_callback = std::move( fn ),
@@ -426,14 +424,14 @@ namespace grab::core
     void
     Reactor::Impl::wake() const noexcept
     {
-        if( wake_fd_ == kInvalidFd )
+        if( wake_fd_ == invalidFd )
         {
             return;
         }
 
         while( true )
         {
-            if( ::eventfd_write( wake_fd_, kWakeEventfdValue ) == kPosixSuccess )
+            if( ::eventfd_write( wake_fd_, wakeEventfdValue ) == posixSuccess )
             {
                 return;
             }
@@ -451,8 +449,8 @@ namespace grab::core
     {
         while( true )
         {
-            eventfd_t value = kEmptyEventfdValue;
-            if( ::eventfd_read( wake_fd_, &value ) == kPosixSuccess )
+            eventfd_t value = emptyEventfdValue;
+            if( ::eventfd_read( wake_fd_, &value ) == posixSuccess )
             {
                 continue;
             }
@@ -479,7 +477,7 @@ namespace grab::core
         {
             switch( op.kind )
             {
-                case PendingKind::add_fd :
+                case PendingKind::AddFd :
                     {
                         if( auto result = add_fd_on_reactor( op ); !result.has_value() )
                         {
@@ -487,7 +485,7 @@ namespace grab::core
                         }
                         break;
                     }
-                case PendingKind::remove_fd :
+                case PendingKind::RemoveFd :
                     {
                         if( auto result = remove_fd_on_reactor( op.token );
                             !result.has_value() )
@@ -496,10 +494,10 @@ namespace grab::core
                         }
                         break;
                     }
-                case PendingKind::add_timer :
+                case PendingKind::AddTimer :
                     add_timer_on_reactor( std::move( op ) );
                     break;
-                case PendingKind::task :
+                case PendingKind::Task :
                     op.void_callback();
                     break;
             }
@@ -518,7 +516,7 @@ namespace grab::core
         epoll_event event{};
         event.events   = op.events;
         event.data.u64 = op.token;
-        if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_ADD, op.fd, &event ) == kPosixFailure )
+        if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_ADD, op.fd, &event ) == posixFailure )
         {
             return std::unexpected( posix_error( "epoll_ctl add", errno ) );
         }
@@ -546,7 +544,7 @@ namespace grab::core
         }
 
         if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_DEL, registration->fd, nullptr ) ==
-            kPosixFailure )
+            posixFailure )
         {
             const int error_number = errno;
             if( error_number != EBADF && error_number != ENOENT )
@@ -589,7 +587,7 @@ namespace grab::core
     void
     Reactor::Impl::dispatch_ready_event( const epoll_event& event )
     {
-        if( event.data.u64 == kWakeToken )
+        if( event.data.u64 == wakeToken )
         {
             drain_wake_fd();
             return;
@@ -613,14 +611,14 @@ namespace grab::core
     {
         if( timers_.empty() )
         {
-            return kInfiniteWait;
+            return infiniteWait;
         }
 
         const auto now      = std::chrono::steady_clock::now();
         const auto deadline = timers_.front().deadline;
         if( deadline <= now )
         {
-            return kNoWait;
+            return noWait;
         }
 
         const auto remaining = deadline - now;

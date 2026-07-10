@@ -9,12 +9,12 @@
 namespace
 {
 
-    constexpr std::uint64_t kInitialGeneration = 0U;
-    constexpr std::uint64_t kFirstGeneration   = 1U;
-    constexpr int           kNoNotifications   = 0;
-    constexpr int           kOneNotification   = 1;
-    constexpr bool          kCallbackNotRun    = false;
-    constexpr bool          kCallbackRan       = true;
+    constexpr std::uint64_t initialGeneration = 0U;
+    constexpr std::uint64_t firstGeneration   = 1U;
+    constexpr int           noNotifications   = 0;
+    constexpr int           oneNotification   = 1;
+    constexpr bool          callbackNotRun    = false;
+    constexpr bool          callbackRan       = true;
 
 }    // namespace
 
@@ -22,10 +22,10 @@ TEST( Monitor,
       UpdateBumpsGenerationAndNotifies )
 {
     grab::core::EnvironmentMonitor monitor( grab::core::Environment{} );
-    EXPECT_EQ( monitor.current().generation, kInitialGeneration );
+    EXPECT_EQ( monitor.current().generation, initialGeneration );
 
-    int           notified        = kNoNotifications;
-    std::uint64_t seen_generation = kInitialGeneration;
+    int           notified        = noNotifications;
+    std::uint64_t seen_generation = initialGeneration;
     const auto    id              = monitor.subscribe(
         [&]( const grab::core::Environment& env )
         {
@@ -35,18 +35,18 @@ TEST( Monitor,
     );
 
     grab::core::Environment next;
-    next.session          = grab::core::SessionType::x11;
+    next.session          = grab::core::SessionType::X11;
     const auto generation = monitor.update( next );
 
-    EXPECT_EQ( generation, kFirstGeneration );
-    EXPECT_EQ( monitor.current().generation, kFirstGeneration );
-    EXPECT_EQ( monitor.current().session, grab::core::SessionType::x11 );
-    EXPECT_EQ( notified, kOneNotification );
-    EXPECT_EQ( seen_generation, kFirstGeneration );
+    EXPECT_EQ( generation, firstGeneration );
+    EXPECT_EQ( monitor.current().generation, firstGeneration );
+    EXPECT_EQ( monitor.current().session, grab::core::SessionType::X11 );
+    EXPECT_EQ( notified, oneNotification );
+    EXPECT_EQ( seen_generation, firstGeneration );
 
     monitor.unsubscribe( id );
     monitor.update( grab::core::Environment{} );
-    EXPECT_EQ( notified, kOneNotification );
+    EXPECT_EQ( notified, oneNotification );
 }
 
 TEST( Monitor,
@@ -54,13 +54,13 @@ TEST( Monitor,
 {
     grab::core::EnvironmentMonitor monitor( grab::core::Environment{} );
 
-    bool                           callback_ran        = kCallbackNotRun;
-    std::uint64_t                  notified_generation = kInitialGeneration;
-    std::uint64_t                  current_generation  = kInitialGeneration;
+    bool                           callback_ran        = callbackNotRun;
+    std::uint64_t                  notified_generation = initialGeneration;
+    std::uint64_t                  current_generation  = initialGeneration;
     const auto                     id                  = monitor.subscribe(
         [&]( const grab::core::Environment& env )
         {
-            callback_ran         = kCallbackRan;
+            callback_ran         = callbackRan;
             notified_generation  = env.generation;
             current_generation   = monitor.current().generation;
 
@@ -75,8 +75,8 @@ TEST( Monitor,
 
     const auto generation = monitor.update( grab::core::Environment{} );
 
-    EXPECT_EQ( generation, kFirstGeneration );
-    EXPECT_EQ( callback_ran, kCallbackRan );
+    EXPECT_EQ( generation, firstGeneration );
+    EXPECT_EQ( callback_ran, callbackRan );
     EXPECT_EQ( notified_generation, generation );
     EXPECT_EQ( current_generation, notified_generation );
 

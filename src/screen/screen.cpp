@@ -27,15 +27,15 @@ namespace grab
     namespace
     {
 
-        constexpr int              kXcbOk                      = 0;
-        constexpr std::uint8_t     kX11SuccessResponse         = 1U;
-        constexpr std::uint8_t     kFormat32Bits               = 32U;
-        constexpr std::uint32_t    kPropertyOffsetZero         = 0U;
-        constexpr std::uint32_t    kSingleWindowPropertyLength = 1U;
-        constexpr unsigned char    kAsciiUpperA                = 'A';
-        constexpr unsigned char    kAsciiUpperZ                = 'Z';
-        constexpr unsigned char    kAsciiCaseOffset            = 'a' - 'A';
-        constexpr std::string_view kNetActiveWindowAtom        = "_NET_ACTIVE_WINDOW";
+        constexpr int              xcbOk                      = 0;
+        constexpr std::uint8_t     x11SuccessResponse         = 1U;
+        constexpr std::uint8_t     format32Bits               = 32U;
+        constexpr std::uint32_t    propertyOffsetZero         = 0U;
+        constexpr std::uint32_t    singleWindowPropertyLength = 1U;
+        constexpr unsigned char    asciiUpperA                = 'A';
+        constexpr unsigned char    asciiUpperZ                = 'Z';
+        constexpr unsigned char    asciiCaseOffset            = 'a' - 'A';
+        constexpr std::string_view netActiveWindowAtom        = "_NET_ACTIVE_WINDOW";
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -62,9 +62,9 @@ namespace grab
         ascii_lower( char value ) noexcept
         {
             const auto code = static_cast<unsigned char>( value );
-            if( code >= kAsciiUpperA && code <= kAsciiUpperZ )
+            if( code >= asciiUpperA && code <= asciiUpperZ )
             {
-                return static_cast<char>( code + kAsciiCaseOffset );
+                return static_cast<char>( code + asciiCaseOffset );
             }
             return value;
         }
@@ -119,16 +119,16 @@ namespace grab
             };
             if( connection ==
                 nullptr ||
-                xcb_connection_has_error( connection.get() ) != kXcbOk )
+                xcb_connection_has_error( connection.get() ) != xcbOk )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB display connection failed" );
             }
 
             const xcb_setup_t* const setup = xcb_get_setup( connection.get() );
-            if( setup == nullptr || setup->status != kX11SuccessResponse )
+            if( setup == nullptr || setup->status != x11SuccessResponse )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB setup is unavailable" );
             }
 
@@ -142,7 +142,7 @@ namespace grab
 
             if( iterator.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB default screen is unavailable" );
             }
 
@@ -162,20 +162,20 @@ namespace grab
                                        xcb_intern_atom( connection,
                                                         1U,
                                                         static_cast<std::uint16_t>(
-                                                            kNetActiveWindowAtom.size()
+                                                            netActiveWindowAtom.size()
                                                         ),
-                                                        kNetActiveWindowAtom.data() ),
+                                                        netActiveWindowAtom.data() ),
                                        &raw_error )
             );
             const auto error = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB atom lookup failed for _NET_ACTIVE_WINDOW" );
             }
             if( reply->atom == XCB_ATOM_NONE )
             {
-                return grab::fail( grab::ErrorCode::window_not_found,
+                return grab::fail( grab::ErrorCode::WindowNotFound,
                                    "EWMH active window atom is unavailable" );
             }
             return reply->atom;
@@ -195,14 +195,14 @@ namespace grab
                                                           root,
                                                           active_window_atom,
                                                           XCB_ATOM_WINDOW,
-                                                          kPropertyOffsetZero,
-                                                          kSingleWindowPropertyLength ),
+                                                          propertyOffsetZero,
+                                                          singleWindowPropertyLength ),
                                         &raw_error )
             );
             const auto error = take_xcb_owned( raw_error );
             if( error != nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB active window property read failed" );
             }
             if( reply ==
@@ -211,19 +211,19 @@ namespace grab
                 XCB_ATOM_NONE ||
                 xcb_get_property_value_length( reply.get() ) == 0 )
             {
-                return grab::fail( grab::ErrorCode::window_not_found,
+                return grab::fail( grab::ErrorCode::WindowNotFound,
                                    "EWMH active window is unset" );
             }
-            if( reply->format != kFormat32Bits )
+            if( reply->format != format32Bits )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "EWMH active window property has an invalid format" );
             }
 
             const int value_length = xcb_get_property_value_length( reply.get() );
             if( std::cmp_less( value_length, sizeof( xcb_window_t ) ) )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "EWMH active window property is truncated" );
             }
 
@@ -237,7 +237,7 @@ namespace grab
             const auto window = std::bit_cast<xcb_window_t>( raw_window );
             if( window == XCB_WINDOW_NONE )
             {
-                return grab::fail( grab::ErrorCode::window_not_found,
+                return grab::fail( grab::ErrorCode::WindowNotFound,
                                    "EWMH active window is unset" );
             }
             return window;
@@ -322,7 +322,7 @@ namespace grab
     {
         if( impl_ == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault, "Screen is not open" );
+            return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
         return impl_->capturer.capture_window( id );
     }
@@ -332,14 +332,14 @@ namespace grab
     {
         if( impl_ == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault, "Screen is not open" );
+            return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
 
         const std::vector<std::string> candidates =
             normalized_candidates( wm_class_candidates );
         if( candidates.empty() )
         {
-            return grab::fail( grab::ErrorCode::window_not_found,
+            return grab::fail( grab::ErrorCode::WindowNotFound,
                                "no WM_CLASS candidates were provided" );
         }
 
@@ -357,7 +357,7 @@ namespace grab
             }
         }
 
-        return grab::fail( grab::ErrorCode::window_not_found,
+        return grab::fail( grab::ErrorCode::WindowNotFound,
                            "no window matched the requested WM_CLASS" );
     }
 
@@ -366,7 +366,7 @@ namespace grab
     {
         if( impl_ == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault, "Screen is not open" );
+            return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
         return impl_->capturer.capture_display();
     }
@@ -379,7 +379,7 @@ namespace grab
     {
         if( impl_ == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault, "Screen is not open" );
+            return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
         return impl_->capturer.capture_region( x, y, width, height );
     }
@@ -389,7 +389,7 @@ namespace grab
     {
         if( impl_ == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault, "Screen is not open" );
+            return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
 
         auto active_window_id = read_active_window_id( impl_->display_name() );

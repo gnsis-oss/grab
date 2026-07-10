@@ -22,16 +22,16 @@ namespace grab::core
     namespace
     {
 
-        inline constexpr auto kSessionNames = EnumTable{
+        inline constexpr auto sessionNames = EnumTable{
             std::to_array( {
-                enum_entry( SessionType::x11, "x11" ),
-                enum_entry( SessionType::wayland, "wayland" ),
-                enum_entry( SessionType::headless, "headless" ),
-                enum_entry( SessionType::unknown, "unknown" ),
+                enum_entry( SessionType::X11, "x11" ),
+                enum_entry( SessionType::Wayland, "wayland" ),
+                enum_entry( SessionType::Headless, "headless" ),
+                enum_entry( SessionType::Unknown, "unknown" ),
             } ),
         };
-        static_assert( enum_table_has_count( kSessionNames,
-                                             SessionType::count ) );
+        static_assert( enum_table_has_count( sessionNames,
+                                             SessionType::Count ) );
 
         struct CapabilityNameLess
         {
@@ -48,7 +48,7 @@ namespace grab::core
         std::string_view
         session_name( SessionType session ) noexcept
         {
-            return kSessionNames.text_of( session, "unknown" );
+            return sessionNames.text_of( session, "unknown" );
         }
 
     }    // namespace
@@ -102,7 +102,7 @@ namespace grab::core
             }
             else
             {
-                entry.state = AvailabilityState::unavailable;
+                entry.state = AvailabilityState::Unavailable;
                 if( !resolution.error().attempts.empty() )
                 {
                     entry.provider = resolution.error().attempts.front().provider;
@@ -209,7 +209,7 @@ namespace grab::core
             std::ranges::all_of( report.capabilities,
                                  []( const CapabilityReport& entry )
                                  {
-                                     return entry.state == AvailabilityState::available;
+                                     return entry.state == AvailabilityState::Available;
                                  } );
         return all_available ? 0 : 1;
     }

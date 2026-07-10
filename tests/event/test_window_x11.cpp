@@ -25,32 +25,32 @@
 namespace
 {
 
-    constexpr const char*      kXvfbDisplay         = ":95";
-    constexpr int              kXcbOk               = 0;
-    constexpr int              kInvalidScreenIndex  = 0;
-    constexpr std::int16_t     kWindowX             = 24;
-    constexpr std::int16_t     kWindowY             = 32;
-    constexpr std::uint16_t    kWindowWidth         = 180U;
-    constexpr std::uint16_t    kWindowHeight        = 120U;
-    constexpr std::uint16_t    kWindowBorderWidth   = 0U;
-    constexpr std::uint32_t    kWindowValueMask     = XCB_CW_BACK_PIXEL;
-    constexpr std::uint32_t    kPropertyReplaceMode = XCB_PROP_MODE_REPLACE;
-    constexpr std::uint8_t     kFormat8Bits         = 8U;
-    constexpr std::uint8_t     kFormat32Bits        = 32U;
-    constexpr std::size_t      kSubscriptionDepth   = 32U;
-    constexpr auto             kThreadReadyTimeout  = std::chrono::seconds{ 2 };
-    constexpr auto             kRegistrationTimeout = std::chrono::seconds{ 2 };
-    constexpr auto             kEventTimeout        = std::chrono::seconds{ 3 };
-    constexpr auto             kPollInterval        = std::chrono::milliseconds{ 20 };
-    constexpr auto             kEventPollInterval   = std::chrono::milliseconds{ 10 };
+    constexpr const char*      xvfbDisplay         = ":95";
+    constexpr int              xcbOk               = 0;
+    constexpr int              invalidScreenIndex  = 0;
+    constexpr std::int16_t     windowX             = 24;
+    constexpr std::int16_t     windowY             = 32;
+    constexpr std::uint16_t    windowWidth         = 180U;
+    constexpr std::uint16_t    windowHeight        = 120U;
+    constexpr std::uint16_t    windowBorderWidth   = 0U;
+    constexpr std::uint32_t    windowValueMask     = XCB_CW_BACK_PIXEL;
+    constexpr std::uint32_t    propertyReplaceMode = XCB_PROP_MODE_REPLACE;
+    constexpr std::uint8_t     format8Bits         = 8U;
+    constexpr std::uint8_t     format32Bits        = 32U;
+    constexpr std::size_t      subscriptionDepth   = 32U;
+    constexpr auto             threadReadyTimeout  = std::chrono::seconds{ 2 };
+    constexpr auto             registrationTimeout = std::chrono::seconds{ 2 };
+    constexpr auto             eventTimeout        = std::chrono::seconds{ 3 };
+    constexpr auto             pollInterval        = std::chrono::milliseconds{ 20 };
+    constexpr auto             eventPollInterval   = std::chrono::milliseconds{ 10 };
 
-    constexpr std::string_view kReactorDidNotStart  = "reactor thread did not start";
-    constexpr std::string_view kTrackerDidNotStart  = "window tracker did not start";
-    constexpr std::string_view kTrackerNotReady = "window tracker fd did not register";
-    constexpr std::string_view kWindowInstance  = "grab-window-tracker-instance";
-    constexpr std::string_view kWindowClass     = "GrabWindowTrackerClass";
-    constexpr std::string_view kInitialTitle    = "grab window tracker initial title";
-    constexpr std::string_view kChangedTitle    = "grab window tracker changed title";
+    constexpr std::string_view reactorDidNotStart  = "reactor thread did not start";
+    constexpr std::string_view trackerDidNotStart  = "window tracker did not start";
+    constexpr std::string_view trackerNotReady = "window tracker fd did not register";
+    constexpr std::string_view windowInstance  = "grab-window-tracker-instance";
+    constexpr std::string_view windowClass     = "GrabWindowTrackerClass";
+    constexpr std::string_view initialTitle    = "grab window tracker initial title";
+    constexpr std::string_view changedTitle    = "grab window tracker changed title";
 
     template<typename T>
     using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -95,7 +95,7 @@ namespace
             bool
             wait_until_started()
             {
-                return started_.wait_for( kThreadReadyTimeout ) ==
+                return started_.wait_for( threadReadyTimeout ) ==
                        std::future_status::ready;
             }
 
@@ -174,7 +174,7 @@ namespace
         private:
 
             xcb_connection_t* connection_   = nullptr;
-            int               screen_index_ = kInvalidScreenIndex;
+            int               screen_index_ = invalidScreenIndex;
     };
 
     [[nodiscard]]
@@ -212,7 +212,7 @@ namespace
     {
         if( xcb_flush( connection ) <=
             0 ||
-            xcb_connection_has_error( connection ) != kXcbOk )
+            xcb_connection_has_error( connection ) != xcbOk )
         {
             return testing::AssertionFailure() << "xcb_flush failed";
         }
@@ -259,15 +259,15 @@ namespace
     set_wm_class( xcb_connection_t* connection,
                   xcb_window_t      window )
     {
-        const std::string value = wm_class_value( kWindowInstance, kWindowClass );
+        const std::string value = wm_class_value( windowInstance, windowClass );
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          XCB_ATOM_WM_CLASS,
                                          XCB_ATOM_STRING,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( value.size() ),
                                          value.data() )
         ) );
@@ -285,11 +285,11 @@ namespace
         EXPECT_TRUE( request_succeeded(
             connection,
             xcb_change_property_checked( connection,
-                                         kPropertyReplaceMode,
+                                         propertyReplaceMode,
                                          window,
                                          net_wm_name,
                                          utf8_string,
-                                         kFormat8Bits,
+                                         format8Bits,
                                          static_cast<std::uint32_t>( title.size() ),
                                          title.data() )
         ) );
@@ -306,17 +306,15 @@ namespace
         );
         const xcb_window_t property_owner = root_window;
         const xcb_atom_t   property_name  = active_window_atom;
-        EXPECT_TRUE(
-            request_succeeded( connection,
-                               xcb_change_property_checked( connection,
-                                                            kPropertyReplaceMode,
-                                                            property_owner,
-                                                            property_name,
-                                                            XCB_ATOM_WINDOW,
-                                                            kFormat32Bits,
-                                                            1U,
-                                                            &window ) )
-        );
+        EXPECT_TRUE( request_succeeded( connection,
+                                        xcb_change_property_checked( connection,
+                                                                     propertyReplaceMode,
+                                                                     property_owner,
+                                                                     property_name,
+                                                                     XCB_ATOM_WINDOW,
+                                                                     format32Bits,
+                                                                     1U,
+                                                                     &window ) ) );
     }
 
     [[nodiscard]]
@@ -333,18 +331,18 @@ namespace
                                                           screen.root_depth,
                                                           window,
                                                           screen.root,
-                                                          kWindowX,
-                                                          kWindowY,
-                                                          kWindowWidth,
-                                                          kWindowHeight,
-                                                          kWindowBorderWidth,
+                                                          windowX,
+                                                          windowY,
+                                                          windowWidth,
+                                                          windowHeight,
+                                                          windowBorderWidth,
                                                           XCB_WINDOW_CLASS_INPUT_OUTPUT,
                                                           screen.root_visual,
-                                                          kWindowValueMask,
+                                                          windowValueMask,
                                                           values.data() ) )
         );
         set_wm_class( connection, window );
-        set_title( connection, window, kInitialTitle );
+        set_title( connection, window, initialTitle );
         EXPECT_TRUE( request_succeeded( connection,
                                         xcb_map_window_checked( connection, window ) ) );
         EXPECT_TRUE( flush_succeeded( connection ) );
@@ -363,7 +361,7 @@ namespace
                 registered.set_value();
             }
         );
-        return registered_future.wait_for( kRegistrationTimeout ) ==
+        return registered_future.wait_for( registrationTimeout ) ==
                std::future_status::ready;
     }
 
@@ -372,7 +370,7 @@ namespace
     wait_for_event( grab::Subscription& subscription,
                     grab::EventKind     kind )
     {
-        const auto deadline = std::chrono::steady_clock::now() + kEventTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + eventTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             while( auto event = subscription.try_pop() )
@@ -382,7 +380,7 @@ namespace
                     return event;
                 }
             }
-            std::this_thread::sleep_for( kEventPollInterval );
+            std::this_thread::sleep_for( eventPollInterval );
         }
         return std::nullopt;
     }
@@ -392,8 +390,8 @@ namespace
     create_destroy_filter()
     {
         grab::EventFilter filter;
-        filter.kinds.push_back( grab::EventKind::window_created );
-        filter.kinds.push_back( grab::EventKind::window_closed );
+        filter.kinds.push_back( grab::EventKind::WindowCreated );
+        filter.kinds.push_back( grab::EventKind::WindowClosed );
         return filter;
     }
 
@@ -402,8 +400,8 @@ namespace
     focus_title_filter()
     {
         grab::EventFilter filter;
-        filter.kinds.push_back( grab::EventKind::window_focus_changed );
-        filter.kinds.push_back( grab::EventKind::window_title_changed );
+        filter.kinds.push_back( grab::EventKind::WindowFocusChanged );
+        filter.kinds.push_back( grab::EventKind::WindowTitleChanged );
         return filter;
     }
 
@@ -414,7 +412,7 @@ namespace
                             std::string_view    app,
                             std::string_view    title )
     {
-        const auto deadline = std::chrono::steady_clock::now() + kEventTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + eventTimeout;
         while( std::chrono::steady_clock::now() < deadline )
         {
             while( auto event = subscription.try_pop() )
@@ -434,7 +432,7 @@ namespace
                     return *payload;
                 }
             }
-            std::this_thread::sleep_for( kEventPollInterval );
+            std::this_thread::sleep_for( eventPollInterval );
         }
         return std::nullopt;
     }
@@ -453,28 +451,28 @@ TEST( WindowX11,
       CreateAndDestroyEmitEvents )
 {
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
-    auto subscription   = bus.subscribe( create_destroy_filter(), kSubscriptionDepth );
+    auto subscription   = bus.subscribe( create_destroy_filter(), subscriptionDepth );
 
-    auto tracker_result = grab::event::WindowTracker::start( kXvfbDisplay,
+    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
                                                              running.reactor(),
                                                              bus,
-                                                             kPollInterval );
+                                                             pollInterval );
     ASSERT_TRUE( tracker_result.has_value() ) << tracker_result.error().message;
     auto tracker = std::move( *tracker_result );
-    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << kTrackerNotReady;
+    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
 
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen, nullptr );
 
     const xcb_window_t window = create_test_window( connection.get(), *screen );
-    auto created = wait_for_event( subscription, grab::EventKind::window_created );
+    auto created = wait_for_event( subscription, grab::EventKind::WindowCreated );
     ASSERT_TRUE( created.has_value() );
     const auto* created_payload = std::get_if<grab::WindowChange>( &created->payload );
     ASSERT_NE( created_payload, nullptr );
@@ -484,7 +482,7 @@ TEST( WindowX11,
                                                                 window ) ) );
     EXPECT_TRUE( flush_succeeded( connection.get() ) );
 
-    auto closed = wait_for_event( subscription, grab::EventKind::window_closed );
+    auto closed = wait_for_event( subscription, grab::EventKind::WindowClosed );
     ASSERT_TRUE( closed.has_value() );
     const auto* closed_payload = std::get_if<grab::WindowChange>( &closed->payload );
     ASSERT_NE( closed_payload, nullptr );
@@ -499,28 +497,28 @@ TEST( WindowX11,
       ActiveWindowChangePublishesFocus )
 {
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
     auto           subscription = bus.subscribe(
         grab::EventFilter{
-            .kinds      = { grab::EventKind::window_focus_changed },
+            .kinds      = { grab::EventKind::WindowFocusChanged },
             .categories = {},
         },
-        kSubscriptionDepth
+        subscriptionDepth
     );
 
-    auto tracker_result = grab::event::WindowTracker::start( kXvfbDisplay,
+    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
                                                              running.reactor(),
                                                              bus,
-                                                             kPollInterval );
-    ASSERT_TRUE( tracker_result.has_value() ) << kTrackerDidNotStart;
+                                                             pollInterval );
+    ASSERT_TRUE( tracker_result.has_value() ) << trackerDidNotStart;
     auto tracker = std::move( *tracker_result );
-    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << kTrackerNotReady;
+    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
 
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen, nullptr );
@@ -531,9 +529,9 @@ TEST( WindowX11,
     EXPECT_TRUE( flush_succeeded( connection.get() ) );
 
     auto focused = wait_for_window_change( subscription,
-                                           grab::EventKind::window_focus_changed,
-                                           kWindowClass,
-                                           kInitialTitle );
+                                           grab::EventKind::WindowFocusChanged,
+                                           windowClass,
+                                           initialTitle );
     ASSERT_TRUE( focused.has_value() );
 
     tracker.stop();
@@ -545,22 +543,22 @@ TEST( WindowX11,
       TitleChangePublishesTitleChanged )
 {
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
-    auto subscription   = bus.subscribe( focus_title_filter(), kSubscriptionDepth );
+    auto subscription   = bus.subscribe( focus_title_filter(), subscriptionDepth );
 
-    auto tracker_result = grab::event::WindowTracker::start( kXvfbDisplay,
+    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
                                                              running.reactor(),
                                                              bus,
-                                                             kPollInterval );
-    ASSERT_TRUE( tracker_result.has_value() ) << kTrackerDidNotStart;
+                                                             pollInterval );
+    ASSERT_TRUE( tracker_result.has_value() ) << trackerDidNotStart;
     auto tracker = std::move( *tracker_result );
-    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << kTrackerNotReady;
+    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
 
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen, nullptr );
@@ -570,19 +568,19 @@ TEST( WindowX11,
     EXPECT_TRUE( flush_succeeded( connection.get() ) );
 
     auto focused = wait_for_window_change( subscription,
-                                           grab::EventKind::window_focus_changed,
-                                           kWindowClass,
-                                           kInitialTitle );
+                                           grab::EventKind::WindowFocusChanged,
+                                           windowClass,
+                                           initialTitle );
     ASSERT_TRUE( focused.has_value() );
-    set_title( connection.get(), window, kChangedTitle );
+    set_title( connection.get(), window, changedTitle );
     EXPECT_TRUE( flush_succeeded( connection.get() ) );
 
     auto changed = wait_for_window_change( subscription,
-                                           grab::EventKind::window_title_changed,
-                                           kWindowClass,
-                                           kChangedTitle );
+                                           grab::EventKind::WindowTitleChanged,
+                                           windowClass,
+                                           changedTitle );
     ASSERT_TRUE( changed.has_value() );
-    EXPECT_EQ( changed->prev_title, kInitialTitle );
+    EXPECT_EQ( changed->prev_title, initialTitle );
 
     tracker.stop();
     running.stop_and_join();

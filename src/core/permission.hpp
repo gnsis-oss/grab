@@ -14,9 +14,9 @@ namespace grab::core
 
     enum class PermissionState : std::uint8_t
     {
-        granted,
-        needed,
-        denied,
+        Granted,
+        Needed,
+        Denied,
     };
 
     class PermissionBroker

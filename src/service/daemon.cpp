@@ -25,8 +25,8 @@ namespace grab::service
     namespace
     {
 
-        constexpr std::size_t kStorageQueueDepth  = 65'536U;
-        constexpr std::size_t kStorageBufferLimit = 1U;
+        constexpr std::size_t storageQueueDepth  = 65'536U;
+        constexpr std::size_t storageBufferLimit = 1U;
 
         struct DrainState
         {
@@ -41,7 +41,7 @@ namespace grab::service
         make_internal_error( const std::string& message )
         {
             return grab::Error{
-                .code       = grab::ErrorCode::internal_fault,
+                .code       = grab::ErrorCode::InternalFault,
                 .message    = message,
                 .capability = {},
                 .target     = {},
@@ -201,7 +201,7 @@ namespace grab::service
 
         auto sink = grab::storage::JsonlSink::open( grab::storage::JsonlOptions{
             .dir          = *store_dir_,
-            .buffer_limit = kStorageBufferLimit,
+            .buffer_limit = storageBufferLimit,
         } );
         if( !sink.has_value() )
         {
@@ -269,8 +269,7 @@ namespace grab::service
             // under extreme overflow); a future EventBus durable-sink hook would
             // make it strictly lossless. This is a known follow-up.
             grab::EventFilter filter;
-            auto              subscription =
-                bus_.subscribe( std::move( filter ), kStorageQueueDepth );
+            auto subscription = bus_.subscribe( std::move( filter ), storageQueueDepth );
             subscription.set_notify(
                 [state = drain_state_]
                 {

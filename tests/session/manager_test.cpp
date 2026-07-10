@@ -41,7 +41,7 @@ namespace
     {
         return grab::SessionDesc{
             .name        = session_name,
-            .mode        = grab::SessionMode::offscreen,
+            .mode        = grab::SessionMode::Offscreen,
             .geometry    = default_geometry,
             .app_command = {},
         };
@@ -58,7 +58,7 @@ TEST( SessionManager,
 
     const auto                            record = manager.start( desc() );
     ASSERT_TRUE( record.has_value() ) << record.error().message;
-    EXPECT_EQ( record->state, grab::SessionState::ready );
+    EXPECT_EQ( record->state, grab::SessionState::Ready );
     EXPECT_FALSE( record->endpoint.empty() );
 }
 
@@ -67,12 +67,12 @@ TEST( SessionManager,
 {
     grab::session::SessionRegistry  registry{ fresh_root( rollback_root_name ) };
     grab::test::FakeSessionProvider provider;
-    provider.fail_next_create( grab::ErrorCode::provider_failed, provider_failure );
+    provider.fail_next_create( grab::ErrorCode::ProviderFailed, provider_failure );
     grab::session::SessionManager manager{ registry, provider };
 
     const auto                    record = manager.start( desc() );
     ASSERT_FALSE( record.has_value() );
-    EXPECT_EQ( record.error().code, grab::ErrorCode::provider_failed );
+    EXPECT_EQ( record.error().code, grab::ErrorCode::ProviderFailed );
     EXPECT_FALSE( registry.read( session_name ).has_value() );
 }
 
@@ -98,5 +98,5 @@ TEST( SessionManager,
 
     const auto                            stopped = manager.stop( ghost_name );
     ASSERT_FALSE( stopped.has_value() );
-    EXPECT_EQ( stopped.error().code, grab::ErrorCode::session_not_found );
+    EXPECT_EQ( stopped.error().code, grab::ErrorCode::SessionNotFound );
 }

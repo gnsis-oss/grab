@@ -14,7 +14,7 @@ namespace
     x11_env()
     {
         grab::core::Environment env;
-        env.session = grab::core::SessionType::x11;
+        env.session = grab::core::SessionType::X11;
         return env;
     }
 
@@ -24,16 +24,16 @@ TEST( X11SeatSessionProvider,
       SharedAvailableOnX11 )
 {
     const grab::session::X11SeatSessionProvider provider;
-    const auto av = provider.probe( x11_env(), grab::SessionMode::shared );
-    EXPECT_EQ( av.state, grab::AvailabilityState::available );
+    const auto av = provider.probe( x11_env(), grab::SessionMode::Shared );
+    EXPECT_EQ( av.state, grab::AvailabilityState::Available );
 }
 
 TEST( X11SeatSessionProvider,
       OffscreenUnavailableOnX11 )
 {
     const grab::session::X11SeatSessionProvider provider;
-    const auto av = provider.probe( x11_env(), grab::SessionMode::offscreen );
-    EXPECT_EQ( av.state, grab::AvailabilityState::unavailable );
+    const auto av = provider.probe( x11_env(), grab::SessionMode::Offscreen );
+    EXPECT_EQ( av.state, grab::AvailabilityState::Unavailable );
     EXPECT_FALSE( av.reason.empty() );
 }
 
@@ -42,6 +42,6 @@ TEST( X11SeatSessionProvider,
 {
     const grab::core::Environment               non_x11;
     const grab::session::X11SeatSessionProvider provider;
-    const auto av = provider.probe( non_x11, grab::SessionMode::shared );
-    EXPECT_EQ( av.state, grab::AvailabilityState::unavailable );
+    const auto av = provider.probe( non_x11, grab::SessionMode::Shared );
+    EXPECT_EQ( av.state, grab::AvailabilityState::Unavailable );
 }

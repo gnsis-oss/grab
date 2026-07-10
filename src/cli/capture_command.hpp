@@ -46,7 +46,7 @@ namespace grab::cli
         {
             if( input.empty() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "geometry contains an empty number" );
             }
 
@@ -59,7 +59,7 @@ namespace grab::cli
             {
                 if( !is_digit( current ) )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "geometry contains a non-digit" );
                 }
                 const std::uint32_t digit = digit_value( current );
@@ -67,7 +67,7 @@ namespace grab::cli
                     max_quotient ||
                     ( value == max_quotient && digit > max_remainder ) )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "geometry number is out of range" );
                 }
                 value = ( value * decimal_base ) + digit;
@@ -76,7 +76,7 @@ namespace grab::cli
 
             if( digit_count == no_digits )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "geometry contains an empty number" );
             }
             return value;
@@ -88,7 +88,7 @@ namespace grab::cli
         {
             if( input.empty() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "geometry contains an empty offset" );
             }
 
@@ -130,7 +130,7 @@ namespace grab::cli
             }
             if( *value == 0U )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "geometry dimensions must be non-zero" );
             }
             return static_cast<std::uint16_t>( *value );

@@ -22,46 +22,46 @@
 namespace
 {
 
-    constexpr std::uint32_t    kWidth                 = 3U;
-    constexpr std::uint32_t    kHeight                = 2U;
-    constexpr std::uint32_t    kRgbaBytes             = 4U;
-    constexpr std::uint32_t    kRgbaStride            = kWidth * kRgbaBytes;
-    constexpr std::size_t      kMinimumValidCorpus    = 2U;
-    constexpr std::size_t      kMinimumInvalidCorpus  = 2U;
-    constexpr std::size_t      kByteModulus           = 256U;
-    constexpr std::size_t      kChannelStep           = 29U;
-    constexpr std::size_t      kRedSeed               = 17U;
-    constexpr std::size_t      kGreenSeed             = 83U;
-    constexpr std::size_t      kBlueSeed              = 149U;
-    constexpr std::size_t      kAlphaSeed             = 211U;
-    constexpr std::size_t      kGraySeed              = 47U;
-    constexpr std::size_t      kTruncatedPngBytes     = 12U;
-    constexpr std::size_t      kPngSignatureBytes     = 8U;
-    constexpr std::size_t      kPngChunkLengthBytes   = 4U;
-    constexpr std::size_t      kPngChunkTypeBytes     = 4U;
-    constexpr std::size_t      kPngIhdrDataBytes      = 13U;
-    constexpr std::size_t      kPngCrcLastBytePadding = 3U;
-    constexpr std::size_t      kIhdrCrcLastByteOffset = kPngSignatureBytes +
-                                                        kPngChunkLengthBytes +
-                                                        kPngChunkTypeBytes +
-                                                        kPngIhdrDataBytes +
-                                                        kPngCrcLastBytePadding;
-    constexpr unsigned char    kCrcFlipMask           = 0XFFU;
-    constexpr auto             kProtocolError         = grab::ErrorCode::protocol_error;
-    constexpr std::string_view kValidPrefix           = "valid_";
-    constexpr std::string_view kInvalidPrefix         = "invalid_";
-    constexpr std::string_view kFilterSub             = "valid_filter_sub.png";
-    constexpr std::string_view kFilterUp              = "valid_filter_up.png";
-    constexpr std::string_view kFilterAverage         = "valid_filter_average.png";
-    constexpr std::string_view kFilterPaeth           = "valid_filter_paeth.png";
-    constexpr std::string_view kPaletteTransparent    = "valid_palette_trns.png";
+    constexpr std::uint32_t    width                 = 3U;
+    constexpr std::uint32_t    height                = 2U;
+    constexpr std::uint32_t    rgbaBytes             = 4U;
+    constexpr std::uint32_t    rgbaStride            = width * rgbaBytes;
+    constexpr std::size_t      minimumValidCorpus    = 2U;
+    constexpr std::size_t      minimumInvalidCorpus  = 2U;
+    constexpr std::size_t      byteModulus           = 256U;
+    constexpr std::size_t      channelStep           = 29U;
+    constexpr std::size_t      redSeed               = 17U;
+    constexpr std::size_t      greenSeed             = 83U;
+    constexpr std::size_t      blueSeed              = 149U;
+    constexpr std::size_t      alphaSeed             = 211U;
+    constexpr std::size_t      graySeed              = 47U;
+    constexpr std::size_t      truncatedPngBytes     = 12U;
+    constexpr std::size_t      pngSignatureBytes     = 8U;
+    constexpr std::size_t      pngChunkLengthBytes   = 4U;
+    constexpr std::size_t      pngChunkTypeBytes     = 4U;
+    constexpr std::size_t      pngIhdrDataBytes      = 13U;
+    constexpr std::size_t      pngCrcLastBytePadding = 3U;
+    constexpr std::size_t      ihdrCrcLastByteOffset = pngSignatureBytes +
+                                                       pngChunkLengthBytes +
+                                                       pngChunkTypeBytes +
+                                                       pngIhdrDataBytes +
+                                                       pngCrcLastBytePadding;
+    constexpr unsigned char    crcFlipMask           = 0XFFU;
+    constexpr auto             protocolError         = grab::ErrorCode::ProtocolError;
+    constexpr std::string_view validPrefix           = "valid_";
+    constexpr std::string_view invalidPrefix         = "invalid_";
+    constexpr std::string_view filterSub             = "valid_filter_sub.png";
+    constexpr std::string_view filterUp              = "valid_filter_up.png";
+    constexpr std::string_view filterAverage         = "valid_filter_average.png";
+    constexpr std::string_view filterPaeth           = "valid_filter_paeth.png";
+    constexpr std::string_view paletteTransparent    = "valid_palette_trns.png";
 
     [[nodiscard]]
     std::byte
     byte_from( std::size_t value ) noexcept
     {
         return static_cast<std::byte>( static_cast<unsigned char>( value %
-                                                                   kByteModulus ) );
+                                                                   byteModulus ) );
     }
 
     [[nodiscard]]
@@ -69,25 +69,25 @@ namespace
     channel_byte( std::size_t pixel_index,
                   std::size_t seed ) noexcept
     {
-        return byte_from( seed + ( pixel_index * kChannelStep ) );
+        return byte_from( seed + ( pixel_index * channelStep ) );
     }
 
     void
     append_rgb_pixel( std::vector<std::byte>& pixels,
                       std::size_t             pixel_index )
     {
-        pixels.push_back( channel_byte( pixel_index, kRedSeed ) );
-        pixels.push_back( channel_byte( pixel_index, kGreenSeed ) );
-        pixels.push_back( channel_byte( pixel_index, kBlueSeed ) );
+        pixels.push_back( channel_byte( pixel_index, redSeed ) );
+        pixels.push_back( channel_byte( pixel_index, greenSeed ) );
+        pixels.push_back( channel_byte( pixel_index, blueSeed ) );
     }
 
     void
     append_bgr_pixel( std::vector<std::byte>& pixels,
                       std::size_t             pixel_index )
     {
-        pixels.push_back( channel_byte( pixel_index, kBlueSeed ) );
-        pixels.push_back( channel_byte( pixel_index, kGreenSeed ) );
-        pixels.push_back( channel_byte( pixel_index, kRedSeed ) );
+        pixels.push_back( channel_byte( pixel_index, blueSeed ) );
+        pixels.push_back( channel_byte( pixel_index, greenSeed ) );
+        pixels.push_back( channel_byte( pixel_index, redSeed ) );
     }
 
     void
@@ -95,7 +95,7 @@ namespace
                        std::size_t             pixel_index )
     {
         append_rgb_pixel( pixels, pixel_index );
-        pixels.push_back( channel_byte( pixel_index, kAlphaSeed ) );
+        pixels.push_back( channel_byte( pixel_index, alphaSeed ) );
     }
 
     void
@@ -103,14 +103,14 @@ namespace
                        std::size_t             pixel_index )
     {
         append_bgr_pixel( pixels, pixel_index );
-        pixels.push_back( channel_byte( pixel_index, kAlphaSeed ) );
+        pixels.push_back( channel_byte( pixel_index, alphaSeed ) );
     }
 
     [[nodiscard]]
     std::size_t
     pixel_count() noexcept
     {
-        return static_cast<std::size_t>( kWidth ) * static_cast<std::size_t>( kHeight );
+        return static_cast<std::size_t>( width ) * static_cast<std::size_t>( height );
     }
 
     [[nodiscard]]
@@ -125,30 +125,30 @@ namespace
         {
             switch( format )
             {
-                case grab::PixelFormat::gray :
-                    pixels.push_back( channel_byte( pixel_index, kGraySeed ) );
+                case grab::PixelFormat::Gray :
+                    pixels.push_back( channel_byte( pixel_index, graySeed ) );
                     break;
-                case grab::PixelFormat::rgb :
-                case grab::PixelFormat::rgb24 :
+                case grab::PixelFormat::Rgb :
+                case grab::PixelFormat::Rgb24 :
                     append_rgb_pixel( pixels, pixel_index );
                     break;
-                case grab::PixelFormat::bgr :
+                case grab::PixelFormat::Bgr :
                     append_bgr_pixel( pixels, pixel_index );
                     break;
-                case grab::PixelFormat::rgba :
+                case grab::PixelFormat::Rgba :
                     append_rgba_pixel( pixels, pixel_index );
                     break;
-                case grab::PixelFormat::bgra :
-                case grab::PixelFormat::bgr0 :
+                case grab::PixelFormat::Bgra :
+                case grab::PixelFormat::Bgr0 :
                     append_bgra_pixel( pixels, pixel_index );
                     break;
             }
         }
 
         return grab::Image{
-            .width  = kWidth,
-            .height = kHeight,
-            .stride = kWidth * grab::bytes_per_pixel( format ),
+            .width  = width,
+            .height = height,
+            .stride = width * grab::bytes_per_pixel( format ),
             .format = format,
             .pixels = std::move( pixels ),
         };
@@ -158,13 +158,13 @@ namespace
     grab::Image
     expected_png_image( grab::PixelFormat source_format )
     {
-        if( source_format == grab::PixelFormat::bgr )
+        if( source_format == grab::PixelFormat::Bgr )
         {
-            return make_pattern( grab::PixelFormat::rgb );
+            return make_pattern( grab::PixelFormat::Rgb );
         }
-        if( source_format == grab::PixelFormat::bgra )
+        if( source_format == grab::PixelFormat::Bgra )
         {
-            return make_pattern( grab::PixelFormat::rgba );
+            return make_pattern( grab::PixelFormat::Rgba );
         }
         return make_pattern( source_format );
     }
@@ -186,19 +186,19 @@ namespace
     {
         switch( format )
         {
-            case grab::PixelFormat::bgra :
+            case grab::PixelFormat::Bgra :
                 return "bgra";
-            case grab::PixelFormat::rgba :
+            case grab::PixelFormat::Rgba :
                 return "rgba";
-            case grab::PixelFormat::rgb :
+            case grab::PixelFormat::Rgb :
                 return "rgb";
-            case grab::PixelFormat::bgr :
+            case grab::PixelFormat::Bgr :
                 return "bgr";
-            case grab::PixelFormat::rgb24 :
+            case grab::PixelFormat::Rgb24 :
                 return "rgb24";
-            case grab::PixelFormat::bgr0 :
+            case grab::PixelFormat::Bgr0 :
                 return "bgr0";
-            case grab::PixelFormat::gray :
+            case grab::PixelFormat::Gray :
                 return "gray";
         }
         return "unknown";
@@ -239,7 +239,7 @@ namespace
     {
         const auto decoded = grab::codec::decode_png( bytes );
         ASSERT_FALSE( decoded.has_value() );
-        EXPECT_EQ( decoded.error().code, kProtocolError );
+        EXPECT_EQ( decoded.error().code, protocolError );
     }
 
     void
@@ -276,7 +276,7 @@ namespace
         ++counts.invalid;
         const auto decoded = grab::codec::decode_png( read_file( path ) );
         ASSERT_FALSE( decoded.has_value() ) << path;
-        EXPECT_EQ( decoded.error().code, kProtocolError );
+        EXPECT_EQ( decoded.error().code, protocolError );
     }
 
     void
@@ -289,13 +289,13 @@ namespace
         }
 
         const auto filename = entry.path().filename().string();
-        if( filename.starts_with( kValidPrefix ) )
+        if( filename.starts_with( validPrefix ) )
         {
             expect_valid_corpus_file( entry.path(), counts );
             return;
         }
 
-        if( filename.starts_with( kInvalidPrefix ) )
+        if( filename.starts_with( invalidPrefix ) )
         {
             expect_invalid_corpus_file( entry.path(), counts );
         }
@@ -307,11 +307,11 @@ TEST( PngCodec,
       RoundTripsEachSupportedPixelFormat )
 {
     constexpr std::array formats{
-        grab::PixelFormat::gray,
-        grab::PixelFormat::rgb,
-        grab::PixelFormat::rgba,
-        grab::PixelFormat::bgr,
-        grab::PixelFormat::bgra,
+        grab::PixelFormat::Gray,
+        grab::PixelFormat::Rgb,
+        grab::PixelFormat::Rgba,
+        grab::PixelFormat::Bgr,
+        grab::PixelFormat::Bgra,
     };
 
     for( const auto format : formats )
@@ -331,34 +331,34 @@ TEST( PngCodec,
       RejectsGarbageAndTruncatedStreams )
 {
     const std::vector<std::byte> garbage{
-        byte_from( kRedSeed ),
-        byte_from( kGreenSeed ),
-        byte_from( kBlueSeed ),
+        byte_from( redSeed ),
+        byte_from( greenSeed ),
+        byte_from( blueSeed ),
     };
     expect_protocol_error( garbage );
 
-    const auto image   = make_pattern( grab::PixelFormat::rgb );
+    const auto image   = make_pattern( grab::PixelFormat::Rgb );
     const auto encoded = grab::codec::encode_png( image );
     ASSERT_TRUE( encoded.has_value() );
 
     auto truncated = *encoded;
-    truncated.resize( kTruncatedPngBytes );
+    truncated.resize( truncatedPngBytes );
     expect_protocol_error( truncated );
 }
 
 TEST( PngCodec,
       RejectsBadChunkCrc )
 {
-    const auto image   = make_pattern( grab::PixelFormat::rgba );
+    const auto image   = make_pattern( grab::PixelFormat::Rgba );
     const auto encoded = grab::codec::encode_png( image );
     ASSERT_TRUE( encoded.has_value() );
 
     auto corrupted = *encoded;
-    ASSERT_GT( corrupted.size(), kIhdrCrcLastByteOffset );
-    corrupted.at( kIhdrCrcLastByteOffset ) =
+    ASSERT_GT( corrupted.size(), ihdrCrcLastByteOffset );
+    corrupted.at( ihdrCrcLastByteOffset ) =
         static_cast<std::byte>( static_cast<unsigned char>(
-            std::to_integer<unsigned char>( corrupted.at( kIhdrCrcLastByteOffset ) ) ^
-            kCrcFlipMask
+            std::to_integer<unsigned char>( corrupted.at( ihdrCrcLastByteOffset ) ) ^
+            crcFlipMask
         ) );
 
     expect_protocol_error( corrupted );
@@ -368,12 +368,12 @@ TEST( PngCodec,
       DecodesAllStandardFiltersFromCorpus )
 {
     const std::array filter_files{
-        kFilterSub,
-        kFilterUp,
-        kFilterAverage,
-        kFilterPaeth,
+        filterSub,
+        filterUp,
+        filterAverage,
+        filterPaeth,
     };
-    const auto expected = make_pattern( grab::PixelFormat::rgb );
+    const auto expected = make_pattern( grab::PixelFormat::Rgb );
 
     for( const auto filename : filter_files )
     {
@@ -389,15 +389,15 @@ TEST( PngCodec,
       DecodesPaletteTransparencyFromCorpus )
 {
     const auto decoded =
-        grab::codec::decode_png( read_file( corpus_path( kPaletteTransparent ) ) );
+        grab::codec::decode_png( read_file( corpus_path( paletteTransparent ) ) );
     ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
-    EXPECT_EQ( decoded->width, kWidth );
-    EXPECT_EQ( decoded->height, kHeight );
-    EXPECT_EQ( decoded->stride, kRgbaStride );
-    EXPECT_EQ( decoded->format, grab::PixelFormat::rgba );
+    EXPECT_EQ( decoded->width, width );
+    EXPECT_EQ( decoded->height, height );
+    EXPECT_EQ( decoded->stride, rgbaStride );
+    EXPECT_EQ( decoded->format, grab::PixelFormat::Rgba );
     EXPECT_EQ( decoded->pixels.size(),
-               static_cast<std::size_t>( kRgbaStride ) *
-                   static_cast<std::size_t>( kHeight ) );
+               static_cast<std::size_t>( rgbaStride ) *
+                   static_cast<std::size_t>( height ) );
 }
 
 TEST( PngCorpus,
@@ -412,6 +412,6 @@ TEST( PngCorpus,
         check_corpus_entry( entry, counts );
     }
 
-    EXPECT_GE( counts.valid, kMinimumValidCorpus );
-    EXPECT_GE( counts.invalid, kMinimumInvalidCorpus );
+    EXPECT_GE( counts.valid, minimumValidCorpus );
+    EXPECT_GE( counts.invalid, minimumInvalidCorpus );
 }

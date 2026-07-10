@@ -17,30 +17,30 @@
 namespace
 {
 
-    constexpr int                        kQualityLow  = 10;
-    constexpr int                        kQualityHigh = 50;
-    constexpr auto                       kCap = grab::Capability::screen_window_image;
-    constexpr std::string_view           kDegradedHighName           = "degraded-hi";
-    constexpr std::string_view           kAvailableLowName           = "avail-lo";
-    constexpr std::string_view           kAvailableHighName          = "avail-hi";
-    constexpr std::string_view           kNeedsPermissionName        = "exact";
-    constexpr std::string_view           kFallbackName               = "fallback";
-    constexpr std::string_view           kUnavailableName            = "gone";
-    constexpr std::string_view           kUnavailableReason          = "probe said no";
-    constexpr std::string_view           kTargetClass                = "window";
-    constexpr std::string_view           kFlipperName                = "flipper";
-    constexpr std::string_view           kFlippedReason              = "flipped";
-    constexpr auto                       kExpectedProviderCount      = 3U;
-    constexpr auto                       kFirstProviderIndex         = 0U;
-    constexpr auto                       kSecondProviderIndex        = 1U;
-    constexpr auto                       kThirdProviderIndex         = 2U;
-    constexpr auto                       kExpectedAttemptCount       = 1U;
-    constexpr auto                       kFirstAttemptIndex          = 0U;
-    constexpr auto                       kFirstGeneration            = 1U;
-    constexpr auto                       kSecondGeneration           = 2U;
-    constexpr int                        kFirstGenerationProbeCount  = 1;
-    constexpr int                        kSecondGenerationProbeCount = 2;
-    constexpr grab::core::ResolveOptions kDefaultOptions{};
+    constexpr int                        qualityLow  = 10;
+    constexpr int                        qualityHigh = 50;
+    constexpr auto                       cap = grab::Capability::ScreenWindowImage;
+    constexpr std::string_view           degradedHighName           = "degraded-hi";
+    constexpr std::string_view           availableLowName           = "avail-lo";
+    constexpr std::string_view           availableHighName          = "avail-hi";
+    constexpr std::string_view           needsPermissionName        = "exact";
+    constexpr std::string_view           fallbackName               = "fallback";
+    constexpr std::string_view           unavailableName            = "gone";
+    constexpr std::string_view           unavailableReason          = "probe said no";
+    constexpr std::string_view           targetClass                = "window";
+    constexpr std::string_view           flipperName                = "flipper";
+    constexpr std::string_view           flippedReason              = "flipped";
+    constexpr auto                       expectedProviderCount      = 3U;
+    constexpr auto                       firstProviderIndex         = 0U;
+    constexpr auto                       secondProviderIndex        = 1U;
+    constexpr auto                       thirdProviderIndex         = 2U;
+    constexpr auto                       expectedAttemptCount       = 1U;
+    constexpr auto                       firstAttemptIndex          = 0U;
+    constexpr auto                       firstGeneration            = 1U;
+    constexpr auto                       secondGeneration           = 2U;
+    constexpr int                        firstGenerationProbeCount  = 1;
+    constexpr int                        secondGenerationProbeCount = 2;
+    constexpr grab::core::ResolveOptions defaultOptions{};
 
     using ProviderSpec = std::tuple<std::string, grab::AvailabilityState, int>;
 
@@ -52,12 +52,12 @@ namespace
         {
             builder.add( std::make_unique<grab::test::FakeProvider>(
                 name,
-                std::vector<grab::Capability>{ kCap },
+                std::vector<grab::Capability>{ cap },
                 grab::Availability{
                     .state   = state,
-                    .reason  = state == grab::AvailabilityState::available
+                    .reason  = state == grab::AvailabilityState::Available
                                  ? ""
-                                 : std::string{ kUnavailableReason },
+                                 : std::string{ unavailableReason },
                     .quality = quality,
                 }
             ) );
@@ -72,37 +72,37 @@ TEST( Resolver,
 {
     const auto                 registry = make_registry( {
         ProviderSpec{
-                     std::string{ kDegradedHighName },
-                     grab::AvailabilityState::degraded,
-                     kQualityHigh},
+                     std::string{ degradedHighName },
+                     grab::AvailabilityState::Degraded,
+                     qualityHigh},
         ProviderSpec{
-                     std::string{ kAvailableLowName },
-                     grab::AvailabilityState::available,
-                     kQualityLow },
+                     std::string{ availableLowName },
+                     grab::AvailabilityState::Available,
+                     qualityLow },
         ProviderSpec{
-                     std::string{ kAvailableHighName },
-                     grab::AvailabilityState::available,
-                     kQualityHigh},
+                     std::string{ availableHighName },
+                     grab::AvailabilityState::Available,
+                     qualityHigh},
     } );
     const grab::core::Resolver resolver( registry );
 
     const auto                 resolution = resolver.resolve(
         grab::core::CapabilityRequest{
-            .capability   = kCap,
-            .target_class = std::string{ kTargetClass },
+            .capability   = cap,
+            .target_class = std::string{ targetClass },
             .target_key   = "",
-            .options      = kDefaultOptions,
+            .options      = defaultOptions,
         },
         grab::core::Environment{}
     );
     ASSERT_TRUE( resolution.has_value() );
-    ASSERT_EQ( resolution->chain.size(), kExpectedProviderCount );
-    EXPECT_EQ( resolution->chain.at( kFirstProviderIndex )->info().name,
-               kAvailableHighName );
-    EXPECT_EQ( resolution->chain.at( kSecondProviderIndex )->info().name,
-               kAvailableLowName );
-    EXPECT_EQ( resolution->chain.at( kThirdProviderIndex )->info().name,
-               kDegradedHighName );
+    ASSERT_EQ( resolution->chain.size(), expectedProviderCount );
+    EXPECT_EQ( resolution->chain.at( firstProviderIndex )->info().name,
+               availableHighName );
+    EXPECT_EQ( resolution->chain.at( secondProviderIndex )->info().name,
+               availableLowName );
+    EXPECT_EQ( resolution->chain.at( thirdProviderIndex )->info().name,
+               degradedHighName );
 }
 
 TEST( Resolver,
@@ -110,30 +110,30 @@ TEST( Resolver,
 {
     const auto                 registry = make_registry( {
         ProviderSpec{
-                     std::string{ kUnavailableName },
-                     grab::AvailabilityState::unavailable,
-                     kQualityHigh
+                     std::string{ unavailableName },
+                     grab::AvailabilityState::Unavailable,
+                     qualityHigh
         },
     } );
     const grab::core::Resolver resolver( registry );
 
     const auto                 resolution = resolver.resolve(
         grab::core::CapabilityRequest{
-            .capability   = kCap,
-            .target_class = std::string{ kTargetClass },
+            .capability   = cap,
+            .target_class = std::string{ targetClass },
             .target_key   = "",
-            .options      = kDefaultOptions,
+            .options      = defaultOptions,
         },
         grab::core::Environment{}
     );
     ASSERT_FALSE( resolution.has_value() );
-    EXPECT_EQ( resolution.error().code, grab::ErrorCode::capability_unavailable );
-    EXPECT_EQ( resolution.error().target, kTargetClass );
-    ASSERT_EQ( resolution.error().attempts.size(), kExpectedAttemptCount );
-    EXPECT_EQ( resolution.error().attempts.at( kFirstAttemptIndex ).provider,
-               kUnavailableName );
-    EXPECT_EQ( resolution.error().attempts.at( kFirstAttemptIndex ).reason,
-               kUnavailableReason );
+    EXPECT_EQ( resolution.error().code, grab::ErrorCode::CapabilityUnavailable );
+    EXPECT_EQ( resolution.error().target, targetClass );
+    ASSERT_EQ( resolution.error().attempts.size(), expectedAttemptCount );
+    EXPECT_EQ( resolution.error().attempts.at( firstAttemptIndex ).provider,
+               unavailableName );
+    EXPECT_EQ( resolution.error().attempts.at( firstAttemptIndex ).reason,
+               unavailableReason );
 }
 
 TEST( Resolver,
@@ -141,35 +141,35 @@ TEST( Resolver,
 {
     const auto                 registry = make_registry( {
         ProviderSpec{
-                     std::string{ kNeedsPermissionName },
-                     grab::AvailabilityState::needs_permission,
-                     kQualityHigh},
+                     std::string{ needsPermissionName },
+                     grab::AvailabilityState::NeedsPermission,
+                     qualityHigh},
         ProviderSpec{
-                     std::string{ kFallbackName },
-                     grab::AvailabilityState::degraded,
-                     kQualityHigh},
+                     std::string{ fallbackName },
+                     grab::AvailabilityState::Degraded,
+                     qualityHigh},
     } );
     const grab::core::Resolver resolver( registry );
 
     auto                       resolution = resolver.resolve(
         grab::core::CapabilityRequest{
-            .capability   = kCap,
+            .capability   = cap,
             .target_class = "",
             .target_key   = "",
-            .options      = kDefaultOptions,
+            .options      = defaultOptions,
         },
         grab::core::Environment{}
     );
     ASSERT_TRUE( resolution.has_value() );
-    EXPECT_EQ( resolution->chain.at( kFirstProviderIndex )->info().name,
-               kNeedsPermissionName );
+    EXPECT_EQ( resolution->chain.at( firstProviderIndex )->info().name,
+               needsPermissionName );
 
     const grab::core::ResolveOptions prompt_averse_options{
         .prefer_permission_over_degraded = false,
     };
     resolution = resolver.resolve(
         grab::core::CapabilityRequest{
-            .capability   = kCap,
+            .capability   = cap,
             .target_class = "",
             .target_key   = "",
             .options      = prompt_averse_options,
@@ -177,7 +177,7 @@ TEST( Resolver,
         grab::core::Environment{}
     );
     ASSERT_TRUE( resolution.has_value() );
-    EXPECT_EQ( resolution->chain.at( kFirstProviderIndex )->info().name, kFallbackName );
+    EXPECT_EQ( resolution->chain.at( firstProviderIndex )->info().name, fallbackName );
 }
 
 TEST( Resolver,
@@ -189,9 +189,9 @@ TEST( Resolver,
 
             FlippingProvider() :
                 info_{
-                    .name         = std::string{ kFlipperName },
-                    .capabilities = std::vector<grab::Capability>{ kCap },
-                    .quality      = kQualityLow,
+                    .name         = std::string{ flipperName },
+                    .capabilities = std::vector<grab::Capability>{ cap },
+                    .quality      = qualityLow,
                 }
             {
             }
@@ -208,18 +208,18 @@ TEST( Resolver,
             probe( const grab::core::Environment& /*env*/ ) const override
             {
                 ++probes_;
-                if( probes_ == kFirstGenerationProbeCount )
+                if( probes_ == firstGenerationProbeCount )
                 {
                     return {
-                        .state   = grab::AvailabilityState::available,
+                        .state   = grab::AvailabilityState::Available,
                         .reason  = "",
-                        .quality = kQualityLow,
+                        .quality = qualityLow,
                     };
                 }
                 return {
-                    .state   = grab::AvailabilityState::degraded,
-                    .reason  = std::string{ kFlippedReason },
-                    .quality = kQualityLow,
+                    .state   = grab::AvailabilityState::Degraded,
+                    .reason  = std::string{ flippedReason },
+                    .quality = qualityLow,
                 };
             }
 
@@ -244,14 +244,14 @@ TEST( Resolver,
     const grab::core::Resolver resolver( registry );
 
     grab::core::Environment    env;
-    env.generation = kFirstGeneration;
+    env.generation = firstGeneration;
     ASSERT_TRUE( resolver
                      .resolve(
                          grab::core::CapabilityRequest{
-                             .capability   = kCap,
+                             .capability   = cap,
                              .target_class = "",
                              .target_key   = "",
-                             .options      = kDefaultOptions,
+                             .options      = defaultOptions,
                          },
                          env
                      )
@@ -259,40 +259,40 @@ TEST( Resolver,
     ASSERT_TRUE( resolver
                      .resolve(
                          grab::core::CapabilityRequest{
-                             .capability   = kCap,
+                             .capability   = cap,
                              .target_class = "",
                              .target_key   = "",
-                             .options      = kDefaultOptions,
+                             .options      = defaultOptions,
                          },
                          env
                      )
                      .has_value() );
-    EXPECT_EQ( flipper->probes(), kFirstGenerationProbeCount );
+    EXPECT_EQ( flipper->probes(), firstGenerationProbeCount );
 
-    env.generation        = kSecondGeneration;
+    env.generation        = secondGeneration;
     const auto resolution = resolver.resolve(
         grab::core::CapabilityRequest{
-            .capability   = kCap,
+            .capability   = cap,
             .target_class = "",
             .target_key   = "",
-            .options      = kDefaultOptions,
+            .options      = defaultOptions,
         },
         env
     );
     ASSERT_TRUE( resolution.has_value() );
-    EXPECT_EQ( resolution->best.state, grab::AvailabilityState::degraded );
-    EXPECT_EQ( resolution->best.reason, kFlippedReason );
-    EXPECT_EQ( flipper->probes(), kSecondGenerationProbeCount );
+    EXPECT_EQ( resolution->best.state, grab::AvailabilityState::Degraded );
+    EXPECT_EQ( resolution->best.reason, flippedReason );
+    EXPECT_EQ( flipper->probes(), secondGenerationProbeCount );
     ASSERT_TRUE( resolver
                      .resolve(
                          grab::core::CapabilityRequest{
-                             .capability   = kCap,
+                             .capability   = cap,
                              .target_class = "",
                              .target_key   = "",
-                             .options      = kDefaultOptions,
+                             .options      = defaultOptions,
                          },
                          env
                      )
                      .has_value() );
-    EXPECT_EQ( flipper->probes(), kSecondGenerationProbeCount );
+    EXPECT_EQ( flipper->probes(), secondGenerationProbeCount );
 }

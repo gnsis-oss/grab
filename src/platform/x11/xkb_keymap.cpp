@@ -29,42 +29,42 @@ namespace grab::platform::x11
     namespace
     {
 
-        constexpr xkb_layout_index_t kFirstLayout           = 0U;
-        constexpr xkb_level_index_t  kLevelOne              = 0U;
-        constexpr xkb_level_index_t  kLevelTwo              = 1U;
-        constexpr xkb_level_index_t  kLevelThree            = 2U;
-        constexpr xkb_level_index_t  kLevelFour             = 3U;
-        constexpr xkb_level_index_t  kExpressibleLevelCount = 4U;
-        constexpr xkb_keysym_t       kNoSymbol              = XKB_KEY_NoSymbol;
-        constexpr std::uint32_t      kFallbackShiftKeycode  = 50U;
-        constexpr std::uint32_t      kFallbackAltgrKeycode  = 92U;
-        constexpr std::uint32_t      kHexDigitCount         = 16U;
-        constexpr std::size_t        kMaxCodepointHexDigits = 8U;
-        constexpr std::string_view   kHexDigits             = "0123456789ABCDEF";
-        constexpr auto          kLayoutContextFlags  = XKB_CONTEXT_NO_ENVIRONMENT_NAMES;
-        constexpr int           kInvalidDevice       = -1;
-        constexpr std::uint8_t  kAsciiMax            = 0X7FU;
-        constexpr std::uint8_t  kContinuationMin     = 0X80U;
-        constexpr std::uint8_t  kContinuationMax     = 0XBFU;
-        constexpr std::uint8_t  kTwoByteLeadMin      = 0XC2U;
-        constexpr std::uint8_t  kTwoByteLeadMax      = 0XDFU;
-        constexpr std::uint8_t  kThreeByteLeadMin    = 0XE0U;
-        constexpr std::uint8_t  kThreeByteLeadMax    = 0XEFU;
-        constexpr std::uint8_t  kFourByteLeadMin     = 0XF0U;
-        constexpr std::uint8_t  kFourByteLeadMax     = 0XF4U;
-        constexpr std::uint32_t kTwoByteCodepointMin = 0X80U;
-        constexpr std::uint32_t kThreeByteCodepointMin = 0X8'00U;
-        constexpr std::uint32_t kFourByteCodepointMin  = 0X1'00'00U;
-        constexpr std::uint32_t kSurrogateMin          = 0XD8'00U;
-        constexpr std::uint32_t kSurrogateMax          = 0XDF'FFU;
-        constexpr std::uint32_t kMaxUnicodeCodepoint   = 0X10'FF'FFU;
-        constexpr std::uint32_t kLowSixBitsMask        = 0X3FU;
-        constexpr std::uint32_t kLowFourBitsMask       = 0X0FU;
-        constexpr std::uint32_t kLowFiveBitsMask       = 0X1FU;
-        constexpr std::uint32_t kLowThreeBitsMask      = 0X07U;
-        constexpr unsigned int  kSixBitShift           = 6U;
-        constexpr unsigned int  kTwelveBitShift        = 12U;
-        constexpr unsigned int  kEighteenBitShift      = 18U;
+        constexpr xkb_layout_index_t firstLayout           = 0U;
+        constexpr xkb_level_index_t  levelOne              = 0U;
+        constexpr xkb_level_index_t  levelTwo              = 1U;
+        constexpr xkb_level_index_t  levelThree            = 2U;
+        constexpr xkb_level_index_t  levelFour             = 3U;
+        constexpr xkb_level_index_t  expressibleLevelCount = 4U;
+        constexpr xkb_keysym_t       noSymbol              = XKB_KEY_NoSymbol;
+        constexpr std::uint32_t      fallbackShiftKeycode  = 50U;
+        constexpr std::uint32_t      fallbackAltgrKeycode  = 92U;
+        constexpr std::uint32_t      hexDigitCount         = 16U;
+        constexpr std::size_t        maxCodepointHexDigits = 8U;
+        constexpr std::string_view   hexDigits             = "0123456789ABCDEF";
+        constexpr auto          layoutContextFlags    = XKB_CONTEXT_NO_ENVIRONMENT_NAMES;
+        constexpr int           invalidDevice         = -1;
+        constexpr std::uint8_t  asciiMax              = 0X7FU;
+        constexpr std::uint8_t  continuationMin       = 0X80U;
+        constexpr std::uint8_t  continuationMax       = 0XBFU;
+        constexpr std::uint8_t  twoByteLeadMin        = 0XC2U;
+        constexpr std::uint8_t  twoByteLeadMax        = 0XDFU;
+        constexpr std::uint8_t  threeByteLeadMin      = 0XE0U;
+        constexpr std::uint8_t  threeByteLeadMax      = 0XEFU;
+        constexpr std::uint8_t  fourByteLeadMin       = 0XF0U;
+        constexpr std::uint8_t  fourByteLeadMax       = 0XF4U;
+        constexpr std::uint32_t twoByteCodepointMin   = 0X80U;
+        constexpr std::uint32_t threeByteCodepointMin = 0X8'00U;
+        constexpr std::uint32_t fourByteCodepointMin  = 0X1'00'00U;
+        constexpr std::uint32_t surrogateMin          = 0XD8'00U;
+        constexpr std::uint32_t surrogateMax          = 0XDF'FFU;
+        constexpr std::uint32_t maxUnicodeCodepoint   = 0X10'FF'FFU;
+        constexpr std::uint32_t lowSixBitsMask        = 0X3FU;
+        constexpr std::uint32_t lowFourBitsMask       = 0X0FU;
+        constexpr std::uint32_t lowFiveBitsMask       = 0X1FU;
+        constexpr std::uint32_t lowThreeBitsMask      = 0X07U;
+        constexpr unsigned int  sixBitShift           = 6U;
+        constexpr unsigned int  twelveBitShift        = 12U;
+        constexpr unsigned int  eighteenBitShift      = 18U;
 
         using XkbContextHandle =
             std::unique_ptr<xkb_context, decltype( &xkb_context_unref )>;
@@ -97,20 +97,20 @@ namespace grab::platform::x11
         std::string
         codepoint_name( char32_t codepoint )
         {
-            std::array<char, kMaxCodepointHexDigits> digits{};
-            std::size_t                              cursor = digits.size();
+            std::array<char, maxCodepointHexDigits> digits{};
+            std::size_t                             cursor = digits.size();
             auto value = static_cast<std::uint32_t>( codepoint );
             if( value == 0U )
             {
                 --cursor;
-                digits.at( cursor ) = kHexDigits.at( 0U );
+                digits.at( cursor ) = hexDigits.at( 0U );
             }
             while( value != 0U && cursor > 0U )
             {
                 --cursor;
                 digits.at( cursor ) =
-                    kHexDigits.at( static_cast<std::size_t>( value % kHexDigitCount ) );
-                value /= kHexDigitCount;
+                    hexDigits.at( static_cast<std::size_t>( value % hexDigitCount ) );
+                value /= hexDigitCount;
             }
 
             std::string name{ "U+" };
@@ -125,7 +125,7 @@ namespace grab::platform::x11
         bool
         is_continuation( std::uint8_t byte ) noexcept
         {
-            return byte >= kContinuationMin && byte <= kContinuationMax;
+            return byte >= continuationMin && byte <= continuationMax;
         }
 
         [[nodiscard]]
@@ -146,7 +146,7 @@ namespace grab::platform::x11
         {
             if( utf8.size() - offset < count )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "UTF-8 sequence is truncated at byte " +
                                        std::to_string( offset ) );
             }
@@ -155,7 +155,7 @@ namespace grab::platform::x11
             {
                 if( !is_continuation( byte_at( utf8, offset + index ) ) )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "UTF-8 continuation byte is invalid at byte " +
                                            std::to_string( offset + index ) );
                 }
@@ -173,10 +173,10 @@ namespace grab::platform::x11
             if( codepoint <
                 minimum ||
                 codepoint >
-                kMaxUnicodeCodepoint ||
-                ( codepoint >= kSurrogateMin && codepoint <= kSurrogateMax ) )
+                maxUnicodeCodepoint ||
+                ( codepoint >= surrogateMin && codepoint <= surrogateMax ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "UTF-8 codepoint is invalid at byte " +
                                        std::to_string( offset ) );
             }
@@ -192,13 +192,13 @@ namespace grab::platform::x11
             const std::size_t  start = offset;
             const std::uint8_t lead  = byte_at( utf8, offset );
 
-            if( lead <= kAsciiMax )
+            if( lead <= asciiMax )
             {
                 ++offset;
                 return static_cast<char32_t>( lead );
             }
 
-            if( lead >= kTwoByteLeadMin && lead <= kTwoByteLeadMax )
+            if( lead >= twoByteLeadMin && lead <= twoByteLeadMax )
             {
                 auto continuation = require_continuation_bytes( utf8, offset + 1U, 1U );
                 if( !continuation.has_value() )
@@ -207,14 +207,14 @@ namespace grab::platform::x11
                 }
 
                 const std::uint32_t codepoint =
-                    ( static_cast<std::uint32_t>( lead & kLowFiveBitsMask )
-                      << kSixBitShift ) |
-                    ( byte_at( utf8, offset + 1U ) & kLowSixBitsMask );
+                    ( static_cast<std::uint32_t>( lead & lowFiveBitsMask )
+                      << sixBitShift ) |
+                    ( byte_at( utf8, offset + 1U ) & lowSixBitsMask );
                 offset += 2U;
-                return validate_codepoint( codepoint, kTwoByteCodepointMin, start );
+                return validate_codepoint( codepoint, twoByteCodepointMin, start );
             }
 
-            if( lead >= kThreeByteLeadMin && lead <= kThreeByteLeadMax )
+            if( lead >= threeByteLeadMin && lead <= threeByteLeadMax )
             {
                 auto continuation = require_continuation_bytes( utf8, offset + 1U, 2U );
                 if( !continuation.has_value() )
@@ -223,17 +223,17 @@ namespace grab::platform::x11
                 }
 
                 const std::uint32_t codepoint =
-                    ( static_cast<std::uint32_t>( lead & kLowFourBitsMask )
-                      << kTwelveBitShift ) |
+                    ( static_cast<std::uint32_t>( lead & lowFourBitsMask )
+                      << twelveBitShift ) |
                     ( static_cast<std::uint32_t>( byte_at( utf8, offset + 1U ) &
-                                                  kLowSixBitsMask )
-                      << kSixBitShift ) |
-                    ( byte_at( utf8, offset + 2U ) & kLowSixBitsMask );
+                                                  lowSixBitsMask )
+                      << sixBitShift ) |
+                    ( byte_at( utf8, offset + 2U ) & lowSixBitsMask );
                 offset += 3U;
-                return validate_codepoint( codepoint, kThreeByteCodepointMin, start );
+                return validate_codepoint( codepoint, threeByteCodepointMin, start );
             }
 
-            if( lead >= kFourByteLeadMin && lead <= kFourByteLeadMax )
+            if( lead >= fourByteLeadMin && lead <= fourByteLeadMax )
             {
                 auto continuation = require_continuation_bytes( utf8, offset + 1U, 3U );
                 if( !continuation.has_value() )
@@ -242,20 +242,20 @@ namespace grab::platform::x11
                 }
 
                 const std::uint32_t codepoint =
-                    ( static_cast<std::uint32_t>( lead & kLowThreeBitsMask )
-                      << kEighteenBitShift ) |
+                    ( static_cast<std::uint32_t>( lead & lowThreeBitsMask )
+                      << eighteenBitShift ) |
                     ( static_cast<std::uint32_t>( byte_at( utf8, offset + 1U ) &
-                                                  kLowSixBitsMask )
-                      << kTwelveBitShift ) |
+                                                  lowSixBitsMask )
+                      << twelveBitShift ) |
                     ( static_cast<std::uint32_t>( byte_at( utf8, offset + 2U ) &
-                                                  kLowSixBitsMask )
-                      << kSixBitShift ) |
-                    ( byte_at( utf8, offset + 3U ) & kLowSixBitsMask );
+                                                  lowSixBitsMask )
+                      << sixBitShift ) |
+                    ( byte_at( utf8, offset + 3U ) & lowSixBitsMask );
                 offset += 4U;
-                return validate_codepoint( codepoint, kFourByteCodepointMin, start );
+                return validate_codepoint( codepoint, fourByteCodepointMin, start );
             }
 
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "UTF-8 leading byte is invalid at byte " +
                                    std::to_string( start ) );
         }
@@ -267,8 +267,8 @@ namespace grab::platform::x11
         {
             return grab::Keystroke{
                 .keycode = static_cast<std::uint32_t>( keycode ),
-                .shift   = level == kLevelTwo || level == kLevelFour,
-                .altgr   = level == kLevelThree || level == kLevelFour,
+                .shift   = level == levelTwo || level == levelFour,
+                .altgr   = level == levelThree || level == levelFour,
             };
         }
 
@@ -276,7 +276,7 @@ namespace grab::platform::x11
         grab::Result<grab::Keystroke>
         unsupported_character( char32_t codepoint )
         {
-            return grab::fail( grab::ErrorCode::unsupported_character,
+            return grab::fail( grab::ErrorCode::UnsupportedCharacter,
                                "unsupported character " + codepoint_name( codepoint ) );
         }
 
@@ -288,11 +288,11 @@ namespace grab::platform::x11
         {
             const xkb_layout_index_t layouts =
                 xkb_keymap_num_layouts_for_key( keymap, keycode );
-            for( xkb_layout_index_t layout = kFirstLayout; layout < layouts; ++layout )
+            for( xkb_layout_index_t layout = firstLayout; layout < layouts; ++layout )
             {
                 const xkb_level_index_t levels =
                     xkb_keymap_num_levels_for_key( keymap, keycode, layout );
-                for( xkb_level_index_t level = kLevelOne; level < levels; ++level )
+                for( xkb_level_index_t level = levelOne; level < levels; ++level )
                 {
                     const xkb_keysym_t* symbols = nullptr;
                     const int           symbol_count =
@@ -393,13 +393,13 @@ namespace grab::platform::x11
                 {
                     if( keymap_ == nullptr )
                     {
-                        return grab::fail( grab::ErrorCode::internal_fault,
+                        return grab::fail( grab::ErrorCode::InternalFault,
                                            "xkb keymap is not open" );
                     }
 
                     const auto keysym =
                         xkb_utf32_to_keysym( static_cast<std::uint32_t>( codepoint ) );
-                    if( keysym == kNoSymbol )
+                    if( keysym == noSymbol )
                     {
                         return unsupported_character( codepoint );
                     }
@@ -420,7 +420,7 @@ namespace grab::platform::x11
                     const xkb_keysym_t keysym =
                         xkb_keysym_from_name( name_storage.c_str(),
                                               XKB_KEYSYM_NO_FLAGS );
-                    if( keysym == kNoSymbol )
+                    if( keysym == noSymbol )
                     {
                         return std::nullopt;
                     }
@@ -433,7 +433,7 @@ namespace grab::platform::x11
                 {
                     return keycode_for_keysym( keymap_.get(),
                                                XKB_KEY_Shift_L,
-                                               kFallbackShiftKeycode );
+                                               fallbackShiftKeycode );
                 }
 
                 [[nodiscard]]
@@ -442,7 +442,7 @@ namespace grab::platform::x11
                 {
                     return keycode_for_keysym( keymap_.get(),
                                                XKB_KEY_ISO_Level3_Shift,
-                                               kFallbackAltgrKeycode );
+                                               fallbackAltgrKeycode );
                 }
 
             private:
@@ -483,9 +483,9 @@ namespace grab::platform::x11
                         const xkb_level_index_t levels =
                             std::min( xkb_keymap_num_levels_for_key( keymap_.get(),
                                                                      keycode,
-                                                                     kFirstLayout ),
-                                      kExpressibleLevelCount );
-                        for( xkb_level_index_t level = kLevelOne; level < levels;
+                                                                     firstLayout ),
+                                      expressibleLevelCount );
+                        for( xkb_level_index_t level = levelOne; level < levels;
                              ++level )
                         {
                             record_keysyms( keycode, level );
@@ -501,7 +501,7 @@ namespace grab::platform::x11
                     const int           symbol_count =
                         xkb_keymap_key_get_syms_by_level( keymap_.get(),
                                                           keycode,
-                                                          kFirstLayout,
+                                                          firstLayout,
                                                           level,
                                                           &symbols );
                     if( symbol_count <= 0 || symbols == nullptr )
@@ -515,7 +515,7 @@ namespace grab::platform::x11
                     };
                     for( const xkb_keysym_t keysym : keysyms )
                     {
-                        if( keysym == kNoSymbol || reverse_.contains( keysym ) )
+                        if( keysym == noSymbol || reverse_.contains( keysym ) )
                         {
                             continue;
                         }
@@ -536,10 +536,10 @@ namespace grab::platform::x11
     grab::Result<grab::Keymap>
     make_keymap_from_layout( std::string_view layout )
     {
-        auto context = take_context( xkb_context_new( kLayoutContextFlags ) );
+        auto context = take_context( xkb_context_new( layoutContextFlags ) );
         if( context == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
+            return grab::fail( grab::ErrorCode::InternalFault,
                                "xkb context allocation failed" );
         }
 
@@ -558,7 +558,7 @@ namespace grab::platform::x11
                                                     XKB_KEYMAP_COMPILE_NO_FLAGS ) );
         if( keymap == nullptr )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "xkb keymap compile failed for layout " + layout_name );
         }
 
@@ -575,7 +575,7 @@ namespace grab::platform::x11
         auto context = take_context( xkb_context_new( XKB_CONTEXT_NO_FLAGS ) );
         if( context == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
+            return grab::fail( grab::ErrorCode::InternalFault,
                                "failed to create XKB context" );
         }
 
@@ -590,14 +590,14 @@ namespace grab::platform::x11
                                          nullptr );
         if( setup == 0 )
         {
-            return grab::fail( grab::ErrorCode::capability_unavailable,
+            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
                                "XKB extension is unavailable on the X display" );
         }
 
         const int device_id = xkb_x11_get_core_keyboard_device_id( conn.get() );
-        if( device_id == kInvalidDevice )
+        if( device_id == invalidDevice )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "failed to resolve the XKB core keyboard device" );
         }
 
@@ -608,7 +608,7 @@ namespace grab::platform::x11
                                                          XKB_KEYMAP_COMPILE_NO_FLAGS ) );
         if( keymap == nullptr )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "failed to load the X server keymap" );
         }
 
@@ -617,7 +617,7 @@ namespace grab::platform::x11
         );
         if( state == nullptr )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "failed to load the X server keyboard state" );
         }
 

@@ -34,24 +34,24 @@
 namespace
 {
 
-    constexpr std::string_view kUnixEndpointPrefix  = "unix:";
-    constexpr std::string_view kSocketStem          = "grab-event-service-";
-    constexpr std::string_view kNameSeparator       = "-";
-    constexpr std::string_view kUnknownTestName     = "unknown";
-    constexpr std::string_view kSocketExtension     = ".sock";
-    constexpr auto             kUnaryDeadline       = std::chrono::seconds{ 2 };
-    constexpr auto             kStreamDeadline      = std::chrono::seconds{ 5 };
-    constexpr auto             kStreamReadyTimeout  = std::chrono::seconds{ 2 };
-    constexpr auto             kStreamResultTimeout = std::chrono::seconds{ 2 };
-    constexpr auto             kNoEventWindow       = std::chrono::milliseconds{ 200 };
-    constexpr double           kEventTimestamp      = 1729.25;
-    constexpr std::uint64_t    kNoSequence          = 0U;
-    constexpr std::uint32_t    kKeyDownCode         = 30U;
-    constexpr std::uint32_t    kKeyUpCode           = 31U;
-    constexpr std::string_view kKeyDownName         = "A";
-    constexpr std::string_view kKeyUpName           = "B";
-    constexpr auto             kInvalidArgumentCode = grpc::StatusCode::INVALID_ARGUMENT;
-    constexpr auto             kCancelledCode       = grpc::StatusCode::CANCELLED;
+    constexpr std::string_view unixEndpointPrefix  = "unix:";
+    constexpr std::string_view socketStem          = "grab-event-service-";
+    constexpr std::string_view nameSeparator       = "-";
+    constexpr std::string_view unknownTestName     = "unknown";
+    constexpr std::string_view socketExtension     = ".sock";
+    constexpr auto             unaryDeadline       = std::chrono::seconds{ 2 };
+    constexpr auto             streamDeadline      = std::chrono::seconds{ 5 };
+    constexpr auto             streamReadyTimeout  = std::chrono::seconds{ 2 };
+    constexpr auto             streamResultTimeout = std::chrono::seconds{ 2 };
+    constexpr auto             noEventWindow       = std::chrono::milliseconds{ 200 };
+    constexpr double           eventTimestamp      = 1729.25;
+    constexpr std::uint64_t    noSequence          = 0U;
+    constexpr std::uint32_t    keyDownCode         = 30U;
+    constexpr std::uint32_t    keyUpCode           = 31U;
+    constexpr std::string_view keyDownName         = "A";
+    constexpr std::string_view keyUpName           = "B";
+    constexpr auto             invalidArgumentCode = grpc::StatusCode::INVALID_ARGUMENT;
+    constexpr auto             cancelledCode       = grpc::StatusCode::CANCELLED;
 
     [[nodiscard]]
     std::string
@@ -61,16 +61,16 @@ namespace
             ::testing::UnitTest::GetInstance()->current_test_info();
         if( test_info == nullptr )
         {
-            return std::string{ kSocketStem } +
-                   std::string{ kUnknownTestName } +
-                   std::string{ kSocketExtension };
+            return std::string{ socketStem } +
+                   std::string{ unknownTestName } +
+                   std::string{ socketExtension };
         }
 
-        return std::string{ kSocketStem } +
+        return std::string{ socketStem } +
                test_info->test_suite_name() +
-               std::string{ kNameSeparator } +
+               std::string{ nameSeparator } +
                test_info->name() +
-               std::string{ kSocketExtension };
+               std::string{ socketExtension };
     }
 
     [[nodiscard]]
@@ -95,7 +95,7 @@ namespace
 
             UnixEndpoint() :
                 path_( socket_path() ),
-                endpoint_( std::string{ kUnixEndpointPrefix } + path_.string() )
+                endpoint_( std::string{ unixEndpointPrefix } + path_.string() )
             {
                 remove_if_present( path_ );
             }
@@ -198,8 +198,8 @@ namespace
                     std::string_view name )
     {
         return grab::Event{
-            .timestamp = kEventTimestamp,
-            .sequence  = kNoSequence,
+            .timestamp = eventTimestamp,
+            .sequence  = noSequence,
             .kind      = kind,
             .category  = grab::category_of( kind ),
             .payload   = grab::Payload{ grab::InputKey{
@@ -227,7 +227,7 @@ namespace
     key_down_wire()
     {
         return make_wire_event(
-            make_key_event( grab::EventKind::key_down, kKeyDownCode, kKeyDownName )
+            make_key_event( grab::EventKind::KeyDown, keyDownCode, keyDownName )
         );
     }
 
@@ -236,7 +236,7 @@ namespace
     key_up_wire()
     {
         return make_wire_event(
-            make_key_event( grab::EventKind::key_up, kKeyUpCode, kKeyUpName )
+            make_key_event( grab::EventKind::KeyUp, keyUpCode, keyUpName )
         );
     }
 
@@ -336,7 +336,7 @@ namespace
                      const eventgrab::v1::Event&            wire )
     {
         grpc::ClientContext context;
-        context.set_deadline( std::chrono::system_clock::now() + kUnaryDeadline );
+        context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
 
         eventgrab::v1::PushEventRequest  request;
         eventgrab::v1::PushEventResponse response;
@@ -352,7 +352,7 @@ namespace
         RunningSubscribe running;
         running.context = std::make_unique<grpc::ClientContext>();
         running.context->set_deadline( std::chrono::system_clock::now() +
-                                       kStreamDeadline );
+                                       streamDeadline );
 
         std::promise<void>             ready_promise;
         std::promise<StreamReadResult> result_promise;
@@ -394,7 +394,7 @@ namespace
     StreamReadResult
     finish_subscription( RunningSubscribe& subscriber )
     {
-        if( subscriber.result.wait_for( kStreamResultTimeout ) !=
+        if( subscriber.result.wait_for( streamResultTimeout ) !=
             std::future_status::ready )
         {
             subscriber.cancel();
@@ -451,7 +451,7 @@ namespace
     bool
     stream_finished_cleanly( const grpc::Status& status ) noexcept
     {
-        return status.ok() || status.error_code() == kCancelledCode;
+        return status.ok() || status.error_code() == cancelledCode;
     }
 
 }    // namespace
@@ -465,7 +465,7 @@ TEST( EventService,
 
     const eventgrab::v1::EventFilter filter;
     auto subscriber = start_subscribe( server.stub(), filter );
-    ASSERT_EQ( subscriber.ready.wait_for( kStreamReadyTimeout ),
+    ASSERT_EQ( subscriber.ready.wait_for( streamReadyTimeout ),
                std::future_status::ready );
 
     const auto expected = key_down_wire();
@@ -487,17 +487,17 @@ TEST( EventService,
 
     const eventgrab::v1::EventFilter filter;
     auto subscriber = start_subscribe( server.stub(), filter );
-    ASSERT_EQ( subscriber.ready.wait_for( kStreamReadyTimeout ),
+    ASSERT_EQ( subscriber.ready.wait_for( streamReadyTimeout ),
                std::future_status::ready );
 
     eventgrab::v1::Event malformed;
     malformed.set_kind( eventgrab::v1::EVENT_KIND_UNSPECIFIED );
     malformed.set_category( eventgrab::v1::EVENT_CATEGORY_INPUT );
-    malformed.set_timestamp( kEventTimestamp );
+    malformed.set_timestamp( eventTimestamp );
 
     const auto status = push_wire_event( server.stub(), malformed );
-    EXPECT_EQ( status.error_code(), kInvalidArgumentCode );
-    EXPECT_EQ( subscriber.result.wait_for( kNoEventWindow ),
+    EXPECT_EQ( status.error_code(), invalidArgumentCode );
+    EXPECT_EQ( subscriber.result.wait_for( noEventWindow ),
                std::future_status::timeout );
 
     subscriber.cancel();
@@ -516,12 +516,12 @@ TEST( EventService,
     eventgrab::v1::EventFilter filter;
     filter.add_kinds( eventgrab::v1::INPUT_KEY_DOWN );
     auto subscriber = start_subscribe( server.stub(), filter );
-    ASSERT_EQ( subscriber.ready.wait_for( kStreamReadyTimeout ),
+    ASSERT_EQ( subscriber.ready.wait_for( streamReadyTimeout ),
                std::future_status::ready );
 
     const auto ignored_status = push_wire_event( server.stub(), key_up_wire() );
     ASSERT_TRUE( ignored_status.ok() ) << ignored_status.error_message();
-    EXPECT_EQ( subscriber.result.wait_for( kNoEventWindow ),
+    EXPECT_EQ( subscriber.result.wait_for( noEventWindow ),
                std::future_status::timeout );
 
     const auto expected         = key_down_wire();
@@ -542,7 +542,7 @@ TEST( EventService,
     ASSERT_TRUE( server.started() );
 
     grpc::ClientContext context;
-    context.set_deadline( std::chrono::system_clock::now() + kUnaryDeadline );
+    context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
 
     const eventgrab::v1::ListEventTypesRequest request;
     eventgrab::v1::ListEventTypesResponse      response;
@@ -572,7 +572,7 @@ TEST( EventService,
 
     const eventgrab::v1::EventFilter filter;
     auto subscriber = start_subscribe( server.stub(), filter );
-    ASSERT_EQ( subscriber.ready.wait_for( kStreamReadyTimeout ),
+    ASSERT_EQ( subscriber.ready.wait_for( streamReadyTimeout ),
                std::future_status::ready );
 
     subscriber.cancel();

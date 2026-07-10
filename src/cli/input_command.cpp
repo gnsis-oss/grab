@@ -102,14 +102,14 @@ namespace grab::cli
         {
             if( index >= args.size() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "argument is missing" );
             }
 
             const char* const value = args.subspan( index, single_arg_count ).front();
             if( value == nullptr )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "argument is null" );
             }
             return std::string_view{ value };
@@ -129,14 +129,14 @@ namespace grab::cli
             const std::size_t value_index = index + value_offset;
             if( value_index >= args.size() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ *flag } + " requires a value" );
             }
 
             auto value = read_arg( args, value_index );
             if( !value.has_value() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ *flag } + " value is null" );
             }
 
@@ -152,8 +152,7 @@ namespace grab::cli
         {
             if( input.empty() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
-                                   "button is empty" );
+                return grab::fail( grab::ErrorCode::InvalidArgument, "button is empty" );
             }
 
             std::uint32_t     value = 0U;
@@ -163,13 +162,13 @@ namespace grab::cli
             const auto        parsed = std::from_chars( first, last, value );
             if( parsed.ec != std::errc{} || parsed.ptr != last )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "button contains an invalid number" );
             }
 
             auto button =
                 grab::checked_cast<std::uint8_t>( value,
-                                                  grab::ErrorCode::invalid_argument,
+                                                  grab::ErrorCode::InvalidArgument,
                                                   "button is out of range" );
             if( !button.has_value() )
             {
@@ -213,7 +212,7 @@ namespace grab::cli
         {
             if( !options.has_window )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--window is required" );
             }
             return {};
@@ -260,7 +259,7 @@ namespace grab::cli
                 options.button = *button;
                 return {};
             }
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown click argument: " + std::string{ option.flag } );
         }
 
@@ -279,7 +278,7 @@ namespace grab::cli
                 options.has_text = true;
                 return {};
             }
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown type argument: " + std::string{ option.flag } );
         }
 
@@ -298,7 +297,7 @@ namespace grab::cli
                 options.has_keysym = true;
                 return {};
             }
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown key argument: " + std::string{ option.flag } );
         }
 
@@ -334,7 +333,7 @@ namespace grab::cli
                 options.has_destination = true;
                 return {};
             }
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown drag-curve argument: " +
                                    std::string{ option.flag } );
         }
@@ -381,12 +380,12 @@ namespace grab::cli
             }
             if( !options->has_fx )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--fx is required" );
             }
             if( !options->has_fy )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--fy is required" );
             }
             return *options;
@@ -408,7 +407,7 @@ namespace grab::cli
             }
             if( !options->has_text )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--text is required" );
             }
             return *options;
@@ -430,7 +429,7 @@ namespace grab::cli
             }
             if( !options->has_keysym )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--keysym is required" );
             }
             return *options;
@@ -453,12 +452,12 @@ namespace grab::cli
             }
             if( !options->has_source )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--src is required" );
             }
             if( !options->has_destination )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--dst is required" );
             }
             return *options;
@@ -526,11 +525,11 @@ namespace grab::cli
             {
                 if( is_known_keysym_name( name ) )
                 {
-                    return grab::fail( grab::ErrorCode::unsupported_character,
+                    return grab::fail( grab::ErrorCode::UnsupportedCharacter,
                                        "keysym is not present in keymap: " +
                                            std::string{ name } );
                 }
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "unknown keysym: " + std::string{ name } );
             }
             return {};

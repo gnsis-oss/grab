@@ -30,9 +30,9 @@ namespace
             .provider          = "fake",
             .endpoint          = ":wl-7",
             .control_socket    = "/run/grab/ai.sock",
-            .mode              = grab::SessionMode::offscreen,
+            .mode              = grab::SessionMode::Offscreen,
             .geometry          = geometry,
-            .state             = grab::SessionState::ready,
+            .state             = grab::SessionState::Ready,
             .supervisor_pid    = grab::Pid{ pid },
             .created_monotonic = created,
         };
@@ -61,5 +61,5 @@ TEST( SessionRecord,
 {
     const auto parsed = grab::session::parse_record( R"({"name":"ai"})" );
     ASSERT_FALSE( parsed.has_value() );
-    EXPECT_EQ( parsed.error().code, grab::ErrorCode::protocol_error );
+    EXPECT_EQ( parsed.error().code, grab::ErrorCode::ProtocolError );
 }

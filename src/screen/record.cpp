@@ -42,27 +42,27 @@ namespace grab::screen
     namespace
     {
 
-        constexpr std::uint32_t kNoFrameLimit          = 0U;
-        constexpr std::uint32_t kNoFramesWritten       = 0U;
-        constexpr std::uint32_t kMinimumFrameRate      = 1U;
-        constexpr std::int64_t  kNoPacketDuration      = 0;
-        constexpr std::int64_t  kSingleFrameDuration   = 1;
-        constexpr std::int64_t  kFirstPresentationTime = 0;
-        constexpr std::int64_t  kDefaultBitRate        = 2'000'000;
-        constexpr int           kLibavSuccess          = 0;
-        constexpr int           kNoBFrames             = 0;
-        constexpr int           kFrameAlignment        = 32;
-        constexpr int           kScaleSourcePlane      = 0;
-        constexpr int           kNoOutputContextFlags  = 0;
-        constexpr int64_t       kNanosecondsPerSecond  = 1'000'000'000;
-        constexpr auto          kNoTimerDelay          = std::chrono::nanoseconds{ 0 };
-        constexpr AVPixelFormat kEncoderPixelFormat    = AV_PIX_FMT_YUV420P;
-        constexpr AVCodecID     kPrimaryCodec          = AV_CODEC_ID_H264;
-        constexpr AVCodecID     kFallbackCodec         = AV_CODEC_ID_MPEG4;
-        constexpr const char*   kH264PresetName        = "preset";
-        constexpr const char*   kH264PresetValue       = "ultrafast";
-        constexpr const char*   kH264TuneName          = "tune";
-        constexpr const char*   kH264TuneValue         = "zerolatency";
+        constexpr std::uint32_t noFrameLimit          = 0U;
+        constexpr std::uint32_t noFramesWritten       = 0U;
+        constexpr std::uint32_t minimumFrameRate      = 1U;
+        constexpr std::int64_t  noPacketDuration      = 0;
+        constexpr std::int64_t  singleFrameDuration   = 1;
+        constexpr std::int64_t  firstPresentationTime = 0;
+        constexpr std::int64_t  defaultBitRate        = 2'000'000;
+        constexpr int           libavSuccess          = 0;
+        constexpr int           noBFrames             = 0;
+        constexpr int           frameAlignment        = 32;
+        constexpr int           scaleSourcePlane      = 0;
+        constexpr int           noOutputContextFlags  = 0;
+        constexpr int64_t       nanosecondsPerSecond  = 1'000'000'000;
+        constexpr auto          noTimerDelay          = std::chrono::nanoseconds{ 0 };
+        constexpr AVPixelFormat encoderPixelFormat    = AV_PIX_FMT_YUV420P;
+        constexpr AVCodecID     primaryCodec          = AV_CODEC_ID_H264;
+        constexpr AVCodecID     fallbackCodec         = AV_CODEC_ID_MPEG4;
+        constexpr const char*   h264PresetName        = "preset";
+        constexpr const char*   h264PresetValue       = "ultrafast";
+        constexpr const char*   h264TuneName          = "tune";
+        constexpr const char*   h264TuneValue         = "zerolatency";
 
         struct EncoderSelection
         {
@@ -74,7 +74,7 @@ namespace grab::screen
         libav_error_message( int code )
         {
             std::array<char, AV_ERROR_MAX_STRING_SIZE> buffer{};
-            if( av_strerror( code, buffer.data(), buffer.size() ) < kLibavSuccess )
+            if( av_strerror( code, buffer.data(), buffer.size() ) < libavSuccess )
             {
                 return "unknown libav error " + std::to_string( code );
             }
@@ -112,7 +112,7 @@ namespace grab::screen
         exception_error( std::string_view      step,
                          const std::exception& exception )
         {
-            return make_error( grab::ErrorCode::internal_fault,
+            return make_error( grab::ErrorCode::InternalFault,
                                std::string{ step } + ": " + exception.what() );
         }
 
@@ -123,7 +123,7 @@ namespace grab::screen
         {
             if( value > static_cast<std::uint32_t>( std::numeric_limits<int>::max() ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ name } + " exceeds libav limits" );
             }
             return static_cast<int>( value );
@@ -135,23 +135,23 @@ namespace grab::screen
         {
             switch( format )
             {
-                case grab::PixelFormat::bgra :
+                case grab::PixelFormat::Bgra :
                     return AV_PIX_FMT_BGRA;
-                case grab::PixelFormat::rgba :
+                case grab::PixelFormat::Rgba :
                     return AV_PIX_FMT_RGBA;
-                case grab::PixelFormat::rgb :
+                case grab::PixelFormat::Rgb :
                     return AV_PIX_FMT_RGB24;
-                case grab::PixelFormat::bgr :
+                case grab::PixelFormat::Bgr :
                     return AV_PIX_FMT_BGR24;
-                case grab::PixelFormat::rgb24 :
+                case grab::PixelFormat::Rgb24 :
                     return AV_PIX_FMT_RGB24;
-                case grab::PixelFormat::bgr0 :
+                case grab::PixelFormat::Bgr0 :
                     return AV_PIX_FMT_BGR0;
-                case grab::PixelFormat::gray :
+                case grab::PixelFormat::Gray :
                     return AV_PIX_FMT_GRAY8;
             }
 
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unsupported capture pixel format" );
         }
 
@@ -161,7 +161,7 @@ namespace grab::screen
         {
             if( image.empty() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "recording frame must be non-empty" );
             }
 
@@ -170,7 +170,7 @@ namespace grab::screen
                 static_cast<std::size_t>( grab::bytes_per_pixel( image.format ) );
             if( image.stride < min_stride )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "capture frame stride is shorter than its pixels" );
             }
 
@@ -178,14 +178,14 @@ namespace grab::screen
                                        static_cast<std::size_t>( image.height );
             if( image.pixels.size() < required_size )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "capture frame storage is shorter than expected" );
             }
 
             if( image.stride >
                 static_cast<std::uint32_t>( std::numeric_limits<int>::max() ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "capture frame stride exceeds libav limits" );
             }
 
@@ -197,7 +197,7 @@ namespace grab::screen
         interval_for_fps( std::uint32_t fps ) noexcept
         {
             return std::chrono::nanoseconds{
-                kNanosecondsPerSecond / static_cast<int64_t>( fps )
+                nanosecondsPerSecond / static_cast<int64_t>( fps )
             };
         }
 
@@ -210,17 +210,17 @@ namespace grab::screen
                                                                        nullptr,
                                                                        nullptr,
                                                                        path.c_str() );
-            if( result < kLibavSuccess || context == nullptr )
+            if( result < libavSuccess || context == nullptr )
             {
-                if( result < kLibavSuccess )
+                if( result < libavSuccess )
                 {
                     return std::unexpected(
-                        libav_error( grab::ErrorCode::invalid_argument,
+                        libav_error( grab::ErrorCode::InvalidArgument,
                                      "guess output media format",
                                      result )
                     );
                 }
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "could not guess output media format" );
             }
             return context;
@@ -237,14 +237,14 @@ namespace grab::screen
             const AVCodec* const codec = avcodec_find_encoder( codec_id );
             if( codec == nullptr )
             {
-                return grab::fail( grab::ErrorCode::capability_unavailable,
+                return grab::fail( grab::ErrorCode::CapabilityUnavailable,
                                    "requested libav encoder is unavailable" );
             }
 
             auto* context = avcodec_alloc_context3( codec );
             if( context == nullptr )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    "could not allocate libav encoder context" );
             }
 
@@ -271,14 +271,14 @@ namespace grab::screen
 
             context->codec_id     = codec_id;
             context->codec_type   = AVMEDIA_TYPE_VIDEO;
-            context->bit_rate     = kDefaultBitRate;
+            context->bit_rate     = defaultBitRate;
             context->width        = *width_int;
             context->height       = *height_int;
             context->time_base    = AVRational{ .num = 1, .den = *fps_int };
             context->framerate    = AVRational{ .num = *fps_int, .den = 1 };
             context->gop_size     = *fps_int;
-            context->max_b_frames = kNoBFrames;
-            context->pix_fmt      = kEncoderPixelFormat;
+            context->max_b_frames = noBFrames;
+            context->pix_fmt      = encoderPixelFormat;
             if( global_header )
             {
                 context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -287,22 +287,22 @@ namespace grab::screen
             if( codec_id == AV_CODEC_ID_H264 )
             {
                 const int preset_result = av_opt_set( context->priv_data,
-                                                      kH264PresetName,
-                                                      kH264PresetValue,
-                                                      kNoOutputContextFlags );
+                                                      h264PresetName,
+                                                      h264PresetValue,
+                                                      noOutputContextFlags );
                 const int tune_result   = av_opt_set( context->priv_data,
-                                                      kH264TuneName,
-                                                      kH264TuneValue,
-                                                      kNoOutputContextFlags );
+                                                      h264TuneName,
+                                                      h264TuneValue,
+                                                      noOutputContextFlags );
                 static_cast<void>( preset_result );
                 static_cast<void>( tune_result );
             }
 
             const int open_result = avcodec_open2( context, codec, nullptr );
-            if( open_result < kLibavSuccess )
+            if( open_result < libavSuccess )
             {
                 avcodec_free_context( &context );
-                return std::unexpected( libav_error( grab::ErrorCode::provider_failed,
+                return std::unexpected( libav_error( grab::ErrorCode::ProviderFailed,
                                                      "open libav encoder",
                                                      open_result ) );
             }
@@ -318,7 +318,7 @@ namespace grab::screen
                                 bool          global_header )
         {
             auto primary =
-                open_encoder_context( kPrimaryCodec, width, height, fps, global_header );
+                open_encoder_context( primaryCodec, width, height, fps, global_header );
             if( primary.has_value() )
             {
                 return EncoderSelection{
@@ -326,11 +326,8 @@ namespace grab::screen
                 };
             }
 
-            auto fallback = open_encoder_context( kFallbackCodec,
-                                                  width,
-                                                  height,
-                                                  fps,
-                                                  global_header );
+            auto fallback =
+                open_encoder_context( fallbackCodec, width, height, fps, global_header );
             if( fallback.has_value() )
             {
                 return EncoderSelection{
@@ -339,7 +336,7 @@ namespace grab::screen
             }
 
             return std::unexpected(
-                make_error( grab::ErrorCode::capability_unavailable,
+                make_error( grab::ErrorCode::CapabilityUnavailable,
                             "no supported libav video encoder is available: " +
                                 primary.error().message +
                                 "; fallback: " +
@@ -351,14 +348,14 @@ namespace grab::screen
         bool
         format_needs_file_io( const AVOutputFormat& format ) noexcept
         {
-            return ( format.flags & AVFMT_NOFILE ) == kNoOutputContextFlags;
+            return ( format.flags & AVFMT_NOFILE ) == noOutputContextFlags;
         }
 
         [[nodiscard]]
         bool
         format_needs_global_header( const AVOutputFormat& format ) noexcept
         {
-            return ( format.flags & AVFMT_GLOBALHEADER ) != kNoOutputContextFlags;
+            return ( format.flags & AVFMT_GLOBALHEADER ) != noOutputContextFlags;
         }
 
     }    // namespace
@@ -416,14 +413,14 @@ namespace grab::screen
 
                 if( options.path.empty() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "recording output path must be non-empty" );
                 }
 
-                if( options.fps < kMinimumFrameRate )
+                if( options.fps < minimumFrameRate )
                 {
                     return grab::fail(
-                        grab::ErrorCode::invalid_argument,
+                        grab::ErrorCode::InvalidArgument,
                         "recording frame rate must be greater than zero"
                     );
                 }
@@ -445,8 +442,8 @@ namespace grab::screen
                 source_pix  = *source_format;
                 interval    = interval_for_fps( options.fps );
                 max_frames  = options.max_frames;
-                next_pts    = kFirstPresentationTime;
-                frame_count = kNoFramesWritten;
+                next_pts    = firstPresentationTime;
+                frame_count = noFramesWritten;
 
                 auto output = allocate_output_context( options.path );
                 if( !output.has_value() )
@@ -470,17 +467,17 @@ namespace grab::screen
                 stream        = avformat_new_stream( format_context, nullptr );
                 if( stream == nullptr )
                 {
-                    return grab::fail( grab::ErrorCode::internal_fault,
+                    return grab::fail( grab::ErrorCode::InternalFault,
                                        "could not allocate output video stream" );
                 }
                 stream->time_base = codec_context->time_base;
 
                 const int parameters_result =
                     avcodec_parameters_from_context( stream->codecpar, codec_context );
-                if( parameters_result < kLibavSuccess )
+                if( parameters_result < libavSuccess )
                 {
                     return std::unexpected(
-                        libav_error( grab::ErrorCode::provider_failed,
+                        libav_error( grab::ErrorCode::ProviderFailed,
                                      "copy encoder parameters to output stream",
                                      parameters_result )
                     );
@@ -501,7 +498,7 @@ namespace grab::screen
                 packet = av_packet_alloc();
                 if( packet == nullptr )
                 {
-                    return grab::fail( grab::ErrorCode::internal_fault,
+                    return grab::fail( grab::ErrorCode::InternalFault,
                                        "could not allocate libav packet" );
                 }
 
@@ -547,7 +544,7 @@ namespace grab::screen
                 ++frame_count;
                 ++next_pts;
 
-                if( max_frames != kNoFrameLimit && frame_count >= max_frames )
+                if( max_frames != noFrameLimit && frame_count >= max_frames )
                 {
                     auto finished = finish_locked();
                     if( !finished.has_value() )
@@ -633,10 +630,10 @@ namespace grab::screen
                     const int open_result = avio_open( &format_context->pb,
                                                        options.path.c_str(),
                                                        AVIO_FLAG_WRITE );
-                    if( open_result < kLibavSuccess )
+                    if( open_result < libavSuccess )
                     {
                         return std::unexpected(
-                            libav_error( grab::ErrorCode::device_inaccessible,
+                            libav_error( grab::ErrorCode::DeviceInaccessible,
                                          "open output media file",
                                          open_result )
                         );
@@ -645,13 +642,11 @@ namespace grab::screen
 
                 const int header_result =
                     avformat_write_header( format_context, nullptr );
-                if( header_result < kLibavSuccess )
+                if( header_result < libavSuccess )
                 {
-                    return std::unexpected(
-                        libav_error( grab::ErrorCode::provider_failed,
-                                     "write output media header",
-                                     header_result )
-                    );
+                    return std::unexpected( libav_error( grab::ErrorCode::ProviderFailed,
+                                                         "write output media header",
+                                                         header_result ) );
                 }
                 header_written = true;
                 return {};
@@ -664,7 +659,7 @@ namespace grab::screen
                 frame = av_frame_alloc();
                 if( frame == nullptr )
                 {
-                    return grab::fail( grab::ErrorCode::internal_fault,
+                    return grab::fail( grab::ErrorCode::InternalFault,
                                        "could not allocate libav frame" );
                 }
 
@@ -682,10 +677,10 @@ namespace grab::screen
                 frame->format           = static_cast<int>( codec_context->pix_fmt );
                 frame->width            = *width_int;
                 frame->height           = *height_int;
-                const int buffer_result = av_frame_get_buffer( frame, kFrameAlignment );
-                if( buffer_result < kLibavSuccess )
+                const int buffer_result = av_frame_get_buffer( frame, frameAlignment );
+                if( buffer_result < libavSuccess )
                 {
-                    return std::unexpected( libav_error( grab::ErrorCode::internal_fault,
+                    return std::unexpected( libav_error( grab::ErrorCode::InternalFault,
                                                          "allocate libav frame buffers",
                                                          buffer_result ) );
                 }
@@ -719,7 +714,7 @@ namespace grab::screen
                                          nullptr );
                 if( scaler == nullptr )
                 {
-                    return grab::fail( grab::ErrorCode::provider_failed,
+                    return grab::fail( grab::ErrorCode::ProviderFailed,
                                        "could not allocate libav pixel scaler" );
                 }
                 return {};
@@ -731,7 +726,7 @@ namespace grab::screen
             {
                 if( image.width != width || image.height != height )
                 {
-                    return grab::fail( grab::ErrorCode::geometry_untrusted,
+                    return grab::fail( grab::ErrorCode::GeometryUntrusted,
                                        "recording frame dimensions changed" );
                 }
 
@@ -748,18 +743,16 @@ namespace grab::screen
                 }
                 if( *pixel_format != source_pix )
                 {
-                    return grab::fail( grab::ErrorCode::geometry_untrusted,
+                    return grab::fail( grab::ErrorCode::GeometryUntrusted,
                                        "recording frame pixel format changed" );
                 }
 
                 const int writable_result = av_frame_make_writable( frame );
-                if( writable_result < kLibavSuccess )
+                if( writable_result < libavSuccess )
                 {
-                    return std::unexpected(
-                        libav_error( grab::ErrorCode::provider_failed,
-                                     "make libav frame writable",
-                                     writable_result )
-                    );
+                    return std::unexpected( libav_error( grab::ErrorCode::ProviderFailed,
+                                                         "make libav frame writable",
+                                                         writable_result ) );
                 }
 
                 using SourcePointer           = const std::uint8_t*;
@@ -791,14 +784,14 @@ namespace grab::screen
                 const int         scaled_height = sws_scale( scaler,
                                                              source_data.data(),
                                                              source_linesize.data(),
-                                                             kScaleSourcePlane,
+                                                             scaleSourcePlane,
                                                              frame->height,
                                                              destination_data,
                                                              destination_linesize );
                 if( scaled_height != frame->height )
                 {
                     return grab::fail(
-                        grab::ErrorCode::provider_failed,
+                        grab::ErrorCode::ProviderFailed,
                         "libav pixel scaler did not convert a full frame"
                     );
                 }
@@ -812,13 +805,11 @@ namespace grab::screen
             encode_frame_locked( const AVFrame* input_frame )
             {
                 const int send_result = avcodec_send_frame( codec_context, input_frame );
-                if( send_result < kLibavSuccess )
+                if( send_result < libavSuccess )
                 {
-                    return std::unexpected(
-                        libav_error( grab::ErrorCode::provider_failed,
-                                     "send frame to libav encoder",
-                                     send_result )
-                    );
+                    return std::unexpected( libav_error( grab::ErrorCode::ProviderFailed,
+                                                         "send frame to libav encoder",
+                                                         send_result ) );
                 }
 
                 return write_available_packets_locked();
@@ -838,18 +829,18 @@ namespace grab::screen
                     {
                         return {};
                     }
-                    if( receive_result < kLibavSuccess )
+                    if( receive_result < libavSuccess )
                     {
                         return std::unexpected(
-                            libav_error( grab::ErrorCode::provider_failed,
+                            libav_error( grab::ErrorCode::ProviderFailed,
                                          "receive packet from libav encoder",
                                          receive_result )
                         );
                     }
 
-                    if( packet->duration == kNoPacketDuration )
+                    if( packet->duration == noPacketDuration )
                     {
-                        packet->duration = kSingleFrameDuration;
+                        packet->duration = singleFrameDuration;
                     }
                     av_packet_rescale_ts( packet,
                                           codec_context->time_base,
@@ -857,10 +848,10 @@ namespace grab::screen
                     packet->stream_index = stream->index;
                     const int write_result =
                         av_interleaved_write_frame( format_context, packet );
-                    if( write_result < kLibavSuccess )
+                    if( write_result < libavSuccess )
                     {
                         return std::unexpected(
-                            libav_error( grab::ErrorCode::provider_failed,
+                            libav_error( grab::ErrorCode::ProviderFailed,
                                          "write encoded video packet",
                                          write_result )
                         );
@@ -887,9 +878,9 @@ namespace grab::screen
                 if( format_context != nullptr && header_written )
                 {
                     const int trailer_result = av_write_trailer( format_context );
-                    if( trailer_result < kLibavSuccess && !finish_error.has_value() )
+                    if( trailer_result < libavSuccess && !finish_error.has_value() )
                     {
-                        finish_error = libav_error( grab::ErrorCode::provider_failed,
+                        finish_error = libav_error( grab::ErrorCode::ProviderFailed,
                                                     "write output media trailer",
                                                     trailer_result );
                     }
@@ -957,9 +948,9 @@ namespace grab::screen
             std::chrono::nanoseconds   interval{};
             std::uint32_t              width          = 0U;
             std::uint32_t              height         = 0U;
-            std::uint32_t              max_frames     = kNoFrameLimit;
-            std::uint32_t              frame_count    = kNoFramesWritten;
-            std::int64_t               next_pts       = kFirstPresentationTime;
+            std::uint32_t              max_frames     = noFrameLimit;
+            std::uint32_t              frame_count    = noFramesWritten;
+            std::int64_t               next_pts       = firstPresentationTime;
             AVPixelFormat              source_pix     = AV_PIX_FMT_NONE;
             AVFormatContext*           format_context = nullptr;
             AVCodecContext*            codec_context  = nullptr;
@@ -988,7 +979,7 @@ namespace grab::screen
             }
 
             const auto now   = std::chrono::steady_clock::now();
-            const auto delay = deadline > now ? deadline - now : kNoTimerDelay;
+            const auto delay = deadline > now ? deadline - now : noTimerDelay;
             static_cast<void>( reactor->add_timer( delay,
                                                    [state]
                                                    {
@@ -1003,7 +994,7 @@ namespace grab::screen
         catch( ... )
         {
             state->remember_async_error(
-                make_error( grab::ErrorCode::internal_fault,
+                make_error( grab::ErrorCode::InternalFault,
                             "schedule recording timer: unknown exception" )
             );
         }
@@ -1032,7 +1023,7 @@ namespace grab::screen
         catch( ... )
         {
             state->remember_async_error(
-                make_error( grab::ErrorCode::internal_fault,
+                make_error( grab::ErrorCode::InternalFault,
                             "record display frame: unknown exception" )
             );
         }

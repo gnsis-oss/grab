@@ -18,16 +18,16 @@ namespace grab::core
     namespace
     {
 
-        constexpr std::string_view kUinputPath      = "/dev/uinput";
-        constexpr std::string_view kInputDevicePath = "/dev/input";
-        constexpr std::string_view kEventPrefix     = "event";
-        constexpr char             kEnvAssign       = '=';
+        constexpr std::string_view uinputPath      = "/dev/uinput";
+        constexpr std::string_view inputDevicePath = "/dev/input";
+        constexpr std::string_view eventPrefix     = "event";
+        constexpr char             envAssign       = '=';
 
         [[nodiscard]]
         std::optional<std::string>
         read_live_environment( std::string_view name )
         {
-            const std::string prefix = std::string{ name } + kEnvAssign;
+            const std::string prefix = std::string{ name } + envAssign;
             for( char* const* entry = ::environ; entry != nullptr && *entry != nullptr;
                  entry              = std::next( entry ) )
             {
@@ -52,16 +52,16 @@ namespace grab::core
         const std::optional<std::string> x11     = facts.get_env( "DISPLAY" );
         if( wayland.has_value() && !wayland->empty() )
         {
-            env.session          = SessionType::wayland;
+            env.session          = SessionType::Wayland;
             env.xwayland_present = x11.has_value() && !x11->empty();
         }
         else if( x11.has_value() && !x11->empty() )
         {
-            env.session = SessionType::x11;
+            env.session = SessionType::X11;
         }
         else
         {
-            env.session = SessionType::headless;
+            env.session = SessionType::Headless;
         }
 
         env.desktop = facts.get_env( "XDG_CURRENT_DESKTOP" ).value_or( "" );
@@ -75,7 +75,7 @@ namespace grab::core
                 .readable = facts.path_readable( path ),
             } );
         }
-        env.uinput_writable = facts.path_writable( std::string{ kUinputPath } );
+        env.uinput_writable = facts.path_writable( std::string{ uinputPath } );
         return env;
     }
 
@@ -103,12 +103,12 @@ namespace grab::core
             std::error_code          ec;
             for( const std::filesystem::directory_entry& entry :
                  std::filesystem::directory_iterator(
-                     std::filesystem::path{ kInputDevicePath },
+                     std::filesystem::path{ inputDevicePath },
                      ec
                  ) )
             {
                 const std::string name = entry.path().filename().string();
-                if( name.starts_with( kEventPrefix ) )
+                if( name.starts_with( eventPrefix ) )
                 {
                     devices.push_back( entry.path().string() );
                 }

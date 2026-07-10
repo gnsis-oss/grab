@@ -16,11 +16,11 @@ namespace grab::input
     namespace
     {
 
-        constexpr std::uint8_t kLeftButton                = 1U;
-        constexpr std::int16_t kArmVerticalOffset         = 6;
-        constexpr std::int32_t kQtStartDragDistance       = 20;
-        constexpr std::int32_t kMinimumInterpolationSteps = 1;
-        constexpr auto         kDragArmOffsets = std::to_array<std::int16_t>( {
+        constexpr std::uint8_t leftButton                = 1U;
+        constexpr std::int16_t armVerticalOffset         = 6;
+        constexpr std::int32_t qtStartDragDistance       = 20;
+        constexpr std::int32_t minimumInterpolationSteps = 1;
+        constexpr auto         dragArmOffsets            = std::to_array<std::int16_t>( {
             10,
             20,
             32,
@@ -28,7 +28,7 @@ namespace grab::input
             62,
             80,
         } );
-        constexpr auto         kFinalNudges    = std::to_array<Point>( {
+        constexpr auto         finalNudges               = std::to_array<Point>( {
             Point{ .x = 0,  .y = 0},
             Point{ .x = 4,  .y = 3},
             Point{.x = -3,  .y = 2},
@@ -73,7 +73,7 @@ namespace grab::input
                 std::numeric_limits<std::int16_t>::min() ||
                 y > std::numeric_limits<std::int16_t>::max() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "Qt drag coordinate is outside int16 range" );
             }
 
@@ -112,7 +112,7 @@ namespace grab::input
                                     static_cast<std::int32_t>( origin.x );
             const std::int32_t dy = static_cast<std::int32_t>( current.y ) -
                                     static_cast<std::int32_t>( origin.y );
-            return absolute( dx ) + absolute( dy ) >= kQtStartDragDistance;
+            return absolute( dx ) + absolute( dy ) >= qtStartDragDistance;
         }
 
         [[nodiscard]]
@@ -155,7 +155,7 @@ namespace grab::input
         grab::Result<void>
         release_and_flush( Seat& seat )
         {
-            auto button_result = button( seat, kLeftButton, false );
+            auto button_result = button( seat, leftButton, false );
             if( !button_result.has_value() )
             {
                 return button_result;
@@ -176,19 +176,19 @@ namespace grab::input
                                  Point to )
         {
             const std::int32_t x_direction = direction_toward( from.x, to.x );
-            for( const std::int16_t arm_offset : kDragArmOffsets )
+            for( const std::int16_t arm_offset : dragArmOffsets )
             {
                 auto point_result =
                     translated( from,
                                 static_cast<std::int32_t>( arm_offset ) * x_direction,
-                                kArmVerticalOffset );
+                                armVerticalOffset );
                 if( !point_result.has_value() )
                 {
                     return std::unexpected( std::move( point_result.error() ) );
                 }
             }
 
-            for( const Point nudge : kFinalNudges )
+            for( const Point nudge : finalNudges )
             {
                 auto point_result = translated( to, nudge.x, nudge.y );
                 if( !point_result.has_value() )
@@ -234,9 +234,9 @@ namespace grab::input
              Point               to,
              const QtDragParams& params )
     {
-        if( params.interpolation_steps < kMinimumInterpolationSteps )
+        if( params.interpolation_steps < minimumInterpolationSteps )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "Qt drag requires at least one interpolation step" );
         }
 
@@ -252,7 +252,7 @@ namespace grab::input
             return move_result;
         }
 
-        auto press_result = button( seat, kLeftButton, true );
+        auto press_result = button( seat, leftButton, true );
         if( !press_result.has_value() )
         {
             return press_result;
@@ -261,12 +261,12 @@ namespace grab::input
         const std::int32_t x_direction              = direction_toward( from.x, to.x );
         Point              arm_point                = from;
         bool               applied_drag_start_dwell = false;
-        for( const std::int16_t arm_offset : kDragArmOffsets )
+        for( const std::int16_t arm_offset : dragArmOffsets )
         {
             auto point_result =
                 translated( from,
                             static_cast<std::int32_t>( arm_offset ) * x_direction,
-                            kArmVerticalOffset );
+                            armVerticalOffset );
             if( !point_result.has_value() )
             {
                 return std::unexpected( std::move( point_result.error() ) );
@@ -301,7 +301,7 @@ namespace grab::input
             }
         }
 
-        for( const Point nudge : kFinalNudges )
+        for( const Point nudge : finalNudges )
         {
             auto point_result = translated( to, nudge.x, nudge.y );
             if( !point_result.has_value() )
@@ -330,7 +330,7 @@ namespace grab::input
             return move_result;
         }
 
-        auto press_result = button( seat, kLeftButton, true );
+        auto press_result = button( seat, leftButton, true );
         if( !press_result.has_value() )
         {
             return press_result;

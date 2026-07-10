@@ -14,7 +14,7 @@ namespace grab::core
     {
             std::string       id;
             std::string       provider;
-            AvailabilityState state = AvailabilityState::unavailable;
+            AvailabilityState state = AvailabilityState::Unavailable;
             std::string       reason;
             std::string       remediation;
     };

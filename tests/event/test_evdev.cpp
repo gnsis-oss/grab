@@ -27,41 +27,41 @@
 namespace
 {
 
-    constexpr const char*      kMissingDevicePath  = "/dev/input/does-not-exist-b6";
-    constexpr int              kInvalidFd          = -1;
-    constexpr int              kPosixFailure       = -1;
-    constexpr int              kPosixSuccess       = 0;
-    constexpr int              kPipeReadIndex      = 0;
-    constexpr int              kPipeWriteIndex     = 1;
-    constexpr std::size_t      kPipeFdCount        = 2U;
-    constexpr ssize_t          kNoBytesWritten     = 0;
-    constexpr std::size_t      kSingleRecordCount  = 1U;
-    constexpr std::size_t      kPartialRecordBytes = sizeof( input_event ) / 2U;
-    constexpr std::uint16_t    kEvKeyType         = static_cast<std::uint16_t>( EV_KEY );
-    constexpr std::uint16_t    kEvRelType         = static_cast<std::uint16_t>( EV_REL );
-    constexpr std::uint16_t    kKeyACode          = static_cast<std::uint16_t>( KEY_A );
-    constexpr std::uint16_t    kRelXCode          = static_cast<std::uint16_t>( REL_X );
-    constexpr std::int32_t     kKeyPressValue     = 1;
-    constexpr std::int32_t     kKeyReleaseValue   = 0;
-    constexpr std::int32_t     kRelXDelta         = 5;
-    constexpr std::uint32_t    kExpectedKeyACode  = static_cast<std::uint32_t>( KEY_A );
-    constexpr std::string_view kExpectedXAxis     = "x";
-    constexpr std::size_t      kSubscriptionDepth = 32U;
-    constexpr std::int64_t     kInputEventSeconds = 1;
-    constexpr std::int64_t     kInputEventUseconds    = 2;
-    constexpr auto             kThreadReadyTimeout    = std::chrono::seconds{ 2 };
-    constexpr auto             kRegistrationTimeout   = std::chrono::seconds{ 2 };
-    constexpr auto             kEventTimeout          = std::chrono::seconds{ 2 };
-    constexpr auto             kPollInterval          = std::chrono::milliseconds{ 10 };
-    constexpr auto             kNoEventWindow         = std::chrono::milliseconds{ 30 };
-    constexpr std::string_view kReactorDidNotStart    = "reactor thread did not start";
-    constexpr std::string_view kMonitorDidNotRegister = "evdev fd did not register";
+    constexpr const char*      missingDevicePath  = "/dev/input/does-not-exist-b6";
+    constexpr int              invalidFd          = -1;
+    constexpr int              posixFailure       = -1;
+    constexpr int              posixSuccess       = 0;
+    constexpr int              pipeReadIndex      = 0;
+    constexpr int              pipeWriteIndex     = 1;
+    constexpr std::size_t      pipeFdCount        = 2U;
+    constexpr ssize_t          noBytesWritten     = 0;
+    constexpr std::size_t      singleRecordCount  = 1U;
+    constexpr std::size_t      partialRecordBytes = sizeof( input_event ) / 2U;
+    constexpr std::uint16_t    evKeyType          = static_cast<std::uint16_t>( EV_KEY );
+    constexpr std::uint16_t    evRelType          = static_cast<std::uint16_t>( EV_REL );
+    constexpr std::uint16_t    keyACode           = static_cast<std::uint16_t>( KEY_A );
+    constexpr std::uint16_t    relXCode           = static_cast<std::uint16_t>( REL_X );
+    constexpr std::int32_t     keyPressValue      = 1;
+    constexpr std::int32_t     keyReleaseValue    = 0;
+    constexpr std::int32_t     relXDelta          = 5;
+    constexpr std::uint32_t    expectedKeyACode   = static_cast<std::uint32_t>( KEY_A );
+    constexpr std::string_view expectedXAxis      = "x";
+    constexpr std::size_t      subscriptionDepth  = 32U;
+    constexpr std::int64_t     inputEventSeconds  = 1;
+    constexpr std::int64_t     inputEventUseconds = 2;
+    constexpr auto             threadReadyTimeout = std::chrono::seconds{ 2 };
+    constexpr auto             registrationTimeout   = std::chrono::seconds{ 2 };
+    constexpr auto             eventTimeout          = std::chrono::seconds{ 2 };
+    constexpr auto             pollInterval          = std::chrono::milliseconds{ 10 };
+    constexpr auto             noEventWindow         = std::chrono::milliseconds{ 30 };
+    constexpr std::string_view reactorDidNotStart    = "reactor thread did not start";
+    constexpr std::string_view monitorDidNotRegister = "evdev fd did not register";
 
     class UniqueFd
     {
         public:
 
-            explicit UniqueFd( int fd = kInvalidFd ) noexcept :
+            explicit UniqueFd( int fd = invalidFd ) noexcept :
                 fd_( fd )
             {
             }
@@ -77,7 +77,7 @@ namespace
 
             UniqueFd( UniqueFd&& other ) noexcept :
                 fd_( std::exchange( other.fd_,
-                                    kInvalidFd ) )
+                                    invalidFd ) )
             {
             }
 
@@ -87,7 +87,7 @@ namespace
                 if( this != &other )
                 {
                     reset();
-                    fd_ = std::exchange( other.fd_, kInvalidFd );
+                    fd_ = std::exchange( other.fd_, invalidFd );
                 }
                 return *this;
             }
@@ -103,7 +103,7 @@ namespace
             int
             release() noexcept
             {
-                return std::exchange( fd_, kInvalidFd );
+                return std::exchange( fd_, invalidFd );
             }
 
         private:
@@ -111,15 +111,15 @@ namespace
             void
             reset() noexcept
             {
-                if( fd_ != kInvalidFd )
+                if( fd_ != invalidFd )
                 {
                     const auto close_result = ::close( fd_ );
                     static_cast<void>( close_result );
-                    fd_ = kInvalidFd;
+                    fd_ = invalidFd;
                 }
             }
 
-            int fd_ = kInvalidFd;
+            int fd_ = invalidFd;
     };
 
     class Pipe
@@ -128,12 +128,12 @@ namespace
 
             Pipe()
             {
-                std::array<int, kPipeFdCount> fds{};
-                valid_ = ::pipe( fds.data() ) == kPosixSuccess;
+                std::array<int, pipeFdCount> fds{};
+                valid_ = ::pipe( fds.data() ) == posixSuccess;
                 if( valid_ )
                 {
-                    read_fd_  = UniqueFd{ fds.at( kPipeReadIndex ) };
-                    write_fd_ = UniqueFd{ fds.at( kPipeWriteIndex ) };
+                    read_fd_  = UniqueFd{ fds.at( pipeReadIndex ) };
+                    write_fd_ = UniqueFd{ fds.at( pipeWriteIndex ) };
                 }
             }
 
@@ -205,7 +205,7 @@ namespace
             bool
             wait_until_started()
             {
-                return started_.wait_for( kThreadReadyTimeout ) ==
+                return started_.wait_for( threadReadyTimeout ) ==
                        std::future_status::ready;
             }
 
@@ -254,7 +254,7 @@ namespace
                 registered.set_value();
             }
         );
-        return registered_future.wait_for( kRegistrationTimeout ) ==
+        return registered_future.wait_for( registrationTimeout ) ==
                std::future_status::ready;
     }
 
@@ -266,9 +266,9 @@ namespace
     {
         input_event record{};
         record.input_event_sec =
-            static_cast<decltype( record.input_event_sec )>( kInputEventSeconds );
+            static_cast<decltype( record.input_event_sec )>( inputEventSeconds );
         record.input_event_usec =
-            static_cast<decltype( record.input_event_usec )>( kInputEventUseconds );
+            static_cast<decltype( record.input_event_usec )>( inputEventUseconds );
         record.type  = static_cast<decltype( record.type )>( type );
         record.code  = static_cast<decltype( record.code )>( code );
         record.value = static_cast<decltype( record.value )>( value );
@@ -280,7 +280,7 @@ namespace
     input_event_bytes( const input_event& record ) noexcept
     {
         return std::as_bytes(
-            std::span<const input_event>{ &record, kSingleRecordCount }
+            std::span<const input_event>{ &record, singleRecordCount }
         );
     }
 
@@ -294,7 +294,7 @@ namespace
         {
             const auto remaining = bytes.subspan( written );
             const auto result    = ::write( fd, remaining.data(), remaining.size() );
-            if( result == kPosixFailure )
+            if( result == posixFailure )
             {
                 if( errno == EINTR )
                 {
@@ -303,7 +303,7 @@ namespace
                 return false;
             }
 
-            if( result == kNoBytesWritten )
+            if( result == noBytesWritten )
             {
                 return false;
             }
@@ -333,7 +333,7 @@ namespace
             {
                 return event;
             }
-            std::this_thread::sleep_for( kPollInterval );
+            std::this_thread::sleep_for( pollInterval );
         }
         return std::nullopt;
     }
@@ -342,7 +342,7 @@ namespace
     std::optional<grab::Event>
     wait_for_next_event( grab::Subscription& subscription )
     {
-        return wait_for_next_event( subscription, kEventTimeout );
+        return wait_for_next_event( subscription, eventTimeout );
     }
 
     [[nodiscard]]
@@ -351,9 +351,9 @@ namespace
     {
         grab::EventFilter filter;
         filter.kinds = {
-            grab::EventKind::key_down,
-            grab::EventKind::key_up,
-            grab::EventKind::mouse_move,
+            grab::EventKind::KeyDown,
+            grab::EventKind::KeyUp,
+            grab::EventKind::MouseMove,
         };
         return filter;
     }
@@ -367,10 +367,10 @@ TEST( Evdev,
     ASSERT_TRUE( pipe.valid() );
 
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
-    auto           subscription = bus.subscribe( input_filter(), kSubscriptionDepth );
+    auto           subscription = bus.subscribe( input_filter(), subscriptionDepth );
 
     auto monitor_result = grab::event::EvdevMonitor::adopt_fd( pipe.release_read_fd(),
                                                                running.reactor(),
@@ -378,26 +378,26 @@ TEST( Evdev,
     ASSERT_TRUE( monitor_result.has_value() ) << monitor_result.error().message;
     auto monitor = std::move( *monitor_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) )
-        << kMonitorDidNotRegister;
+        << monitorDidNotRegister;
 
-    const auto key_down = make_input_event( kEvKeyType, kKeyACode, kKeyPressValue );
-    const auto key_up   = make_input_event( kEvKeyType, kKeyACode, kKeyReleaseValue );
+    const auto key_down = make_input_event( evKeyType, keyACode, keyPressValue );
+    const auto key_up   = make_input_event( evKeyType, keyACode, keyReleaseValue );
     ASSERT_TRUE( write_input_event( pipe.write_fd(), key_down ) );
     ASSERT_TRUE( write_input_event( pipe.write_fd(), key_up ) );
 
     auto first = wait_for_next_event( subscription );
     ASSERT_TRUE( first.has_value() );
-    EXPECT_EQ( first->kind, grab::EventKind::key_down );
+    EXPECT_EQ( first->kind, grab::EventKind::KeyDown );
     const auto* first_payload = std::get_if<grab::InputKey>( &first->payload );
     ASSERT_NE( first_payload, nullptr );
-    EXPECT_EQ( first_payload->code, kExpectedKeyACode );
+    EXPECT_EQ( first_payload->code, expectedKeyACode );
 
     auto second = wait_for_next_event( subscription );
     ASSERT_TRUE( second.has_value() );
-    EXPECT_EQ( second->kind, grab::EventKind::key_up );
+    EXPECT_EQ( second->kind, grab::EventKind::KeyUp );
     const auto* second_payload = std::get_if<grab::InputKey>( &second->payload );
     ASSERT_NE( second_payload, nullptr );
-    EXPECT_EQ( second_payload->code, kExpectedKeyACode );
+    EXPECT_EQ( second_payload->code, expectedKeyACode );
 
     monitor.stop();
     running.stop_and_join();
@@ -411,10 +411,10 @@ TEST( Evdev,
     ASSERT_TRUE( pipe.valid() );
 
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
-    auto           subscription = bus.subscribe( input_filter(), kSubscriptionDepth );
+    auto           subscription = bus.subscribe( input_filter(), subscriptionDepth );
 
     auto monitor_result = grab::event::EvdevMonitor::adopt_fd( pipe.release_read_fd(),
                                                                running.reactor(),
@@ -422,18 +422,18 @@ TEST( Evdev,
     ASSERT_TRUE( monitor_result.has_value() ) << monitor_result.error().message;
     auto monitor = std::move( *monitor_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) )
-        << kMonitorDidNotRegister;
+        << monitorDidNotRegister;
 
-    const auto motion = make_input_event( kEvRelType, kRelXCode, kRelXDelta );
+    const auto motion = make_input_event( evRelType, relXCode, relXDelta );
     ASSERT_TRUE( write_input_event( pipe.write_fd(), motion ) );
 
     auto event = wait_for_next_event( subscription );
     ASSERT_TRUE( event.has_value() );
-    EXPECT_EQ( event->kind, grab::EventKind::mouse_move );
+    EXPECT_EQ( event->kind, grab::EventKind::MouseMove );
     const auto* payload = std::get_if<grab::MouseMove>( &event->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->axis, kExpectedXAxis );
-    EXPECT_DOUBLE_EQ( payload->delta, static_cast<double>( kRelXDelta ) );
+    EXPECT_EQ( payload->axis, expectedXAxis );
+    EXPECT_DOUBLE_EQ( payload->delta, static_cast<double>( relXDelta ) );
 
     monitor.stop();
     running.stop_and_join();
@@ -447,10 +447,10 @@ TEST( Evdev,
     ASSERT_TRUE( pipe.valid() );
 
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
-    auto           subscription = bus.subscribe( input_filter(), kSubscriptionDepth );
+    auto           subscription = bus.subscribe( input_filter(), subscriptionDepth );
 
     auto monitor_result = grab::event::EvdevMonitor::adopt_fd( pipe.release_read_fd(),
                                                                running.reactor(),
@@ -458,23 +458,23 @@ TEST( Evdev,
     ASSERT_TRUE( monitor_result.has_value() ) << monitor_result.error().message;
     auto monitor = std::move( *monitor_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) )
-        << kMonitorDidNotRegister;
+        << monitorDidNotRegister;
 
-    const auto record = make_input_event( kEvKeyType, kKeyACode, kKeyPressValue );
+    const auto record = make_input_event( evKeyType, keyACode, keyPressValue );
     const auto bytes  = input_event_bytes( record );
-    ASSERT_TRUE( write_all( pipe.write_fd(), bytes.first( kPartialRecordBytes ) ) );
-    std::this_thread::sleep_for( kNoEventWindow );
+    ASSERT_TRUE( write_all( pipe.write_fd(), bytes.first( partialRecordBytes ) ) );
+    std::this_thread::sleep_for( noEventWindow );
     EXPECT_FALSE( subscription.try_pop().has_value() );
 
-    ASSERT_TRUE( write_all( pipe.write_fd(), bytes.subspan( kPartialRecordBytes ) ) );
+    ASSERT_TRUE( write_all( pipe.write_fd(), bytes.subspan( partialRecordBytes ) ) );
 
     auto event = wait_for_next_event( subscription );
     ASSERT_TRUE( event.has_value() );
-    EXPECT_EQ( event->kind, grab::EventKind::key_down );
+    EXPECT_EQ( event->kind, grab::EventKind::KeyDown );
     const auto* payload = std::get_if<grab::InputKey>( &event->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->code, kExpectedKeyACode );
-    EXPECT_FALSE( wait_for_next_event( subscription, kNoEventWindow ).has_value() );
+    EXPECT_EQ( payload->code, expectedKeyACode );
+    EXPECT_FALSE( wait_for_next_event( subscription, noEventWindow ).has_value() );
 
     monitor.stop();
     running.stop_and_join();
@@ -488,8 +488,8 @@ TEST( Evdev,
     grab::EventBus      bus;
 
     auto                monitor =
-        grab::event::EvdevMonitor::open_device( kMissingDevicePath, reactor, bus );
+        grab::event::EvdevMonitor::open_device( missingDevicePath, reactor, bus );
 
     ASSERT_FALSE( monitor.has_value() );
-    EXPECT_EQ( monitor.error().code, grab::ErrorCode::device_inaccessible );
+    EXPECT_EQ( monitor.error().code, grab::ErrorCode::DeviceInaccessible );
 }

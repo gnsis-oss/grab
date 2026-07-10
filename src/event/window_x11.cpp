@@ -27,30 +27,29 @@ namespace grab::event
     namespace
     {
 
-        constexpr int           kInvalidFd              = -1;
-        constexpr int           kXcbOk                  = 0;
-        constexpr int           kFlushFailed            = 0;
-        constexpr std::uint64_t kNoToken                = 0U;
-        constexpr std::uint8_t  kResponseTypeMask       = 0X7FU;
-        constexpr std::uint32_t kPropertyOffsetZero     = 0U;
-        constexpr std::uint32_t kMaxPropertyUnits       = 256U * 1'024U;
-        constexpr std::uint8_t  kFormat8Bits            = 8U;
-        constexpr std::uint8_t  kFormat32Bits           = 32U;
-        constexpr std::uint32_t kNoEvents               = 0U;
-        constexpr double        kUnknownDurationSeconds = 0.0;
-        constexpr std::uint32_t kReadableEvents =
-            static_cast<std::uint32_t>( EPOLLIN ) |
-            static_cast<std::uint32_t>( EPOLLERR ) |
-            static_cast<std::uint32_t>( EPOLLHUP );
-        constexpr std::uint32_t kRootEventMask =
+        constexpr int           invalidFd              = -1;
+        constexpr int           xcbOk                  = 0;
+        constexpr int           flushFailed            = 0;
+        constexpr std::uint64_t noToken                = 0U;
+        constexpr std::uint8_t  responseTypeMask       = 0X7FU;
+        constexpr std::uint32_t propertyOffsetZero     = 0U;
+        constexpr std::uint32_t maxPropertyUnits       = 256U * 1'024U;
+        constexpr std::uint8_t  format8Bits            = 8U;
+        constexpr std::uint8_t  format32Bits           = 32U;
+        constexpr std::uint32_t noEvents               = 0U;
+        constexpr double        unknownDurationSeconds = 0.0;
+        constexpr std::uint32_t readableEvents = static_cast<std::uint32_t>( EPOLLIN ) |
+                                                 static_cast<std::uint32_t>( EPOLLERR ) |
+                                                 static_cast<std::uint32_t>( EPOLLHUP );
+        constexpr std::uint32_t rootEventMask =
             static_cast<std::uint32_t>( XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY );
-        constexpr std::uint32_t kRootValueMask =
+        constexpr std::uint32_t rootValueMask =
             static_cast<std::uint32_t>( XCB_CW_EVENT_MASK );
 
-        constexpr std::string_view kNetActiveWindowAtom = "_NET_ACTIVE_WINDOW";
-        constexpr std::string_view kNetWmNameAtom       = "_NET_WM_NAME";
-        constexpr std::string_view kNetWmPidAtom        = "_NET_WM_PID";
-        constexpr std::string_view kUtf8StringAtom      = "UTF8_STRING";
+        constexpr std::string_view netActiveWindowAtom = "_NET_ACTIVE_WINDOW";
+        constexpr std::string_view netWmNameAtom       = "_NET_WM_NAME";
+        constexpr std::string_view netWmPidAtom        = "_NET_WM_PID";
+        constexpr std::string_view utf8StringAtom      = "UTF8_STRING";
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -115,7 +114,7 @@ namespace grab::event
 
             if( iterator.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB default screen is unavailable" );
             }
 
@@ -139,7 +138,7 @@ namespace grab::event
             const auto           error     = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "XCB atom lookup failed for " + std::string{ name } );
             }
 
@@ -150,25 +149,25 @@ namespace grab::event
         grab::Result<Atoms>
         intern_atoms( xcb_connection_t* connection )
         {
-            auto net_active_window = intern_atom( connection, kNetActiveWindowAtom );
+            auto net_active_window = intern_atom( connection, netActiveWindowAtom );
             if( !net_active_window.has_value() )
             {
                 return std::unexpected( std::move( net_active_window.error() ) );
             }
 
-            auto net_wm_name = intern_atom( connection, kNetWmNameAtom );
+            auto net_wm_name = intern_atom( connection, netWmNameAtom );
             if( !net_wm_name.has_value() )
             {
                 return std::unexpected( std::move( net_wm_name.error() ) );
             }
 
-            auto net_wm_pid = intern_atom( connection, kNetWmPidAtom );
+            auto net_wm_pid = intern_atom( connection, netWmPidAtom );
             if( !net_wm_pid.has_value() )
             {
                 return std::unexpected( std::move( net_wm_pid.error() ) );
             }
 
-            auto utf8_string = intern_atom( connection, kUtf8StringAtom );
+            auto utf8_string = intern_atom( connection, utf8StringAtom );
             if( !utf8_string.has_value() )
             {
                 return std::unexpected( std::move( utf8_string.error() ) );
@@ -209,8 +208,8 @@ namespace grab::event
                                                           window,
                                                           property,
                                                           type,
-                                                          kPropertyOffsetZero,
-                                                          kMaxPropertyUnits ),
+                                                          propertyOffsetZero,
+                                                          maxPropertyUnits ),
                                         &raw_error )
             );
             const auto error = take_xcb_owned( raw_error );
@@ -239,7 +238,7 @@ namespace grab::event
                             xcb_atom_t        type )
         {
             auto reply = read_property( connection, window, property, type );
-            if( !reply.has_value() || ( *reply )->format != kFormat8Bits )
+            if( !reply.has_value() || ( *reply )->format != format8Bits )
             {
                 return std::nullopt;
             }
@@ -263,7 +262,7 @@ namespace grab::event
                            xcb_atom_t        type )
         {
             auto reply = read_property( connection, window, property, type );
-            if( !reply.has_value() || ( *reply )->format != kFormat32Bits )
+            if( !reply.has_value() || ( *reply )->format != format32Bits )
             {
                 return std::nullopt;
             }
@@ -448,7 +447,7 @@ namespace grab::event
                 .timestamp = now_timestamp_s(),
                 .sequence  = 0U,
                 .kind      = kind,
-                .category  = grab::EventCategory::window,
+                .category  = grab::EventCategory::Window,
                 .payload   = grab::Payload{ std::move( payload ) },
             };
         }
@@ -457,7 +456,7 @@ namespace grab::event
         grab::Event
         make_empty_focus_event()
         {
-            return make_window_event( grab::EventKind::window_focus_changed,
+            return make_window_event( grab::EventKind::WindowFocusChanged,
                                       grab::WindowChange{} );
         }
 
@@ -488,7 +487,7 @@ namespace grab::event
             const auto error = take_xcb_owned( xcb_request_check( connection, cookie ) );
             if( error != nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    std::string{ operation } +
                                        " failed with X error " +
                                        std::to_string( error->error_code ) );
@@ -502,12 +501,12 @@ namespace grab::event
         select_root_events( xcb_connection_t* connection,
                             xcb_window_t      root )
         {
-            const std::uint32_t event_mask = kRootEventMask;
+            const std::uint32_t event_mask = rootEventMask;
             auto                selected =
                 check_request( connection,
                                xcb_change_window_attributes_checked( connection,
                                                                      root,
-                                                                     kRootValueMask,
+                                                                     rootValueMask,
                                                                      &event_mask ),
                                "XCB root event selection" );
             if( !selected.has_value() )
@@ -516,10 +515,10 @@ namespace grab::event
             }
 
             if( xcb_flush( connection ) <=
-                kFlushFailed ||
-                xcb_connection_has_error( connection ) != kXcbOk )
+                flushFailed ||
+                xcb_connection_has_error( connection ) != xcbOk )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB root event selection flush failed" );
             }
 
@@ -562,7 +561,7 @@ namespace grab::event
                 *existing = info;
             }
 
-            pending_events.push_back( make_window_event( grab::EventKind::window_created,
+            pending_events.push_back( make_window_event( grab::EventKind::WindowCreated,
                                                          make_window_change( info ) ) );
         }
 
@@ -576,7 +575,7 @@ namespace grab::event
                 .pid        = {},
                 .title      = {},
                 .prev_title = {},
-                .duration_s = kUnknownDurationSeconds,
+                .duration_s = unknownDurationSeconds,
             };
 
             const auto existing = find_tracked( tracked, window );
@@ -591,7 +590,7 @@ namespace grab::event
                 tracked.erase( existing );
             }
 
-            pending_events.push_back( make_window_event( grab::EventKind::window_closed,
+            pending_events.push_back( make_window_event( grab::EventKind::WindowClosed,
                                                          std::move( payload ) ) );
         }
 
@@ -603,7 +602,7 @@ namespace grab::event
                               std::vector<grab::Event>&   pending_events )
         {
             const auto response_type =
-                static_cast<std::uint8_t>( raw_event.response_type & kResponseTypeMask );
+                static_cast<std::uint8_t>( raw_event.response_type & responseTypeMask );
 
             const void* const event_storage = &raw_event;
             switch( response_type )
@@ -673,9 +672,9 @@ namespace grab::event
         reactor_( std::exchange( other.reactor_,
                                  nullptr ) ),
         fd_token_( std::exchange( other.fd_token_,
-                                  kNoToken ) ),
+                                  noToken ) ),
         timer_token_( std::exchange( other.timer_token_,
-                                     kNoToken ) ),
+                                     noToken ) ),
         state_( std::move( other.state_ ) )
     {
     }
@@ -687,8 +686,8 @@ namespace grab::event
         {
             stop();
             reactor_     = std::exchange( other.reactor_, nullptr );
-            fd_token_    = std::exchange( other.fd_token_, kNoToken );
-            timer_token_ = std::exchange( other.timer_token_, kNoToken );
+            fd_token_    = std::exchange( other.fd_token_, noToken );
+            timer_token_ = std::exchange( other.timer_token_, noToken );
             state_       = std::move( other.state_ );
         }
         return *this;
@@ -707,9 +706,9 @@ namespace grab::event
         };
         if( connection ==
             nullptr ||
-            xcb_connection_has_error( connection.get() ) != kXcbOk )
+            xcb_connection_has_error( connection.get() ) != xcbOk )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "XCB display connection failed" );
         }
 
@@ -732,9 +731,9 @@ namespace grab::event
         }
 
         const int fd = xcb_get_file_descriptor( connection.get() );
-        if( fd == kInvalidFd )
+        if( fd == invalidFd )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "XCB connection file descriptor is unavailable" );
         }
 
@@ -767,7 +766,7 @@ namespace grab::event
     WindowTracker::handle_fd( const std::shared_ptr<State>& state,
                               std::uint32_t                 events )
     {
-        if( ( events & kReadableEvents ) == kNoEvents )
+        if( ( events & readableEvents ) == noEvents )
         {
             return;
         }
@@ -799,7 +798,7 @@ namespace grab::event
                                       pending_events );
             }
 
-            if( xcb_connection_has_error( state->connection ) != kXcbOk )
+            if( xcb_connection_has_error( state->connection ) != xcbOk )
             {
                 state->active = false;
             }
@@ -851,7 +850,7 @@ namespace grab::event
                                                                 state->atoms,
                                                                 state->tracked );
                     pending_events.push_back(
-                        make_window_event( grab::EventKind::window_focus_changed,
+                        make_window_event( grab::EventKind::WindowFocusChanged,
                                            make_window_change( info ) )
                     );
                 }
@@ -879,7 +878,7 @@ namespace grab::event
                         auto payload       = make_window_change( *existing );
                         payload.prev_title = old_title;
                         pending_events.push_back(
-                            make_window_event( grab::EventKind::window_title_changed,
+                            make_window_event( grab::EventKind::WindowTitleChanged,
                                                std::move( payload ) )
                         );
                     }
@@ -908,11 +907,11 @@ namespace grab::event
     WindowTracker::stop() noexcept
     {
         grab::core::Reactor* const reactor  = std::exchange( reactor_, nullptr );
-        const std::uint64_t        fd_token = std::exchange( fd_token_, kNoToken );
-        static_cast<void>( std::exchange( timer_token_, kNoToken ) );
+        const std::uint64_t        fd_token = std::exchange( fd_token_, noToken );
+        static_cast<void>( std::exchange( timer_token_, noToken ) );
         auto state = std::move( state_ );
 
-        if( reactor != nullptr && fd_token != kNoToken )
+        if( reactor != nullptr && fd_token != noToken )
         {
             bool remove_failed = false;
             try

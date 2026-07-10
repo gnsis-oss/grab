@@ -16,21 +16,21 @@
 namespace
 {
 
-    constexpr double           kTimestamp          = 42.5;
-    constexpr std::string_view kObjectInterface    = "org.a11y.atspi.Event.Object";
-    constexpr std::string_view kStateChangedMember = "StateChanged";
-    constexpr std::string_view kFocusedDetail      = "focused";
-    constexpr std::string_view kPressedDetail      = "pressed";
-    constexpr std::string_view kUnrelatedMember    = "BoundsChanged";
-    constexpr std::string_view kApp                = "gedit";
-    constexpr std::string_view kButtonRole         = "push button";
-    constexpr std::string_view kButtonName         = "Save";
-    constexpr auto             kA11yCategory       = grab::EventCategory::accessibility;
-    constexpr auto             kFocusChangedKind   = grab::EventKind::a11y_focus_changed;
-    constexpr auto             kButtonClickedKind = grab::EventKind::a11y_button_clicked;
-    constexpr auto kDeviceInaccessibleCode        = grab::ErrorCode::device_inaccessible;
-    constexpr auto kThreadReadyTimeout            = std::chrono::seconds{ 2 };
-    constexpr std::string_view kReactorDidNotStart = "reactor thread did not start";
+    constexpr double           timestamp          = 42.5;
+    constexpr std::string_view objectInterface    = "org.a11y.atspi.Event.Object";
+    constexpr std::string_view stateChangedMember = "StateChanged";
+    constexpr std::string_view focusedDetail      = "focused";
+    constexpr std::string_view pressedDetail      = "pressed";
+    constexpr std::string_view unrelatedMember    = "BoundsChanged";
+    constexpr std::string_view app                = "gedit";
+    constexpr std::string_view buttonRole         = "push button";
+    constexpr std::string_view buttonName         = "Save";
+    constexpr auto             a11yCategory       = grab::EventCategory::Accessibility;
+    constexpr auto             focusChangedKind   = grab::EventKind::A11yFocusChanged;
+    constexpr auto             buttonClickedKind  = grab::EventKind::A11yButtonClicked;
+    constexpr auto deviceInaccessibleCode         = grab::ErrorCode::DeviceInaccessible;
+    constexpr auto threadReadyTimeout             = std::chrono::seconds{ 2 };
+    constexpr std::string_view reactorDidNotStart = "reactor thread did not start";
 
     [[nodiscard]]
     grab::event::AtspiSignal
@@ -38,12 +38,12 @@ namespace
                   std::string_view detail )
     {
         return grab::event::AtspiSignal{
-            .interface = std::string{ kObjectInterface },
+            .interface = std::string{ objectInterface },
             .member    = std::string{ member },
             .detail    = std::string{ detail },
-            .app       = std::string{ kApp },
-            .role      = std::string{ kButtonRole },
-            .name      = std::string{ kButtonName },
+            .app       = std::string{ app },
+            .role      = std::string{ buttonRole },
+            .name      = std::string{ buttonName },
         };
     }
 
@@ -79,7 +79,7 @@ namespace
             bool
             wait_until_started()
             {
-                return started_.wait_for( kThreadReadyTimeout ) ==
+                return started_.wait_for( threadReadyTimeout ) ==
                        std::future_status::ready;
             }
 
@@ -122,50 +122,49 @@ TEST( Atspi,
       DecodesFocusChange )
 {
     const auto decoded =
-        grab::event::decode_atspi_signal( atspi_signal( kStateChangedMember,
-                                                        kFocusedDetail ),
-                                          kTimestamp );
+        grab::event::decode_atspi_signal( atspi_signal( stateChangedMember,
+                                                        focusedDetail ),
+                                          timestamp );
 
     ASSERT_TRUE( decoded.has_value() );
-    EXPECT_EQ( decoded->kind, kFocusChangedKind );
-    EXPECT_EQ( decoded->category, kA11yCategory );
-    EXPECT_EQ( decoded->timestamp, kTimestamp );
+    EXPECT_EQ( decoded->kind, focusChangedKind );
+    EXPECT_EQ( decoded->category, a11yCategory );
+    EXPECT_EQ( decoded->timestamp, timestamp );
 
     const auto* payload = std::get_if<grab::A11yEvent>( &decoded->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->app, kApp );
-    EXPECT_EQ( payload->role, kButtonRole );
-    EXPECT_EQ( payload->name, kButtonName );
-    EXPECT_EQ( payload->detail, kFocusedDetail );
+    EXPECT_EQ( payload->app, app );
+    EXPECT_EQ( payload->role, buttonRole );
+    EXPECT_EQ( payload->name, buttonName );
+    EXPECT_EQ( payload->detail, focusedDetail );
 }
 
 TEST( Atspi,
       DecodesButtonClick )
 {
     const auto decoded =
-        grab::event::decode_atspi_signal( atspi_signal( kStateChangedMember,
-                                                        kPressedDetail ),
-                                          kTimestamp );
+        grab::event::decode_atspi_signal( atspi_signal( stateChangedMember,
+                                                        pressedDetail ),
+                                          timestamp );
 
     ASSERT_TRUE( decoded.has_value() );
-    EXPECT_EQ( decoded->kind, kButtonClickedKind );
-    EXPECT_EQ( decoded->category, kA11yCategory );
+    EXPECT_EQ( decoded->kind, buttonClickedKind );
+    EXPECT_EQ( decoded->category, a11yCategory );
 
     const auto* payload = std::get_if<grab::A11yEvent>( &decoded->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->app, kApp );
-    EXPECT_EQ( payload->role, kButtonRole );
-    EXPECT_EQ( payload->name, kButtonName );
-    EXPECT_EQ( payload->detail, kPressedDetail );
+    EXPECT_EQ( payload->app, app );
+    EXPECT_EQ( payload->role, buttonRole );
+    EXPECT_EQ( payload->name, buttonName );
+    EXPECT_EQ( payload->detail, pressedDetail );
 }
 
 TEST( Atspi,
       UnmappedSignalReturnsNullopt )
 {
     const auto decoded =
-        grab::event::decode_atspi_signal( atspi_signal( kUnrelatedMember,
-                                                        kFocusedDetail ),
-                                          kTimestamp );
+        grab::event::decode_atspi_signal( atspi_signal( unrelatedMember, focusedDetail ),
+                                          timestamp );
 
     EXPECT_FALSE( decoded.has_value() );
 }
@@ -174,7 +173,7 @@ TEST( Atspi,
       StartFailsGracefullyWithoutA11yBus )
 {
     RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << kReactorDidNotStart;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
     auto           monitor = grab::event::AtspiMonitor::start( running.reactor(), bus );
@@ -192,7 +191,7 @@ TEST( Atspi,
             << "AT-SPI bus present; live subscription path is deferred integration";
     }
 
-    EXPECT_EQ( monitor.error().code, kDeviceInaccessibleCode );
+    EXPECT_EQ( monitor.error().code, deviceInaccessibleCode );
     running.stop_and_join();
     EXPECT_TRUE( running.result().has_value() );
 }

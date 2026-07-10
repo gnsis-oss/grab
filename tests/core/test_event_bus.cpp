@@ -17,45 +17,45 @@
 namespace
 {
 
-    constexpr auto             kKeyDownKind           = grab::EventKind::key_down;
-    constexpr auto             kKeyUpKind             = grab::EventKind::key_up;
-    constexpr auto             kMouseMoveKind         = grab::EventKind::mouse_move;
-    constexpr auto             kInputCategory         = grab::EventCategory::input;
-    constexpr double           kTimestamp             = 10.5;
-    constexpr std::uint64_t    kUnsetSequence         = 0U;
-    constexpr std::uint64_t    kFirstSequence         = 1U;
-    constexpr std::uint64_t    kSecondSequence        = 2U;
-    constexpr std::uint64_t    kThirdSequence         = 3U;
-    constexpr std::uint64_t    kNoOverflows           = 0U;
-    constexpr std::uint32_t    kKeyCode               = 42U;
-    constexpr std::string_view kKeyName               = "answer";
-    constexpr std::size_t      kSmallQueueDepth       = 2U;
-    constexpr std::size_t      kOverflowPublishCount  = 4U;
-    constexpr std::size_t      kFirstPublishIndex     = 0U;
-    constexpr std::uint64_t    kExpectedOverflowCount = 2U;
-    constexpr int              kNoNotifications       = 0;
-    constexpr int              kOneNotification       = 1;
-    constexpr double           kFirstMoveDelta        = 1.0;
-    constexpr double           kSecondMoveDelta       = 2.0;
-    constexpr double           kLastMoveDelta         = 3.0;
-    constexpr std::string_view kFirstMoveAxis         = "first";
-    constexpr std::string_view kSecondMoveAxis        = "second";
-    constexpr std::string_view kLastMoveAxis          = "last";
-    constexpr auto             kPublishTimeout        = std::chrono::seconds{ 2 };
-    constexpr auto             kNotifyTimeout         = std::chrono::seconds{ 2 };
+    constexpr auto             keyDownKind           = grab::EventKind::KeyDown;
+    constexpr auto             keyUpKind             = grab::EventKind::KeyUp;
+    constexpr auto             mouseMoveKind         = grab::EventKind::MouseMove;
+    constexpr auto             inputCategory         = grab::EventCategory::Input;
+    constexpr double           timestamp             = 10.5;
+    constexpr std::uint64_t    unsetSequence         = 0U;
+    constexpr std::uint64_t    firstSequence         = 1U;
+    constexpr std::uint64_t    secondSequence        = 2U;
+    constexpr std::uint64_t    thirdSequence         = 3U;
+    constexpr std::uint64_t    noOverflows           = 0U;
+    constexpr std::uint32_t    keyCode               = 42U;
+    constexpr std::string_view keyName               = "answer";
+    constexpr std::size_t      smallQueueDepth       = 2U;
+    constexpr std::size_t      overflowPublishCount  = 4U;
+    constexpr std::size_t      firstPublishIndex     = 0U;
+    constexpr std::uint64_t    expectedOverflowCount = 2U;
+    constexpr int              noNotifications       = 0;
+    constexpr int              oneNotification       = 1;
+    constexpr double           firstMoveDelta        = 1.0;
+    constexpr double           secondMoveDelta       = 2.0;
+    constexpr double           lastMoveDelta         = 3.0;
+    constexpr std::string_view firstMoveAxis         = "first";
+    constexpr std::string_view secondMoveAxis        = "second";
+    constexpr std::string_view lastMoveAxis          = "last";
+    constexpr auto             publishTimeout        = std::chrono::seconds{ 2 };
+    constexpr auto             notifyTimeout         = std::chrono::seconds{ 2 };
 
     [[nodiscard]]
     grab::Event
     make_key_event( grab::EventKind kind )
     {
         return grab::Event{
-            .timestamp = kTimestamp,
-            .sequence  = kUnsetSequence,
+            .timestamp = timestamp,
+            .sequence  = unsetSequence,
             .kind      = kind,
             .category  = grab::category_of( kind ),
             .payload   = grab::Payload{ grab::InputKey{
-                .code = kKeyCode,
-                .name = std::string{ kKeyName },
+                .code = keyCode,
+                .name = std::string{ keyName },
             } },
         };
     }
@@ -66,10 +66,10 @@ namespace
                            double           delta )
     {
         return grab::Event{
-            .timestamp = kTimestamp,
-            .sequence  = kUnsetSequence,
-            .kind      = kMouseMoveKind,
-            .category  = grab::category_of( kMouseMoveKind ),
+            .timestamp = timestamp,
+            .sequence  = unsetSequence,
+            .kind      = mouseMoveKind,
+            .category  = grab::category_of( mouseMoveKind ),
             .payload   = grab::Payload{ grab::MouseMove{
                 .axis  = std::string{ axis },
                 .delta = delta,
@@ -96,21 +96,21 @@ TEST( EventBus,
 {
     grab::EventBus bus;
     auto           matching     = bus.subscribe( grab::EventFilter{
-        .kinds      = { kKeyDownKind },
+        .kinds      = { keyDownKind },
         .categories = {},
     } );
     auto           non_matching = bus.subscribe( grab::EventFilter{
-        .kinds      = { kMouseMoveKind },
+        .kinds      = { mouseMoveKind },
         .categories = {},
     } );
 
-    bus.publish( make_key_event( kKeyDownKind ) );
+    bus.publish( make_key_event( keyDownKind ) );
 
     auto delivered = matching.try_pop();
     ASSERT_TRUE( delivered.has_value() );
-    EXPECT_EQ( delivered->sequence, kFirstSequence );
-    EXPECT_EQ( delivered->kind, kKeyDownKind );
-    EXPECT_EQ( delivered->category, kInputCategory );
+    EXPECT_EQ( delivered->sequence, firstSequence );
+    EXPECT_EQ( delivered->kind, keyDownKind );
+    EXPECT_EQ( delivered->category, inputCategory );
     EXPECT_FALSE( non_matching.try_pop().has_value() );
 }
 
@@ -120,21 +120,21 @@ TEST( EventBus,
     grab::EventBus bus;
     auto           subscription = bus.subscribe( grab::EventFilter{} );
 
-    bus.publish( make_key_event( kKeyDownKind ) );
-    bus.publish( make_key_event( kKeyUpKind ) );
-    bus.publish( make_mouse_move_event( kFirstMoveAxis, kFirstMoveDelta ) );
+    bus.publish( make_key_event( keyDownKind ) );
+    bus.publish( make_key_event( keyUpKind ) );
+    bus.publish( make_mouse_move_event( firstMoveAxis, firstMoveDelta ) );
 
     const auto first = subscription.try_pop();
     ASSERT_TRUE( first.has_value() );
-    EXPECT_EQ( first->sequence, kFirstSequence );
+    EXPECT_EQ( first->sequence, firstSequence );
 
     const auto second = subscription.try_pop();
     ASSERT_TRUE( second.has_value() );
-    EXPECT_EQ( second->sequence, kSecondSequence );
+    EXPECT_EQ( second->sequence, secondSequence );
 
     const auto third = subscription.try_pop();
     ASSERT_TRUE( third.has_value() );
-    EXPECT_EQ( third->sequence, kThirdSequence );
+    EXPECT_EQ( third->sequence, thirdSequence );
 
     EXPECT_FALSE( subscription.try_pop().has_value() );
 }
@@ -145,29 +145,29 @@ TEST( EventBus,
     grab::EventBus bus;
     auto           subscription = bus.subscribe(
         grab::EventFilter{
-            .kinds      = { kMouseMoveKind },
+            .kinds      = { mouseMoveKind },
             .categories = {},
         },
-        kSmallQueueDepth
+        smallQueueDepth
     );
 
     auto publish_future = std::async(
         std::launch::async,
         [&]
         {
-            bus.publish( make_mouse_move_event( kFirstMoveAxis, kFirstMoveDelta ) );
-            bus.publish( make_mouse_move_event( kSecondMoveAxis, kSecondMoveDelta ) );
-            bus.publish( make_mouse_move_event( kLastMoveAxis, kLastMoveDelta ) );
+            bus.publish( make_mouse_move_event( firstMoveAxis, firstMoveDelta ) );
+            bus.publish( make_mouse_move_event( secondMoveAxis, secondMoveDelta ) );
+            bus.publish( make_mouse_move_event( lastMoveAxis, lastMoveDelta ) );
         }
     );
-    ASSERT_EQ( publish_future.wait_for( kPublishTimeout ), std::future_status::ready );
+    ASSERT_EQ( publish_future.wait_for( publishTimeout ), std::future_status::ready );
     publish_future.get();
 
-    expect_mouse_move( subscription.try_pop(), kFirstMoveAxis, kFirstMoveDelta );
-    expect_mouse_move( subscription.try_pop(), kLastMoveAxis, kLastMoveDelta );
+    expect_mouse_move( subscription.try_pop(), firstMoveAxis, firstMoveDelta );
+    expect_mouse_move( subscription.try_pop(), lastMoveAxis, lastMoveDelta );
 
     EXPECT_FALSE( subscription.try_pop().has_value() );
-    EXPECT_EQ( subscription.overflow_count(), kNoOverflows );
+    EXPECT_EQ( subscription.overflow_count(), noOverflows );
     EXPECT_FALSE( subscription.lagging() );
 }
 
@@ -177,27 +177,27 @@ TEST( EventBus,
     grab::EventBus bus;
     auto           subscription = bus.subscribe(
         grab::EventFilter{
-            .kinds      = { kKeyDownKind },
+            .kinds      = { keyDownKind },
             .categories = {},
         },
-        kSmallQueueDepth
+        smallQueueDepth
     );
 
     auto publish_future =
         std::async( std::launch::async,
                     [&]
                     {
-                        for( std::size_t index = kFirstPublishIndex;
-                             index < kOverflowPublishCount;
+                        for( std::size_t index = firstPublishIndex;
+                             index < overflowPublishCount;
                              ++index )
                         {
-                            bus.publish( make_key_event( kKeyDownKind ) );
+                            bus.publish( make_key_event( keyDownKind ) );
                         }
                     } );
-    ASSERT_EQ( publish_future.wait_for( kPublishTimeout ), std::future_status::ready );
+    ASSERT_EQ( publish_future.wait_for( publishTimeout ), std::future_status::ready );
     publish_future.get();
 
-    EXPECT_EQ( subscription.overflow_count(), kExpectedOverflowCount );
+    EXPECT_EQ( subscription.overflow_count(), expectedOverflowCount );
     EXPECT_TRUE( subscription.lagging() );
 
     EXPECT_TRUE( subscription.try_pop().has_value() );
@@ -222,9 +222,9 @@ TEST( EventBus,
         }
     );
 
-    bus.publish( make_key_event( kKeyDownKind ) );
+    bus.publish( make_key_event( keyDownKind ) );
 
-    EXPECT_EQ( notified_future.wait_for( kNotifyTimeout ), std::future_status::ready );
+    EXPECT_EQ( notified_future.wait_for( notifyTimeout ), std::future_status::ready );
 }
 
 TEST( EventBus,
@@ -232,24 +232,24 @@ TEST( EventBus,
 {
     grab::EventBus   bus;
     auto             survivor = bus.subscribe( grab::EventFilter{} );
-    std::atomic<int> destroyed_notifications{ kNoNotifications };
+    std::atomic<int> destroyed_notifications{ noNotifications };
 
     {
         auto destroyed = bus.subscribe( grab::EventFilter{} );
         destroyed.set_notify(
             [&]
             {
-                destroyed_notifications.fetch_add( kOneNotification,
+                destroyed_notifications.fetch_add( oneNotification,
                                                    std::memory_order_relaxed );
             }
         );
     }
 
-    bus.publish( make_key_event( kKeyDownKind ) );
+    bus.publish( make_key_event( keyDownKind ) );
 
     auto delivered = survivor.try_pop();
     ASSERT_TRUE( delivered.has_value() );
-    EXPECT_EQ( delivered->sequence, kFirstSequence );
+    EXPECT_EQ( delivered->sequence, firstSequence );
     EXPECT_EQ( destroyed_notifications.load( std::memory_order_relaxed ),
-               kNoNotifications );
+               noNotifications );
 }

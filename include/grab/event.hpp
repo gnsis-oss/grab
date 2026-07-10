@@ -13,39 +13,39 @@ namespace grab
 
     enum class EventCategory : std::uint8_t
     {
-        unspecified   = 0U,
-        input         = 1U,
-        window        = 2U,
-        accessibility = 3U,
-        integration   = 4U,
-        browser       = 5U,
-        state         = 6U,
+        Unspecified   = 0U,
+        Input         = 1U,
+        Window        = 2U,
+        Accessibility = 3U,
+        Integration   = 4U,
+        Browser       = 5U,
+        State         = 6U,
     };
 
     enum class EventKind : std::uint16_t
     {
-        unspecified          = 0U,
-        key_down             = 100U,
-        key_up               = 101U,
-        key_combo            = 102U,
-        mouse_click          = 103U,
-        mouse_move           = 104U,
-        idle_start           = 105U,
-        idle_end             = 106U,
-        window_focus_changed = 200U,
-        window_title_changed = 201U,
-        window_created       = 202U,
-        window_closed        = 203U,
-        a11y_button_clicked  = 300U,
-        a11y_menu_opened     = 301U,
-        a11y_menu_closed     = 302U,
-        a11y_focus_changed   = 303U,
-        a11y_text_changed    = 304U,
-        a11y_state_changed   = 305U,
-        app_tab_changed      = 400U,
-        app_context_update   = 401U,
-        browser_tab_switched = 500U,
-        state_snapshot       = 600U,
+        Unspecified        = 0U,
+        KeyDown            = 100U,
+        KeyUp              = 101U,
+        KeyCombo           = 102U,
+        MouseClick         = 103U,
+        MouseMove          = 104U,
+        IdleStart          = 105U,
+        IdleEnd            = 106U,
+        WindowFocusChanged = 200U,
+        WindowTitleChanged = 201U,
+        WindowCreated      = 202U,
+        WindowClosed       = 203U,
+        A11yButtonClicked  = 300U,
+        A11yMenuOpened     = 301U,
+        A11yMenuClosed     = 302U,
+        A11yFocusChanged   = 303U,
+        A11yTextChanged    = 304U,
+        A11yStateChanged   = 305U,
+        AppTabChanged      = 400U,
+        AppContextUpdate   = 401U,
+        BrowserTabSwitched = 500U,
+        StateSnapshot      = 600U,
     };
 
     struct InputKey
@@ -129,8 +129,8 @@ namespace grab
     {
             double        timestamp = 0.0;
             std::uint64_t sequence  = 0U;
-            EventKind     kind      = EventKind::unspecified;
-            EventCategory category  = EventCategory::unspecified;
+            EventKind     kind      = EventKind::Unspecified;
+            EventCategory category  = EventCategory::Unspecified;
             Payload       payload;
     };
 
@@ -140,38 +140,38 @@ namespace grab
     {
         switch( kind )
         {
-            case EventKind::key_down :
-            case EventKind::key_up :
-            case EventKind::key_combo :
-            case EventKind::mouse_click :
-            case EventKind::mouse_move :
-            case EventKind::idle_start :
-            case EventKind::idle_end :
-                return EventCategory::input;
-            case EventKind::window_focus_changed :
-            case EventKind::window_title_changed :
-            case EventKind::window_created :
-            case EventKind::window_closed :
-                return EventCategory::window;
-            case EventKind::a11y_button_clicked :
-            case EventKind::a11y_menu_opened :
-            case EventKind::a11y_menu_closed :
-            case EventKind::a11y_focus_changed :
-            case EventKind::a11y_text_changed :
-            case EventKind::a11y_state_changed :
-                return EventCategory::accessibility;
-            case EventKind::app_tab_changed :
-            case EventKind::app_context_update :
-                return EventCategory::integration;
-            case EventKind::browser_tab_switched :
-                return EventCategory::browser;
-            case EventKind::state_snapshot :
-                return EventCategory::state;
-            case EventKind::unspecified :
-                return EventCategory::unspecified;
+            case EventKind::KeyDown :
+            case EventKind::KeyUp :
+            case EventKind::KeyCombo :
+            case EventKind::MouseClick :
+            case EventKind::MouseMove :
+            case EventKind::IdleStart :
+            case EventKind::IdleEnd :
+                return EventCategory::Input;
+            case EventKind::WindowFocusChanged :
+            case EventKind::WindowTitleChanged :
+            case EventKind::WindowCreated :
+            case EventKind::WindowClosed :
+                return EventCategory::Window;
+            case EventKind::A11yButtonClicked :
+            case EventKind::A11yMenuOpened :
+            case EventKind::A11yMenuClosed :
+            case EventKind::A11yFocusChanged :
+            case EventKind::A11yTextChanged :
+            case EventKind::A11yStateChanged :
+                return EventCategory::Accessibility;
+            case EventKind::AppTabChanged :
+            case EventKind::AppContextUpdate :
+                return EventCategory::Integration;
+            case EventKind::BrowserTabSwitched :
+                return EventCategory::Browser;
+            case EventKind::StateSnapshot :
+                return EventCategory::State;
+            case EventKind::Unspecified :
+                return EventCategory::Unspecified;
         }
 
-        return EventCategory::unspecified;
+        return EventCategory::Unspecified;
     }
 
     struct EventFilter

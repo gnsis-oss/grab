@@ -15,16 +15,16 @@ namespace grab::input
 
     enum class GeometryTrust : std::uint8_t
     {
-        trusted,
-        estimated,
-        unavailable,
+        Trusted,
+        Estimated,
+        Unavailable,
     };
 
     struct LocatedWindow
     {
             std::uint32_t             window = 0U;
             grab::geometry::Rectangle bounds;
-            GeometryTrust             trust = GeometryTrust::unavailable;
+            GeometryTrust             trust = GeometryTrust::Unavailable;
     };
 
     class WindowLocator

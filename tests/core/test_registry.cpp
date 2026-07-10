@@ -12,20 +12,20 @@
 namespace
 {
 
-    constexpr int              kHighQuality         = 90;
-    constexpr std::string_view kScreenProviderName  = "fake-screen";
-    constexpr std::string_view kInputProviderName   = "fake-input";
-    constexpr auto             kExpectedScreenCount = 1U;
-    constexpr auto             kExpectedAllCount    = 2U;
-    constexpr auto             kFirstScreenProvider = 0U;
-    constexpr auto             kFirstProvider       = 0U;
-    constexpr auto             kSecondProvider      = 1U;
+    constexpr int              highQuality         = 90;
+    constexpr std::string_view screenProviderName  = "fake-screen";
+    constexpr std::string_view inputProviderName   = "fake-input";
+    constexpr auto             expectedScreenCount = 1U;
+    constexpr auto             expectedAllCount    = 2U;
+    constexpr auto             firstScreenProvider = 0U;
+    constexpr auto             firstProvider       = 0U;
+    constexpr auto             secondProvider      = 1U;
 
     grab::Availability
     available( int quality )
     {
         return {
-            .state   = grab::AvailabilityState::available,
+            .state   = grab::AvailabilityState::Available,
             .reason  = "",
             .quality = quality,
         };
@@ -38,25 +38,25 @@ TEST( Registry,
 {
     grab::core::RegistryBuilder builder;
     builder.add( std::make_unique<grab::test::FakeProvider>(
-        std::string{ kScreenProviderName },
+        std::string{ screenProviderName },
         std::vector<grab::Capability>{
-            grab::Capability::screen_window_image,
+            grab::Capability::ScreenWindowImage,
         },
-        available( kHighQuality )
+        available( highQuality )
     ) );
     builder.add(
-        std::make_unique<grab::test::FakeProvider>( std::string{ kInputProviderName },
+        std::make_unique<grab::test::FakeProvider>( std::string{ inputProviderName },
                                                     std::vector<grab::Capability>{
-                                                        grab::Capability::mouse_click,
+                                                        grab::Capability::MouseClick,
                                                     },
-                                                    available( kHighQuality ) )
+                                                    available( highQuality ) )
     );
     const auto registry = std::move( builder ).build();
 
-    const auto screen = registry.providers_for( grab::Capability::screen_window_image );
-    ASSERT_EQ( screen.size(), kExpectedScreenCount );
-    EXPECT_EQ( screen.at( kFirstScreenProvider )->info().name, kScreenProviderName );
-    EXPECT_TRUE( registry.providers_for( grab::Capability::key_chord ).empty() );
+    const auto screen   = registry.providers_for( grab::Capability::ScreenWindowImage );
+    ASSERT_EQ( screen.size(), expectedScreenCount );
+    EXPECT_EQ( screen.at( firstScreenProvider )->info().name, screenProviderName );
+    EXPECT_TRUE( registry.providers_for( grab::Capability::KeyChord ).empty() );
 }
 
 TEST( Registry,
@@ -64,23 +64,23 @@ TEST( Registry,
 {
     grab::core::RegistryBuilder builder;
     builder.add( std::make_unique<grab::test::FakeProvider>(
-        std::string{ kScreenProviderName },
+        std::string{ screenProviderName },
         std::vector<grab::Capability>{
-            grab::Capability::screen_window_image,
+            grab::Capability::ScreenWindowImage,
         },
-        available( kHighQuality )
+        available( highQuality )
     ) );
     builder.add(
-        std::make_unique<grab::test::FakeProvider>( std::string{ kInputProviderName },
+        std::make_unique<grab::test::FakeProvider>( std::string{ inputProviderName },
                                                     std::vector<grab::Capability>{
-                                                        grab::Capability::mouse_click,
+                                                        grab::Capability::MouseClick,
                                                     },
-                                                    available( kHighQuality ) )
+                                                    available( highQuality ) )
     );
     const auto registry  = std::move( builder ).build();
 
     const auto providers = registry.all();
-    ASSERT_EQ( providers.size(), kExpectedAllCount );
-    EXPECT_EQ( providers.at( kFirstProvider )->info().name, kScreenProviderName );
-    EXPECT_EQ( providers.at( kSecondProvider )->info().name, kInputProviderName );
+    ASSERT_EQ( providers.size(), expectedAllCount );
+    EXPECT_EQ( providers.at( firstProvider )->info().name, screenProviderName );
+    EXPECT_EQ( providers.at( secondProvider )->info().name, inputProviderName );
 }

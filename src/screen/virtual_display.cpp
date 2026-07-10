@@ -27,31 +27,31 @@ namespace grab::screen
     namespace
     {
 
-        constexpr pid_t  kInvalidPid         = static_cast<pid_t>( -1 );
-        constexpr int    kXcbOk              = 0;
-        constexpr int    kSpawnSuccess       = 0;
-        constexpr int    kSystemCallFailed   = -1;
-        constexpr int    kPathExistsMode     = F_OK;
-        constexpr int    kFirstDisplayNumber = 100;
-        constexpr int    kLastDisplayNumber  = 199;
-        constexpr int    kNoWaitOptions      = 0;
-        constexpr int    kTerminateSignal = SIGTERM;    // NOLINT(misc-include-cleaner)
-        constexpr int    kKillSignal      = SIGKILL;    // NOLINT(misc-include-cleaner)
-        constexpr mode_t kNoFileMode      = 0;
-        constexpr std::size_t kXvfbArgumentCount   = 6U;
-        constexpr const char* kDevNullPath         = "/dev/null";
-        constexpr const char* kXvfbExecutable      = "Xvfb";
-        constexpr const char* kScreenOption        = "-screen";
-        constexpr const char* kDefaultScreenNumber = "0";
-        constexpr const char* kDisplayLockPrefix   = "/tmp/.X";
-        constexpr const char* kDisplayLockSuffix   = "-lock";
-        constexpr const char* kDisplaySocketPrefix = "/tmp/.X11-unix/X";
-        constexpr char        kDisplayPrefix       = ':';
-        constexpr char        kGeometrySeparator   = 'x';
-        constexpr auto        kReadyTimeout        = std::chrono::seconds{ 5 };
-        constexpr auto        kStopTimeout         = std::chrono::seconds{ 2 };
-        constexpr auto        kPollInterval        = std::chrono::milliseconds{ 50 };
-        constexpr auto        kInitialExitGrace    = std::chrono::milliseconds{ 100 };
+        constexpr pid_t  invalidPid         = static_cast<pid_t>( -1 );
+        constexpr int    xcbOk              = 0;
+        constexpr int    spawnSuccess       = 0;
+        constexpr int    systemCallFailed   = -1;
+        constexpr int    pathExistsMode     = F_OK;
+        constexpr int    firstDisplayNumber = 100;
+        constexpr int    lastDisplayNumber  = 199;
+        constexpr int    noWaitOptions      = 0;
+        constexpr int    terminateSignal    = SIGTERM;    // NOLINT(misc-include-cleaner)
+        constexpr int    killSignal         = SIGKILL;    // NOLINT(misc-include-cleaner)
+        constexpr mode_t noFileMode         = 0;
+        constexpr std::size_t xvfbArgumentCount   = 6U;
+        constexpr const char* devNullPath         = "/dev/null";
+        constexpr const char* xvfbExecutable      = "Xvfb";
+        constexpr const char* screenOption        = "-screen";
+        constexpr const char* defaultScreenNumber = "0";
+        constexpr const char* displayLockPrefix   = "/tmp/.X";
+        constexpr const char* displayLockSuffix   = "-lock";
+        constexpr const char* displaySocketPrefix = "/tmp/.X11-unix/X";
+        constexpr char        displayPrefix       = ':';
+        constexpr char        geometrySeparator   = 'x';
+        constexpr auto        readyTimeout        = std::chrono::seconds{ 5 };
+        constexpr auto        stopTimeout         = std::chrono::seconds{ 2 };
+        constexpr auto        pollInterval        = std::chrono::milliseconds{ 50 };
+        constexpr auto        initialExitGrace    = std::chrono::milliseconds{ 100 };
 
         using XcbConnection =
             std::unique_ptr<xcb_connection_t, decltype( &xcb_disconnect )>;
@@ -67,7 +67,7 @@ namespace grab::screen
 
                 ~SpawnFileActions()
                 {
-                    if( error_ == kSpawnSuccess )
+                    if( error_ == spawnSuccess )
                     {
                         static_cast<void>(
                             posix_spawn_file_actions_destroy( &actions_ )
@@ -99,7 +99,7 @@ namespace grab::screen
             private:
 
                 posix_spawn_file_actions_t actions_{};
-                int                        error_ = kSpawnSuccess;
+                int                        error_ = spawnSuccess;
         };
 
         [[nodiscard]]
@@ -118,9 +118,9 @@ namespace grab::screen
         {
             if( error_number == ENOENT || error_number == EACCES )
             {
-                return grab::ErrorCode::device_inaccessible;
+                return grab::ErrorCode::DeviceInaccessible;
             }
-            return grab::ErrorCode::internal_fault;
+            return grab::ErrorCode::InternalFault;
         }
 
         [[nodiscard]]
@@ -134,14 +134,14 @@ namespace grab::screen
             };
             return connection !=
                    nullptr &&
-                   xcb_connection_has_error( connection.get() ) == kXcbOk;
+                   xcb_connection_has_error( connection.get() ) == xcbOk;
         }
 
         [[nodiscard]]
         bool
         path_exists( const std::string& path ) noexcept
         {
-            if( access( path.c_str(), kPathExistsMode ) == kSpawnSuccess )
+            if( access( path.c_str(), pathExistsMode ) == spawnSuccess )
             {
                 return true;
             }
@@ -155,24 +155,24 @@ namespace grab::screen
         {
             const std::string number = std::to_string( display_number );
             return path_exists(
-                       std::string{ kDisplayLockPrefix } + number + kDisplayLockSuffix
+                       std::string{ displayLockPrefix } + number + displayLockSuffix
                    ) ||
-                   path_exists( std::string{ kDisplaySocketPrefix } + number );
+                   path_exists( std::string{ displaySocketPrefix } + number );
         }
 
         [[nodiscard]]
         std::string
         display_name_for( int display_number )
         {
-            return std::string{ 1U, kDisplayPrefix } + std::to_string( display_number );
+            return std::string{ 1U, displayPrefix } + std::to_string( display_number );
         }
 
         [[nodiscard]]
         grab::Result<std::string>
         find_free_display()
         {
-            for( int display_number = kFirstDisplayNumber;
-                 display_number <= kLastDisplayNumber;
+            for( int display_number = firstDisplayNumber;
+                 display_number <= lastDisplayNumber;
                  ++display_number )
             {
                 if( display_has_existing_artifact( display_number ) )
@@ -187,7 +187,7 @@ namespace grab::screen
                 }
             }
 
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "No free X display found in :100..:199" );
         }
 
@@ -198,9 +198,9 @@ namespace grab::screen
                          std::uint8_t  depth )
         {
             return std::to_string( width ) +
-                   kGeometrySeparator +
+                   geometrySeparator +
                    std::to_string( height ) +
-                   kGeometrySeparator +
+                   geometrySeparator +
                    std::to_string( static_cast<unsigned int>( depth ) );
         }
 
@@ -210,36 +210,36 @@ namespace grab::screen
         {
             const int stdin_result = posix_spawn_file_actions_addopen( actions.get(),
                                                                        STDIN_FILENO,
-                                                                       kDevNullPath,
+                                                                       devNullPath,
                                                                        O_RDONLY,
-                                                                       kNoFileMode );
-            if( stdin_result != kSpawnSuccess )
+                                                                       noFileMode );
+            if( stdin_result != spawnSuccess )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    error_message( "posix_spawn stdin redirect",
                                                   stdin_result ) );
             }
 
             const int stdout_result = posix_spawn_file_actions_addopen( actions.get(),
                                                                         STDOUT_FILENO,
-                                                                        kDevNullPath,
+                                                                        devNullPath,
                                                                         O_WRONLY,
-                                                                        kNoFileMode );
-            if( stdout_result != kSpawnSuccess )
+                                                                        noFileMode );
+            if( stdout_result != spawnSuccess )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    error_message( "posix_spawn stdout redirect",
                                                   stdout_result ) );
             }
 
             const int stderr_result = posix_spawn_file_actions_addopen( actions.get(),
                                                                         STDERR_FILENO,
-                                                                        kDevNullPath,
+                                                                        devNullPath,
                                                                         O_WRONLY,
-                                                                        kNoFileMode );
-            if( stderr_result != kSpawnSuccess )
+                                                                        noFileMode );
+            if( stderr_result != spawnSuccess )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    error_message( "posix_spawn stderr redirect",
                                                   stderr_result ) );
             }
@@ -253,9 +253,9 @@ namespace grab::screen
                     const std::string& geometry )
         {
             SpawnFileActions actions;
-            if( actions.error() != kSpawnSuccess )
+            if( actions.error() != spawnSuccess )
             {
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    error_message( "posix_spawn_file_actions_init",
                                                   actions.error() ) );
             }
@@ -266,12 +266,12 @@ namespace grab::screen
                 return std::unexpected( std::move( redirects.error() ) );
             }
 
-            std::string                           executable{ kXvfbExecutable };
-            std::string                           screen_option{ kScreenOption };
-            std::string                           screen_number{ kDefaultScreenNumber };
-            std::string                           display_argument{ display };
-            std::string                           geometry_argument{ geometry };
-            std::array<char*, kXvfbArgumentCount> arguments{
+            std::string                          executable{ xvfbExecutable };
+            std::string                          screen_option{ screenOption };
+            std::string                          screen_number{ defaultScreenNumber };
+            std::string                          display_argument{ display };
+            std::string                          geometry_argument{ geometry };
+            std::array<char*, xvfbArgumentCount> arguments{
                 executable.data(),
                 display_argument.data(),
                 screen_option.data(),
@@ -280,14 +280,14 @@ namespace grab::screen
                 nullptr,
             };
 
-            pid_t     child_pid    = kInvalidPid;
+            pid_t     child_pid    = invalidPid;
             const int spawn_result = posix_spawnp( &child_pid,
                                                    executable.c_str(),
                                                    actions.get(),
                                                    nullptr,
                                                    arguments.data(),
                                                    environ );
-            if( spawn_result != kSpawnSuccess )
+            if( spawn_result != spawnSuccess )
             {
                 return grab::fail( spawn_error_code( spawn_result ),
                                    error_message( "posix_spawnp Xvfb", spawn_result ) );
@@ -332,7 +332,7 @@ namespace grab::screen
                 }
                 if( wait_result == child_pid )
                 {
-                    return grab::fail( grab::ErrorCode::internal_fault,
+                    return grab::fail( grab::ErrorCode::InternalFault,
                                        "Xvfb exited before accepting connections: " +
                                            wait_status_message( status ) );
                 }
@@ -342,10 +342,10 @@ namespace grab::screen
                 }
                 if( errno == ECHILD )
                 {
-                    return grab::fail( grab::ErrorCode::internal_fault,
+                    return grab::fail( grab::ErrorCode::InternalFault,
                                        "Xvfb child process is not waitable" );
                 }
-                return grab::fail( grab::ErrorCode::internal_fault,
+                return grab::fail( grab::ErrorCode::InternalFault,
                                    error_message( "waitpid", errno ) );
             }
         }
@@ -356,8 +356,8 @@ namespace grab::screen
                           const std::string& display )
         {
             const auto start_time       = std::chrono::steady_clock::now();
-            const auto first_exit_check = start_time + kInitialExitGrace;
-            const auto deadline         = start_time + kReadyTimeout;
+            const auto first_exit_check = start_time + initialExitGrace;
+            const auto deadline         = start_time + readyTimeout;
             auto       now              = start_time;
             while( now < deadline )
             {
@@ -375,7 +375,7 @@ namespace grab::screen
                     }
                 }
 
-                std::this_thread::sleep_for( kPollInterval );
+                std::this_thread::sleep_for( pollInterval );
                 now = std::chrono::steady_clock::now();
             }
 
@@ -385,14 +385,14 @@ namespace grab::screen
                 return std::unexpected( std::move( child_running.error() ) );
             }
 
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "Xvfb display did not become connectable" );
         }
 
         void
         wait_for_child_after_signal( pid_t child_pid ) noexcept
         {
-            const auto deadline = std::chrono::steady_clock::now() + kStopTimeout;
+            const auto deadline = std::chrono::steady_clock::now() + stopTimeout;
             while( std::chrono::steady_clock::now() < deadline )
             {
                 int         status      = 0;
@@ -405,19 +405,19 @@ namespace grab::screen
                 {
                     return;
                 }
-                if( wait_result == kSystemCallFailed && errno == ECHILD )
+                if( wait_result == systemCallFailed && errno == ECHILD )
                 {
                     return;
                 }
-                if( wait_result == kSystemCallFailed && errno == EINTR )
+                if( wait_result == systemCallFailed && errno == EINTR )
                 {
                     continue;
                 }
-                std::this_thread::sleep_for( kPollInterval );
+                std::this_thread::sleep_for( pollInterval );
             }
 
             // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <signal.h>.
-            if( kill( child_pid, kKillSignal ) == kSystemCallFailed && errno == ESRCH )
+            if( kill( child_pid, killSignal ) == systemCallFailed && errno == ESRCH )
             {
                 return;
             }
@@ -425,12 +425,12 @@ namespace grab::screen
             for( ;; )
             {
                 int         status      = 0;
-                const pid_t wait_result = waitpid( child_pid, &status, kNoWaitOptions );
+                const pid_t wait_result = waitpid( child_pid, &status, noWaitOptions );
                 if( wait_result == child_pid )
                 {
                     return;
                 }
-                if( wait_result == kSystemCallFailed && errno == EINTR )
+                if( wait_result == systemCallFailed && errno == EINTR )
                 {
                     continue;
                 }
@@ -441,14 +441,14 @@ namespace grab::screen
         void
         terminate_child( pid_t child_pid ) noexcept
         {
-            if( child_pid == kInvalidPid )
+            if( child_pid == invalidPid )
             {
                 return;
             }
 
             // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <signal.h>.
-            if( kill( child_pid, kTerminateSignal ) ==
-                kSystemCallFailed &&
+            if( kill( child_pid, terminateSignal ) ==
+                systemCallFailed &&
                 errno == ESRCH )
             {
                 return;
@@ -473,7 +473,7 @@ namespace grab::screen
 
     VirtualDisplay::VirtualDisplay( VirtualDisplay&& other ) noexcept :
         child_pid_( std::exchange( other.child_pid_,
-                                   kInvalidPid ) ),
+                                   invalidPid ) ),
         display_( std::move( other.display_ ) )
     {
     }
@@ -484,7 +484,7 @@ namespace grab::screen
         if( this != &other )
         {
             stop();
-            child_pid_ = std::exchange( other.child_pid_, kInvalidPid );
+            child_pid_ = std::exchange( other.child_pid_, invalidPid );
             display_   = std::move( other.display_ );
         }
         return *this;
@@ -497,7 +497,7 @@ namespace grab::screen
     {
         if( width == 0U || height == 0U || depth == 0U )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "Virtual display dimensions and depth must be non-zero" );
         }
 
@@ -533,7 +533,7 @@ namespace grab::screen
     VirtualDisplay::stop() noexcept
     {
         terminate_child( child_pid_ );
-        child_pid_ = kInvalidPid;
+        child_pid_ = invalidPid;
         display_.clear();
     }
 

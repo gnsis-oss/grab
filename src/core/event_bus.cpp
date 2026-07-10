@@ -17,15 +17,15 @@ namespace grab
     namespace
     {
 
-        constexpr std::uint64_t kFirstSequence = 1U;
-        constexpr std::uint64_t kNoOverflows   = 0U;
-        constexpr std::size_t   kEmptyQueue    = 0U;
+        constexpr std::uint64_t firstSequence = 1U;
+        constexpr std::uint64_t noOverflows   = 0U;
+        constexpr std::size_t   emptyQueue    = 0U;
 
         [[nodiscard]]
         bool
         coalescible_motion( const Event& event ) noexcept
         {
-            return event.kind == EventKind::mouse_move;
+            return event.kind == EventKind::MouseMove;
         }
 
     }    // namespace
@@ -74,7 +74,7 @@ namespace grab::detail
                     }
 
                     if( coalescible_motion( event ) &&
-                        buffer_.at( back_index() ).kind == EventKind::mouse_move )
+                        buffer_.at( back_index() ).kind == EventKind::MouseMove )
                     {
                         buffer_.at( back_index() ) = event;
                         notify                     = notify_;
@@ -91,7 +91,7 @@ namespace grab::detail
             try_pop()
             {
                 const std::scoped_lock lock( mutex_ );
-                if( size_ == kEmptyQueue )
+                if( size_ == emptyQueue )
                 {
                     return std::nullopt;
                 }
@@ -160,7 +160,7 @@ namespace grab::detail
             std::size_t                head_ = 0U;
             std::size_t                size_ = 0U;
             std::function<void()>      notify_;
-            std::atomic<std::uint64_t> overflow_count_{ kNoOverflows };
+            std::atomic<std::uint64_t> overflow_count_{ noOverflows };
             std::atomic_bool           lagging_{ false };
     };
 
@@ -237,7 +237,7 @@ namespace grab::detail
 
             std::mutex                                      mutex_;
             std::vector<std::shared_ptr<SubscriptionState>> subscriptions_;
-            std::uint64_t next_sequence_ = kFirstSequence;
+            std::uint64_t next_sequence_ = firstSequence;
     };
 
 }    // namespace grab::detail
@@ -294,7 +294,7 @@ namespace grab
     {
         if( state_ == nullptr )
         {
-            return kNoOverflows;
+            return noOverflows;
         }
         return state_->overflow_count();
     }

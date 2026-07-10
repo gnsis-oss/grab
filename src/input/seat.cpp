@@ -18,12 +18,12 @@ namespace grab::input
     namespace
     {
 
-        constexpr std::string_view kXtestExtensionName = "XTEST";
-        constexpr int              kXcbOk              = 0;
-        constexpr std::uint8_t     kCurrentDevice      = 0U;
-        constexpr std::uint8_t     kNoDetail           = 0U;
-        constexpr std::int16_t     kNoRootX            = 0;
-        constexpr std::int16_t     kNoRootY            = 0;
+        constexpr std::string_view xtestExtensionName = "XTEST";
+        constexpr int              xcbOk              = 0;
+        constexpr std::uint8_t     currentDevice      = 0U;
+        constexpr std::uint8_t     noDetail           = 0U;
+        constexpr std::int16_t     noRootX            = 0;
+        constexpr std::int16_t     noRootY            = 0;
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -45,7 +45,7 @@ namespace grab::input
         {
             if( connection == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB seat connection is not open" );
             }
             return {};
@@ -60,7 +60,7 @@ namespace grab::input
             const auto error = take_xcb_owned( xcb_request_check( connection, cookie ) );
             if( error != nullptr )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    std::string{ operation } +
                                        " failed with X error " +
                                        std::to_string( error->error_code ) );
@@ -84,7 +84,7 @@ namespace grab::input
 
             if( iterator.data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB default screen is unavailable" );
             }
 
@@ -97,8 +97,8 @@ namespace grab::input
         {
             const auto extension_cookie = xcb_query_extension(
                 connection,
-                static_cast<std::uint16_t>( kXtestExtensionName.size() ),
-                kXtestExtensionName.data()
+                static_cast<std::uint16_t>( xtestExtensionName.size() ),
+                xtestExtensionName.data()
             );
             xcb_generic_error_t* raw_extension_error = nullptr;
             const auto           extension_reply =
@@ -113,7 +113,7 @@ namespace grab::input
                 nullptr ||
                 extension_reply->present == 0U )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XTEST extension is unavailable" );
             }
 
@@ -129,7 +129,7 @@ namespace grab::input
 
             if( version_error != nullptr || version_reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::device_inaccessible,
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XTEST version query failed" );
             }
 
@@ -160,7 +160,7 @@ namespace grab::input
                                                                root,
                                                                root_x,
                                                                root_y,
-                                                               kCurrentDevice ),
+                                                               currentDevice ),
                                   operation );
         }
 
@@ -214,9 +214,9 @@ namespace grab::input
         };
         if( connection ==
             nullptr ||
-            xcb_connection_has_error( connection.get() ) != kXcbOk )
+            xcb_connection_has_error( connection.get() ) != xcbOk )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "XCB display connection failed" );
         }
 
@@ -242,7 +242,7 @@ namespace grab::input
         return fake_input( connection_,
                            root_,
                            XCB_MOTION_NOTIFY,
-                           kNoDetail,
+                           noDetail,
                            x,
                            y,
                            "XTEST pointer move" );
@@ -254,7 +254,7 @@ namespace grab::input
     {
         if( button_detail == 0U )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "XTEST button detail must be nonzero" );
         }
 
@@ -262,8 +262,8 @@ namespace grab::input
                            root_,
                            press ? XCB_BUTTON_PRESS : XCB_BUTTON_RELEASE,
                            button_detail,
-                           kNoRootX,
-                           kNoRootY,
+                           noRootX,
+                           noRootY,
                            "XTEST button event" );
     }
 
@@ -273,7 +273,7 @@ namespace grab::input
     {
         if( keycode == 0U )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "XTEST keycode must be nonzero" );
         }
 
@@ -281,8 +281,8 @@ namespace grab::input
                            root_,
                            press ? XCB_KEY_PRESS : XCB_KEY_RELEASE,
                            keycode,
-                           kNoRootX,
-                           kNoRootY,
+                           noRootX,
+                           noRootY,
                            "XTEST key event" );
     }
 
@@ -297,9 +297,9 @@ namespace grab::input
 
         if( xcb_flush( connection_ ) <=
             0 ||
-            xcb_connection_has_error( connection_ ) != kXcbOk )
+            xcb_connection_has_error( connection_ ) != xcbOk )
         {
-            return grab::fail( grab::ErrorCode::device_inaccessible,
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "XCB seat flush failed" );
         }
 

@@ -12,8 +12,8 @@
 namespace
 {
 
-    constexpr auto kCallbackTimeout   = std::chrono::seconds{ 2 };
-    constexpr auto kSessionClosedCode = grab::ErrorCode::session_closed;
+    constexpr auto callbackTimeout   = std::chrono::seconds{ 2 };
+    constexpr auto sessionClosedCode = grab::ErrorCode::SessionClosed;
 
 }    // namespace
 
@@ -37,8 +37,7 @@ TEST( Session,
     );
     ASSERT_TRUE( post_result.has_value() );
 
-    if( callback_thread_future.wait_for( kCallbackTimeout ) !=
-        std::future_status::ready )
+    if( callback_thread_future.wait_for( callbackTimeout ) != std::future_status::ready )
     {
         session->close();
         FAIL() << "posted callback did not run";
@@ -78,7 +77,7 @@ TEST( Session,
         }
     );
     ASSERT_FALSE( post_result.has_value() );
-    EXPECT_EQ( post_result.error().code, kSessionClosedCode );
+    EXPECT_EQ( post_result.error().code, sessionClosedCode );
 }
 
 TEST( Session,
@@ -101,7 +100,7 @@ TEST( Session,
         );
         ASSERT_TRUE( post_result.has_value() );
 
-        if( task_ran_future.wait_for( kCallbackTimeout ) != std::future_status::ready )
+        if( task_ran_future.wait_for( callbackTimeout ) != std::future_status::ready )
         {
             session->close();
             FAIL() << "posted callback did not run before destruction";

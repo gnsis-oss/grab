@@ -18,27 +18,27 @@
 namespace
 {
 
-    constexpr const char*   kXvfbDisplay     = ":93";
-    constexpr const char*   kBadDisplay      = ":bad-nonexistent-93";
-    constexpr int           kXcbOk           = 0;
-    constexpr std::int16_t  kWindowX         = 48;
-    constexpr std::int16_t  kWindowY         = 64;
-    constexpr std::int16_t  kOccluderX       = 48;
-    constexpr std::int16_t  kOccluderY       = 64;
-    constexpr std::uint16_t kWindowWidth     = 160U;
-    constexpr std::uint16_t kWindowHeight    = 96U;
-    constexpr std::uint16_t kOccluderWidth   = 200U;
-    constexpr std::uint16_t kOccluderHeight  = 128U;
-    constexpr std::uint16_t kWindowBorder    = 0U;
-    constexpr std::uint16_t kXvfbWidth       = 1'280U;
-    constexpr std::uint16_t kXvfbHeight      = 1'024U;
-    constexpr std::uint32_t kKnownColor      = 0X00'33'66'CCU;
-    constexpr std::uint32_t kOccluderColor   = 0X00'00'CC'33U;
-    constexpr std::uint32_t kWindowValueMask = XCB_CW_BACK_PIXEL;
-    constexpr std::uint8_t  kExpectedRed     = 0X33U;
-    constexpr std::uint8_t  kExpectedGreen   = 0X66U;
-    constexpr std::uint8_t  kExpectedBlue    = 0XCCU;
-    constexpr auto          kPaintDelay      = std::chrono::milliseconds{ 50 };
+    constexpr const char*   xvfbDisplay     = ":93";
+    constexpr const char*   badDisplay      = ":bad-nonexistent-93";
+    constexpr int           xcbOk           = 0;
+    constexpr std::int16_t  windowX         = 48;
+    constexpr std::int16_t  windowY         = 64;
+    constexpr std::int16_t  occluderX       = 48;
+    constexpr std::int16_t  occluderY       = 64;
+    constexpr std::uint16_t windowWidth     = 160U;
+    constexpr std::uint16_t windowHeight    = 96U;
+    constexpr std::uint16_t occluderWidth   = 200U;
+    constexpr std::uint16_t occluderHeight  = 128U;
+    constexpr std::uint16_t windowBorder    = 0U;
+    constexpr std::uint16_t xvfbWidth       = 1'280U;
+    constexpr std::uint16_t xvfbHeight      = 1'024U;
+    constexpr std::uint32_t knownColor      = 0X00'33'66'CCU;
+    constexpr std::uint32_t occluderColor   = 0X00'00'CC'33U;
+    constexpr std::uint32_t windowValueMask = XCB_CW_BACK_PIXEL;
+    constexpr std::uint8_t  expectedRed     = 0X33U;
+    constexpr std::uint8_t  expectedGreen   = 0X66U;
+    constexpr std::uint8_t  expectedBlue    = 0XCCU;
+    constexpr auto          paintDelay      = std::chrono::milliseconds{ 50 };
 
     template<typename T>
     using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -131,7 +131,7 @@ namespace
     {
         if( xcb_flush( connection ) <=
             0 ||
-            xcb_connection_has_error( connection ) != kXcbOk )
+            xcb_connection_has_error( connection ) != xcbOk )
         {
             return testing::AssertionFailure() << "xcb_flush failed";
         }
@@ -160,16 +160,16 @@ namespace
                                                           y,
                                                           width,
                                                           height,
-                                                          kWindowBorder,
+                                                          windowBorder,
                                                           XCB_WINDOW_CLASS_INPUT_OUTPUT,
                                                           screen.root_visual,
-                                                          kWindowValueMask,
+                                                          windowValueMask,
                                                           values.data() ) )
         );
         EXPECT_TRUE( request_succeeded( connection,
                                         xcb_map_window_checked( connection, window ) ) );
         EXPECT_TRUE( flush_succeeded( connection ) );
-        std::this_thread::sleep_for( kPaintDelay );
+        std::this_thread::sleep_for( paintDelay );
         return window;
     }
 
@@ -190,16 +190,16 @@ namespace
     void
     expect_sample_matches_known_color( const grab::Image& image )
     {
-        constexpr std::uint32_t kSampleX = kWindowWidth / 2U;
-        constexpr std::uint32_t kSampleY = kWindowHeight / 2U;
-        ASSERT_GE( image.width, kWindowWidth );
-        ASSERT_GE( image.height, kWindowHeight );
+        constexpr std::uint32_t sampleX = windowWidth / 2U;
+        constexpr std::uint32_t sampleY = windowHeight / 2U;
+        ASSERT_GE( image.width, windowWidth );
+        ASSERT_GE( image.height, windowHeight );
         ASSERT_TRUE( image.format ==
-                     grab::PixelFormat::bgra ||
-                     image.format == grab::PixelFormat::bgr );
-        EXPECT_EQ( byte_at( image, kSampleX, kSampleY, 0U ), kExpectedBlue );
-        EXPECT_EQ( byte_at( image, kSampleX, kSampleY, 1U ), kExpectedGreen );
-        EXPECT_EQ( byte_at( image, kSampleX, kSampleY, 2U ), kExpectedRed );
+                     grab::PixelFormat::Bgra ||
+                     image.format == grab::PixelFormat::Bgr );
+        EXPECT_EQ( byte_at( image, sampleX, sampleY, 0U ), expectedBlue );
+        EXPECT_EQ( byte_at( image, sampleX, sampleY, 1U ), expectedGreen );
+        EXPECT_EQ( byte_at( image, sampleX, sampleY, 2U ), expectedRed );
     }
 
 }    // namespace
@@ -207,82 +207,82 @@ namespace
 TEST( X11Capturer,
       CapturesSolidColorWindow )
 {
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen, nullptr );
     const xcb_window_t window   = create_solid_window( connection.get(),
                                                        *screen,
-                                                       kWindowX,
-                                                       kWindowY,
-                                                       kWindowWidth,
-                                                       kWindowHeight,
-                                                       kKnownColor );
+                                                       windowX,
+                                                       windowY,
+                                                       windowWidth,
+                                                       windowHeight,
+                                                       knownColor );
 
-    auto               capturer = grab::screen::X11Capturer::open( kXvfbDisplay );
+    auto               capturer = grab::screen::X11Capturer::open( xvfbDisplay );
     ASSERT_TRUE( capturer.has_value() ) << capturer.error().message;
     auto image = capturer->capture_window( window );
 
     ASSERT_TRUE( image.has_value() ) << image.error().message;
-    EXPECT_EQ( image->width, kWindowWidth );
-    EXPECT_EQ( image->height, kWindowHeight );
+    EXPECT_EQ( image->width, windowWidth );
+    EXPECT_EQ( image->height, windowHeight );
     expect_sample_matches_known_color( *image );
 }
 
 TEST( X11Capturer,
       CapturesOccludedWindowWithoutRaising )
 {
-    const TestConnection connection{ kXvfbDisplay };
+    const TestConnection connection{ xvfbDisplay };
     ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), kXcbOk );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
     const xcb_screen_t* screen =
         default_screen( connection.get(), connection.screen_index() );
     ASSERT_NE( screen, nullptr );
     const xcb_window_t target = create_solid_window( connection.get(),
                                                      *screen,
-                                                     kWindowX,
-                                                     kWindowY,
-                                                     kWindowWidth,
-                                                     kWindowHeight,
-                                                     kKnownColor );
+                                                     windowX,
+                                                     windowY,
+                                                     windowWidth,
+                                                     windowHeight,
+                                                     knownColor );
     static_cast<void>( create_solid_window( connection.get(),
                                             *screen,
-                                            kOccluderX,
-                                            kOccluderY,
-                                            kOccluderWidth,
-                                            kOccluderHeight,
-                                            kOccluderColor ) );
+                                            occluderX,
+                                            occluderY,
+                                            occluderWidth,
+                                            occluderHeight,
+                                            occluderColor ) );
 
-    auto capturer = grab::screen::X11Capturer::open( kXvfbDisplay );
+    auto capturer = grab::screen::X11Capturer::open( xvfbDisplay );
     ASSERT_TRUE( capturer.has_value() ) << capturer.error().message;
     auto image = capturer->capture_window( target );
 
     ASSERT_TRUE( image.has_value() ) << image.error().message;
-    EXPECT_EQ( image->width, kWindowWidth );
-    EXPECT_EQ( image->height, kWindowHeight );
+    EXPECT_EQ( image->width, windowWidth );
+    EXPECT_EQ( image->height, windowHeight );
     expect_sample_matches_known_color( *image );
 }
 
 TEST( X11Capturer,
       CaptureDisplayHasScreenDimensions )
 {
-    auto capturer = grab::screen::X11Capturer::open( kXvfbDisplay );
+    auto capturer = grab::screen::X11Capturer::open( xvfbDisplay );
     ASSERT_TRUE( capturer.has_value() ) << capturer.error().message;
 
     auto image = capturer->capture_display();
 
     ASSERT_TRUE( image.has_value() ) << image.error().message;
-    EXPECT_EQ( image->width, kXvfbWidth );
-    EXPECT_EQ( image->height, kXvfbHeight );
+    EXPECT_EQ( image->width, xvfbWidth );
+    EXPECT_EQ( image->height, xvfbHeight );
 }
 
 TEST( X11Capturer,
       OpenFailsOnBadDisplay )
 {
-    auto capturer = grab::screen::X11Capturer::open( kBadDisplay );
+    auto capturer = grab::screen::X11Capturer::open( badDisplay );
 
     ASSERT_FALSE( capturer.has_value() );
-    EXPECT_EQ( capturer.error().code, grab::ErrorCode::device_inaccessible );
+    EXPECT_EQ( capturer.error().code, grab::ErrorCode::DeviceInaccessible );
 }

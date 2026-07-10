@@ -34,7 +34,7 @@ namespace grab::cli
         {
             if( input.empty() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "fraction is empty" );
             }
 
@@ -45,12 +45,12 @@ namespace grab::cli
             const auto        parsed = std::from_chars( first, last, value );
             if( parsed.ec != std::errc{} || parsed.ptr != last )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "fraction contains an invalid number" );
             }
             if( !std::isfinite( value ) )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "fraction must be finite" );
             }
             return value;
@@ -65,13 +65,13 @@ namespace grab::cli
         const std::size_t separator = input.find( detail::fraction_pair_separator );
         if( separator == std::string_view::npos )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "fraction pair must match X,Y" );
         }
         if( input.find( detail::fraction_pair_separator, separator + 1U ) !=
             std::string_view::npos )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "fraction pair must match X,Y" );
         }
 

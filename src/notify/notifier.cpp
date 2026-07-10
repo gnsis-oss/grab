@@ -14,19 +14,19 @@ namespace grab::notify
     namespace
     {
 
-        constexpr int           kDbusCallTimeoutMs    = 2'000;
-        constexpr dbus_uint32_t kNoReplacementId      = 0U;
-        constexpr int           kDbusTypeArray        = static_cast<int>( 'a' );
-        constexpr int           kDbusTypeInt32        = static_cast<int>( 'i' );
-        constexpr int           kDbusTypeString       = static_cast<int>( 's' );
-        constexpr int           kDbusTypeUint32       = static_cast<int>( 'u' );
-        constexpr const char*   kNotificationsName    = "org.freedesktop.Notifications";
-        constexpr const char*   kNotificationsPath    = "/org/freedesktop/Notifications";
-        constexpr const char* kNotificationsInterface = "org.freedesktop.Notifications";
-        constexpr const char* kNotifyMember           = "Notify";
-        constexpr const char* kCloseNotificationMember = "CloseNotification";
-        constexpr const char* kStringArraySignature    = "s";
-        constexpr const char* kHintsSignature          = "{sv}";
+        constexpr int           dbusCallTimeoutMs = 2'000;
+        constexpr dbus_uint32_t noReplacementId   = 0U;
+        constexpr int           dbusTypeArray     = static_cast<int>( 'a' );
+        constexpr int           dbusTypeInt32     = static_cast<int>( 'i' );
+        constexpr int           dbusTypeString    = static_cast<int>( 's' );
+        constexpr int           dbusTypeUint32    = static_cast<int>( 'u' );
+        constexpr const char*   notificationsName = "org.freedesktop.Notifications";
+        constexpr const char*   notificationsPath = "/org/freedesktop/Notifications";
+        constexpr const char*   notificationsInterface = "org.freedesktop.Notifications";
+        constexpr const char*   notifyMember           = "Notify";
+        constexpr const char*   closeNotificationMember = "CloseNotification";
+        constexpr const char*   stringArraySignature    = "s";
+        constexpr const char*   hintsSignature          = "{sv}";
 
         struct DbusError
         {
@@ -86,7 +86,7 @@ namespace grab::notify
                            const DbusError& error )
         {
             return grab::Error{
-                .code       = grab::ErrorCode::device_inaccessible,
+                .code       = grab::ErrorCode::DeviceInaccessible,
                 .message    = std::string{ step } +
                               ": " +
                               error.message_or( "D-Bus operation failed" ),
@@ -101,7 +101,7 @@ namespace grab::notify
         append_allocation_error( std::string_view call,
                                  std::string_view argument )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
+            return grab::fail( grab::ErrorCode::InternalFault,
                                "D-Bus " +
                                    std::string{ call } +
                                    " " +
@@ -117,11 +117,11 @@ namespace grab::notify
         {
             const char* text = value.c_str();
             if( dbus_message_iter_append_basic( &iterator,
-                                                kDbusTypeString,
+                                                dbusTypeString,
                                                 static_cast<const void*>( &text ) ) ==
                 0 )
             {
-                return append_allocation_error( kNotifyMember, argument );
+                return append_allocation_error( notifyMember, argument );
             }
             return {};
         }
@@ -134,7 +134,7 @@ namespace grab::notify
                        std::string_view call )
         {
             if( dbus_message_iter_append_basic( &iterator,
-                                                kDbusTypeUint32,
+                                                dbusTypeUint32,
                                                 static_cast<const void*>( &value ) ) ==
                 0 )
             {
@@ -150,11 +150,11 @@ namespace grab::notify
                       std::string_view argument )
         {
             if( dbus_message_iter_append_basic( &iterator,
-                                                kDbusTypeInt32,
+                                                dbusTypeInt32,
                                                 static_cast<const void*>( &value ) ) ==
                 0 )
             {
-                return append_allocation_error( kNotifyMember, argument );
+                return append_allocation_error( notifyMember, argument );
             }
             return {};
         }
@@ -167,16 +167,16 @@ namespace grab::notify
         {
             DBusMessageIter array_iterator{};
             if( dbus_message_iter_open_container( &iterator,
-                                                  kDbusTypeArray,
+                                                  dbusTypeArray,
                                                   signature,
                                                   &array_iterator ) == 0 )
             {
-                return append_allocation_error( kNotifyMember, argument );
+                return append_allocation_error( notifyMember, argument );
             }
 
             if( dbus_message_iter_close_container( &iterator, &array_iterator ) == 0 )
             {
-                return append_allocation_error( kNotifyMember, argument );
+                return append_allocation_error( notifyMember, argument );
             }
             return {};
         }
@@ -195,10 +195,8 @@ namespace grab::notify
                 return appended;
             }
 
-            appended = append_uint32( iterator,
-                                      kNoReplacementId,
-                                      "replaces_id",
-                                      kNotifyMember );
+            appended =
+                append_uint32( iterator, noReplacementId, "replaces_id", notifyMember );
             if( !appended.has_value() )
             {
                 return appended;
@@ -222,13 +220,13 @@ namespace grab::notify
                 return appended;
             }
 
-            appended = append_empty_array( iterator, kStringArraySignature, "actions" );
+            appended = append_empty_array( iterator, stringArraySignature, "actions" );
             if( !appended.has_value() )
             {
                 return appended;
             }
 
-            appended = append_empty_array( iterator, kHintsSignature, "hints" );
+            appended = append_empty_array( iterator, hintsSignature, "hints" );
             if( !appended.has_value() )
             {
                 return appended;
@@ -244,9 +242,9 @@ namespace grab::notify
             DBusMessageIter iterator{};
             if( dbus_message_iter_init( reply, &iterator ) ==
                 0 ||
-                dbus_message_iter_get_arg_type( &iterator ) != kDbusTypeUint32 )
+                dbus_message_iter_get_arg_type( &iterator ) != dbusTypeUint32 )
             {
-                return grab::fail( grab::ErrorCode::protocol_error,
+                return grab::fail( grab::ErrorCode::ProtocolError,
                                    "D-Bus Notify response: missing notification id" );
             }
 
@@ -274,13 +272,13 @@ namespace grab::notify
     grab::Result<DbusMessagePtr>
     build_notify_message( const Notification& notification )
     {
-        DbusMessagePtr message{ dbus_message_new_method_call( kNotificationsName,
-                                                              kNotificationsPath,
-                                                              kNotificationsInterface,
-                                                              kNotifyMember ) };
+        DbusMessagePtr message{ dbus_message_new_method_call( notificationsName,
+                                                              notificationsPath,
+                                                              notificationsInterface,
+                                                              notifyMember ) };
         if( message == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
+            return grab::fail( grab::ErrorCode::InternalFault,
                                "D-Bus Notify request allocation failed" );
         }
 
@@ -320,7 +318,7 @@ namespace grab::notify
     {
         if( dbus_threads_init_default() == 0 )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
+            return grab::fail( grab::ErrorCode::InternalFault,
                                "libdbus thread support initialization failed" );
         }
 
@@ -346,7 +344,7 @@ namespace grab::notify
     {
         if( state_ == nullptr || state_->connection == nullptr )
         {
-            return grab::fail( grab::ErrorCode::session_closed,
+            return grab::fail( grab::ErrorCode::SessionClosed,
                                "notification D-Bus connection is closed" );
         }
 
@@ -360,7 +358,7 @@ namespace grab::notify
         const DbusMessagePtr reply{
             dbus_connection_send_with_reply_and_block( state_->connection.get(),
                                                        request->get(),
-                                                       kDbusCallTimeoutMs,
+                                                       dbusCallTimeoutMs,
                                                        &reply_error.value )
         };
         if( reply == nullptr )
@@ -376,19 +374,19 @@ namespace grab::notify
     {
         if( state_ == nullptr || state_->connection == nullptr )
         {
-            return grab::fail( grab::ErrorCode::session_closed,
+            return grab::fail( grab::ErrorCode::SessionClosed,
                                "notification D-Bus connection is closed" );
         }
 
         const DbusMessagePtr request{
-            dbus_message_new_method_call( kNotificationsName,
-                                          kNotificationsPath,
-                                          kNotificationsInterface,
-                                          kCloseNotificationMember )
+            dbus_message_new_method_call( notificationsName,
+                                          notificationsPath,
+                                          notificationsInterface,
+                                          closeNotificationMember )
         };
         if( request == nullptr )
         {
-            return grab::fail( grab::ErrorCode::internal_fault,
+            return grab::fail( grab::ErrorCode::InternalFault,
                                "D-Bus CloseNotification request allocation failed" );
         }
 
@@ -397,7 +395,7 @@ namespace grab::notify
         auto appended = append_uint32( iterator,
                                        static_cast<dbus_uint32_t>( id ),
                                        "id",
-                                       kCloseNotificationMember );
+                                       closeNotificationMember );
         if( !appended.has_value() )
         {
             return appended;
@@ -407,7 +405,7 @@ namespace grab::notify
         const DbusMessagePtr reply{
             dbus_connection_send_with_reply_and_block( state_->connection.get(),
                                                        request.get(),
-                                                       kDbusCallTimeoutMs,
+                                                       dbusCallTimeoutMs,
                                                        &reply_error.value )
         };
         if( reply == nullptr )

@@ -10,27 +10,27 @@
 namespace
 {
 
-    constexpr std::uint32_t kBgraBytes     = 4U;
-    constexpr std::uint32_t kRgbaBytes     = 4U;
-    constexpr std::uint32_t kRgbBytes      = 3U;
-    constexpr std::uint32_t kBgrBytes      = 3U;
-    constexpr std::uint32_t kGrayBytes     = 1U;
-    constexpr std::uint32_t kWidth         = 3U;
-    constexpr std::uint32_t kHeight        = 2U;
-    constexpr std::uint32_t kPaddingBytes  = 2U;
-    constexpr std::uint32_t kStride        = ( kWidth * kRgbBytes ) + kPaddingBytes;
-    constexpr std::uint32_t kOutOfRangeRow = kHeight;
-    constexpr std::size_t   kPixelSeed     = 17U;
-    constexpr std::size_t   kByteModulus   = 256U;
-    constexpr std::size_t   kExpectedBytes =
-        static_cast<std::size_t>( kStride ) * static_cast<std::size_t>( kHeight );
+    constexpr std::uint32_t bgraBytes     = 4U;
+    constexpr std::uint32_t rgbaBytes     = 4U;
+    constexpr std::uint32_t rgbBytes      = 3U;
+    constexpr std::uint32_t bgrBytes      = 3U;
+    constexpr std::uint32_t grayBytes     = 1U;
+    constexpr std::uint32_t width         = 3U;
+    constexpr std::uint32_t height        = 2U;
+    constexpr std::uint32_t paddingBytes  = 2U;
+    constexpr std::uint32_t stride        = ( width * rgbBytes ) + paddingBytes;
+    constexpr std::uint32_t outOfRangeRow = height;
+    constexpr std::size_t   pixelSeed     = 17U;
+    constexpr std::size_t   byteModulus   = 256U;
+    constexpr std::size_t   expectedBytes =
+        static_cast<std::size_t>( stride ) * static_cast<std::size_t>( height );
 
     [[nodiscard]]
     std::byte
     test_byte( std::size_t index ) noexcept
     {
         return static_cast<std::byte>(
-            static_cast<unsigned char>( ( index + kPixelSeed ) % kByteModulus )
+            static_cast<unsigned char>( ( index + pixelSeed ) % byteModulus )
         );
     }
 
@@ -52,17 +52,17 @@ namespace
 TEST( Image,
       BytesPerPixelIsStable )
 {
-    static_assert( grab::bytes_per_pixel( grab::PixelFormat::bgra ) == kBgraBytes );
-    static_assert( grab::bytes_per_pixel( grab::PixelFormat::rgba ) == kRgbaBytes );
-    static_assert( grab::bytes_per_pixel( grab::PixelFormat::rgb ) == kRgbBytes );
-    static_assert( grab::bytes_per_pixel( grab::PixelFormat::bgr ) == kBgrBytes );
-    static_assert( grab::bytes_per_pixel( grab::PixelFormat::gray ) == kGrayBytes );
+    static_assert( grab::bytes_per_pixel( grab::PixelFormat::Bgra ) == bgraBytes );
+    static_assert( grab::bytes_per_pixel( grab::PixelFormat::Rgba ) == rgbaBytes );
+    static_assert( grab::bytes_per_pixel( grab::PixelFormat::Rgb ) == rgbBytes );
+    static_assert( grab::bytes_per_pixel( grab::PixelFormat::Bgr ) == bgrBytes );
+    static_assert( grab::bytes_per_pixel( grab::PixelFormat::Gray ) == grayBytes );
 
-    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::bgra ), kBgraBytes );
-    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::rgba ), kRgbaBytes );
-    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::rgb ), kRgbBytes );
-    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::bgr ), kBgrBytes );
-    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::gray ), kGrayBytes );
+    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::Bgra ), bgraBytes );
+    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::Rgba ), rgbaBytes );
+    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::Rgb ), rgbBytes );
+    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::Bgr ), bgrBytes );
+    EXPECT_EQ( grab::bytes_per_pixel( grab::PixelFormat::Gray ), grayBytes );
 }
 
 TEST( Image,
@@ -70,28 +70,28 @@ TEST( Image,
 {
     const grab::Image empty_width{
         .width  = 0U,
-        .height = kHeight,
-        .stride = kStride,
-        .format = grab::PixelFormat::rgb,
-        .pixels = pixels( kExpectedBytes ),
+        .height = height,
+        .stride = stride,
+        .format = grab::PixelFormat::Rgb,
+        .pixels = pixels( expectedBytes ),
     };
     EXPECT_TRUE( empty_width.empty() );
 
     const grab::Image empty_height{
-        .width  = kWidth,
+        .width  = width,
         .height = 0U,
-        .stride = kStride,
-        .format = grab::PixelFormat::rgb,
-        .pixels = pixels( kExpectedBytes ),
+        .stride = stride,
+        .format = grab::PixelFormat::Rgb,
+        .pixels = pixels( expectedBytes ),
     };
     EXPECT_TRUE( empty_height.empty() );
 
     const grab::Image non_empty{
-        .width  = kWidth,
-        .height = kHeight,
-        .stride = kStride,
-        .format = grab::PixelFormat::rgb,
-        .pixels = pixels( kExpectedBytes ),
+        .width  = width,
+        .height = height,
+        .stride = stride,
+        .format = grab::PixelFormat::Rgb,
+        .pixels = pixels( expectedBytes ),
     };
     EXPECT_FALSE( non_empty.empty() );
 }
@@ -99,32 +99,32 @@ TEST( Image,
 TEST( Image,
       RowUsesStrideAndBounds )
 {
-    const auto        backing_pixels = pixels( kExpectedBytes );
+    const auto        backing_pixels = pixels( expectedBytes );
     const grab::Image image{
-        .width  = kWidth,
-        .height = kHeight,
-        .stride = kStride,
-        .format = grab::PixelFormat::rgb,
+        .width  = width,
+        .height = height,
+        .stride = stride,
+        .format = grab::PixelFormat::Rgb,
         .pixels = backing_pixels,
     };
 
     const auto row_zero = image.row( 0U );
-    ASSERT_EQ( row_zero.size(), kStride );
+    ASSERT_EQ( row_zero.size(), stride );
     EXPECT_EQ( row_zero.front(), backing_pixels.front() );
-    EXPECT_EQ( row_zero.back(), backing_pixels.at( kStride - 1U ) );
+    EXPECT_EQ( row_zero.back(), backing_pixels.at( stride - 1U ) );
 
     const auto row_one = image.row( 1U );
-    ASSERT_EQ( row_one.size(), kStride );
-    EXPECT_EQ( row_one.front(), backing_pixels.at( kStride ) );
+    ASSERT_EQ( row_one.size(), stride );
+    EXPECT_EQ( row_one.front(), backing_pixels.at( stride ) );
 
-    EXPECT_TRUE( image.row( kOutOfRangeRow ).empty() );
+    EXPECT_TRUE( image.row( outOfRangeRow ).empty() );
 
     const grab::Image truncated{
-        .width  = kWidth,
-        .height = kHeight,
-        .stride = kStride,
-        .format = grab::PixelFormat::rgb,
-        .pixels = pixels( kStride ),
+        .width  = width,
+        .height = height,
+        .stride = stride,
+        .format = grab::PixelFormat::Rgb,
+        .pixels = pixels( stride ),
     };
     EXPECT_TRUE( truncated.row( 1U ).empty() );
 }

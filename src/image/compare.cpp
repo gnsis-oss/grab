@@ -19,19 +19,19 @@ namespace grab::image
     namespace
     {
 
-        constexpr std::size_t      kRgbaBytes       = 4U;
-        constexpr std::size_t      kRedOffset       = 0U;
-        constexpr std::size_t      kGreenOffset     = 1U;
-        constexpr std::size_t      kBlueOffset      = 2U;
-        constexpr std::size_t      kAlphaOffset     = 3U;
-        constexpr std::size_t      kSingleByte      = 1U;
-        constexpr unsigned int     kRgbChannelCount = 3U;
-        constexpr unsigned int     kDimDivisor      = 2U;
-        constexpr std::uint8_t     kOpaqueAlpha     = 0XFFU;
-        constexpr std::uint8_t     kHighlightRed    = 0XFFU;
-        constexpr std::uint8_t     kHighlightGreen  = 0U;
-        constexpr std::uint8_t     kHighlightBlue   = 0U;
-        constexpr std::string_view kInvalidPrefix   = "image comparison: ";
+        constexpr std::size_t      rgbaBytes       = 4U;
+        constexpr std::size_t      redOffset       = 0U;
+        constexpr std::size_t      greenOffset     = 1U;
+        constexpr std::size_t      blueOffset      = 2U;
+        constexpr std::size_t      alphaOffset     = 3U;
+        constexpr std::size_t      singleByte      = 1U;
+        constexpr unsigned int     rgbChannelCount = 3U;
+        constexpr unsigned int     dimDivisor      = 2U;
+        constexpr std::uint8_t     opaqueAlpha     = 0XFFU;
+        constexpr std::uint8_t     highlightRed    = 0XFFU;
+        constexpr std::uint8_t     highlightGreen  = 0U;
+        constexpr std::uint8_t     highlightBlue   = 0U;
+        constexpr std::string_view invalidPrefix   = "image comparison: ";
 
         struct Layout
         {
@@ -51,8 +51,8 @@ namespace grab::image
         std::unexpected<grab::Error>
         invalid_argument_error( std::string message )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
-                               std::string{ kInvalidPrefix } + std::move( message ) );
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               std::string{ invalidPrefix } + std::move( message ) );
         }
 
         [[nodiscard]]
@@ -195,7 +195,7 @@ namespace grab::image
         byte_at( std::span<const std::byte> bytes,
                  std::size_t                offset )
         {
-            return bytes.subspan( offset, kSingleByte ).front();
+            return bytes.subspan( offset, singleByte ).front();
         }
 
         [[nodiscard]]
@@ -227,9 +227,9 @@ namespace grab::image
                           std::uint32_t max_x,
                           std::uint32_t max_y )
         {
-            constexpr auto kMaxRectOrigin =
+            constexpr auto maxRectOrigin =
                 static_cast<std::uint32_t>( std::numeric_limits<std::int32_t>::max() );
-            if( min_x > kMaxRectOrigin || min_y > kMaxRectOrigin )
+            if( min_x > maxRectOrigin || min_y > maxRectOrigin )
             {
                 return invalid_argument_error( "diff rectangle origin exceeds int32_t" );
             }
@@ -246,12 +246,12 @@ namespace grab::image
         std::uint32_t
         output_stride( std::uint32_t width )
         {
-            constexpr auto kMaxStride = std::numeric_limits<std::uint32_t>::max();
-            if( width > kMaxStride / static_cast<std::uint32_t>( kRgbaBytes ) )
+            constexpr auto maxStride = std::numeric_limits<std::uint32_t>::max();
+            if( width > maxStride / static_cast<std::uint32_t>( rgbaBytes ) )
             {
                 return 0U;
             }
-            return width * static_cast<std::uint32_t>( kRgbaBytes );
+            return width * static_cast<std::uint32_t>( rgbaBytes );
         }
 
         [[nodiscard]]
@@ -290,57 +290,57 @@ namespace grab::image
         {
             switch( format )
             {
-                case grab::PixelFormat::rgba :
+                case grab::PixelFormat::Rgba :
                     return Rgb{
                         .red = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kRedOffset )
+                            byte_at( row, offset + redOffset )
                         ),
                         .green = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kGreenOffset )
+                            byte_at( row, offset + greenOffset )
                         ),
                         .blue = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kBlueOffset )
+                            byte_at( row, offset + blueOffset )
                         ),
                     };
-                case grab::PixelFormat::bgr0 :
-                case grab::PixelFormat::bgra :
+                case grab::PixelFormat::Bgr0 :
+                case grab::PixelFormat::Bgra :
                     return Rgb{
                         .red = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kBlueOffset )
+                            byte_at( row, offset + blueOffset )
                         ),
                         .green = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kGreenOffset )
+                            byte_at( row, offset + greenOffset )
                         ),
                         .blue = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kRedOffset )
+                            byte_at( row, offset + redOffset )
                         ),
                     };
-                case grab::PixelFormat::rgb24 :
-                case grab::PixelFormat::rgb :
+                case grab::PixelFormat::Rgb24 :
+                case grab::PixelFormat::Rgb :
                     return Rgb{
                         .red = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kRedOffset )
+                            byte_at( row, offset + redOffset )
                         ),
                         .green = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kGreenOffset )
+                            byte_at( row, offset + greenOffset )
                         ),
                         .blue = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kBlueOffset )
+                            byte_at( row, offset + blueOffset )
                         ),
                     };
-                case grab::PixelFormat::bgr :
+                case grab::PixelFormat::Bgr :
                     return Rgb{
                         .red = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kBlueOffset )
+                            byte_at( row, offset + blueOffset )
                         ),
                         .green = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kGreenOffset )
+                            byte_at( row, offset + greenOffset )
                         ),
                         .blue = std::to_integer<unsigned int>(
-                            byte_at( row, offset + kRedOffset )
+                            byte_at( row, offset + redOffset )
                         ),
                     };
-                case grab::PixelFormat::gray :
+                case grab::PixelFormat::Gray :
                     {
                         const auto gray =
                             std::to_integer<unsigned int>( byte_at( row, offset ) );
@@ -355,8 +355,8 @@ namespace grab::image
         std::uint8_t
         dimmed_grayscale( Rgb rgb ) noexcept
         {
-            const auto average = ( rgb.red + rgb.green + rgb.blue ) / kRgbChannelCount;
-            return static_cast<std::uint8_t>( average / kDimDivisor );
+            const auto average = ( rgb.red + rgb.green + rgb.blue ) / rgbChannelCount;
+            return static_cast<std::uint8_t>( average / dimDivisor );
         }
 
         void
@@ -367,10 +367,10 @@ namespace grab::image
                           std::uint8_t            blue,
                           std::uint8_t            alpha )
         {
-            pixels.at( offset + kRedOffset )   = byte_from( red );
-            pixels.at( offset + kGreenOffset ) = byte_from( green );
-            pixels.at( offset + kBlueOffset )  = byte_from( blue );
-            pixels.at( offset + kAlphaOffset ) = byte_from( alpha );
+            pixels.at( offset + redOffset )   = byte_from( red );
+            pixels.at( offset + greenOffset ) = byte_from( green );
+            pixels.at( offset + blueOffset )  = byte_from( blue );
+            pixels.at( offset + alphaOffset ) = byte_from( alpha );
         }
 
     }
@@ -467,10 +467,9 @@ namespace grab::image
             {
                 const auto input_offset =
                     static_cast<std::size_t>( x ) * layout->bytes_per_pixel;
-                const auto output_offset =
-                    ( static_cast<std::size_t>( y ) *
-                      static_cast<std::size_t>( stride ) ) +
-                    ( static_cast<std::size_t>( x ) * kRgbaBytes );
+                const auto output_offset = ( static_cast<std::size_t>( y ) *
+                                             static_cast<std::size_t>( stride ) ) +
+                                           ( static_cast<std::size_t>( x ) * rgbaBytes );
                 if( pixel_differs( a_row,
                                    b_row,
                                    input_offset,
@@ -479,10 +478,10 @@ namespace grab::image
                 {
                     set_output_pixel( pixels,
                                       output_offset,
-                                      kHighlightRed,
-                                      kHighlightGreen,
-                                      kHighlightBlue,
-                                      kOpaqueAlpha );
+                                      highlightRed,
+                                      highlightGreen,
+                                      highlightBlue,
+                                      opaqueAlpha );
                 }
                 else
                 {
@@ -493,7 +492,7 @@ namespace grab::image
                                       gray,
                                       gray,
                                       gray,
-                                      kOpaqueAlpha );
+                                      opaqueAlpha );
                 }
             }
         }
@@ -502,7 +501,7 @@ namespace grab::image
             .width  = a.width,
             .height = a.height,
             .stride = stride,
-            .format = grab::PixelFormat::rgba,
+            .format = grab::PixelFormat::Rgba,
             .pixels = std::move( pixels ),
         };
     }

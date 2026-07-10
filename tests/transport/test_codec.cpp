@@ -17,32 +17,32 @@
 namespace
 {
 
-    constexpr double        kTimestamp           = 1729.125;
-    constexpr double        kExpectedTimestamp   = kTimestamp;
-    constexpr double        kMouseDelta          = -4.5;
-    constexpr double        kIdleSeconds         = 30.25;
-    constexpr double        kWindowDuration      = 7.75;
-    constexpr std::int64_t  kPidValue            = 1'234;
-    constexpr std::uint64_t kSequence            = 42U;
-    constexpr std::uint64_t kDecodedSequence     = 0U;
-    constexpr std::uint32_t kKeyCode             = 30U;
-    constexpr std::uint32_t kMouseButton         = 1U;
-    constexpr int           kUnknownKindNumber   = 9'999;
-    constexpr int           kOversizedEntryPad   = 1;
-    constexpr int           kSingleErasedEntry   = 1;
-    constexpr auto          kProtocolErrorCode   = grab::ErrorCode::protocol_error;
-    constexpr auto          kInputCategory       = grab::EventCategory::input;
-    constexpr auto          kWindowCategory      = grab::EventCategory::window;
-    constexpr auto          kA11yCategory        = grab::EventCategory::accessibility;
-    constexpr auto          kIntegrationCategory = grab::EventCategory::integration;
-    constexpr auto          kBrowserCategory     = grab::EventCategory::browser;
-    constexpr auto          kStateCategory       = grab::EventCategory::state;
+    constexpr double        timestamp           = 1729.125;
+    constexpr double        expectedTimestamp   = timestamp;
+    constexpr double        mouseDelta          = -4.5;
+    constexpr double        idleSeconds         = 30.25;
+    constexpr double        windowDuration      = 7.75;
+    constexpr std::int64_t  pidValue            = 1'234;
+    constexpr std::uint64_t sequence            = 42U;
+    constexpr std::uint64_t decodedSequence     = 0U;
+    constexpr std::uint32_t keyCode             = 30U;
+    constexpr std::uint32_t mouseButton         = 1U;
+    constexpr int           unknownKindNumber   = 9'999;
+    constexpr int           oversizedEntryPad   = 1;
+    constexpr int           singleErasedEntry   = 1;
+    constexpr auto          protocolErrorCode   = grab::ErrorCode::ProtocolError;
+    constexpr auto          inputCategory       = grab::EventCategory::Input;
+    constexpr auto          windowCategory      = grab::EventCategory::Window;
+    constexpr auto          a11yCategory        = grab::EventCategory::Accessibility;
+    constexpr auto          integrationCategory = grab::EventCategory::Integration;
+    constexpr auto          browserCategory     = grab::EventCategory::Browser;
+    constexpr auto          stateCategory       = grab::EventCategory::State;
 
     [[nodiscard]]
     grab::InputKey
     input_key()
     {
-        return grab::InputKey{ .code = kKeyCode, .name = "A" };
+        return grab::InputKey{ .code = keyCode, .name = "A" };
     }
 
     [[nodiscard]]
@@ -56,21 +56,21 @@ namespace
     grab::MouseClick
     mouse_click()
     {
-        return grab::MouseClick{ .button = kMouseButton, .name = "left" };
+        return grab::MouseClick{ .button = mouseButton, .name = "left" };
     }
 
     [[nodiscard]]
     grab::MouseMove
     mouse_move()
     {
-        return grab::MouseMove{ .axis = "0", .delta = kMouseDelta };
+        return grab::MouseMove{ .axis = "0", .delta = mouseDelta };
     }
 
     [[nodiscard]]
     grab::Idle
     idle()
     {
-        return grab::Idle{ .idle_s = kIdleSeconds };
+        return grab::Idle{ .idle_s = idleSeconds };
     }
 
     [[nodiscard]]
@@ -79,10 +79,10 @@ namespace
     {
         return grab::WindowChange{
             .app        = "Firefox",
-            .pid        = grab::Pid{ kPidValue },
+            .pid        = grab::Pid{ pidValue },
             .title      = "New title",
             .prev_title = "Old title",
-            .duration_s = kWindowDuration,
+            .duration_s = windowDuration,
         };
     }
 
@@ -116,7 +116,7 @@ namespace
     {
         return grab::BrowserTab{
             .app            = "Firefox",
-            .pid            = grab::Pid{ kPidValue },
+            .pid            = grab::Pid{ pidValue },
             .tab_title      = "Docs",
             .prev_tab_title = "Search",
         };
@@ -136,8 +136,8 @@ namespace
                 grab::Payload       payload )
     {
         return grab::Event{
-            .timestamp = kTimestamp,
-            .sequence  = kSequence,
+            .timestamp = timestamp,
+            .sequence  = sequence,
             .kind      = kind,
             .category  = category,
             .payload   = std::move( payload ),
@@ -149,50 +149,40 @@ namespace
     all_payload_events()
     {
         return {
-            make_event( grab::EventKind::key_down, kInputCategory, input_key() ),
-            make_event( grab::EventKind::key_up, kInputCategory, input_key() ),
-            make_event( grab::EventKind::key_combo, kInputCategory, key_combo() ),
-            make_event( grab::EventKind::mouse_click, kInputCategory, mouse_click() ),
-            make_event( grab::EventKind::mouse_move, kInputCategory, mouse_move() ),
-            make_event( grab::EventKind::idle_start, kInputCategory, idle() ),
-            make_event( grab::EventKind::idle_end, kInputCategory, idle() ),
-            make_event( grab::EventKind::window_focus_changed,
-                        kWindowCategory,
+            make_event( grab::EventKind::KeyDown, inputCategory, input_key() ),
+            make_event( grab::EventKind::KeyUp, inputCategory, input_key() ),
+            make_event( grab::EventKind::KeyCombo, inputCategory, key_combo() ),
+            make_event( grab::EventKind::MouseClick, inputCategory, mouse_click() ),
+            make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() ),
+            make_event( grab::EventKind::IdleStart, inputCategory, idle() ),
+            make_event( grab::EventKind::IdleEnd, inputCategory, idle() ),
+            make_event( grab::EventKind::WindowFocusChanged,
+                        windowCategory,
                         window_change() ),
-            make_event( grab::EventKind::window_title_changed,
-                        kWindowCategory,
+            make_event( grab::EventKind::WindowTitleChanged,
+                        windowCategory,
                         window_change() ),
-            make_event( grab::EventKind::window_created,
-                        kWindowCategory,
+            make_event( grab::EventKind::WindowCreated,
+                        windowCategory,
                         window_change() ),
-            make_event( grab::EventKind::window_closed,
-                        kWindowCategory,
-                        window_change() ),
-            make_event( grab::EventKind::a11y_button_clicked,
-                        kA11yCategory,
-                        a11y_event() ),
-            make_event( grab::EventKind::a11y_menu_opened, kA11yCategory, a11y_event() ),
-            make_event( grab::EventKind::a11y_menu_closed, kA11yCategory, a11y_event() ),
-            make_event( grab::EventKind::a11y_focus_changed,
-                        kA11yCategory,
-                        a11y_event() ),
-            make_event( grab::EventKind::a11y_text_changed,
-                        kA11yCategory,
-                        a11y_event() ),
-            make_event( grab::EventKind::a11y_state_changed,
-                        kA11yCategory,
-                        a11y_event() ),
-            make_event( grab::EventKind::app_tab_changed,
-                        kIntegrationCategory,
+            make_event( grab::EventKind::WindowClosed, windowCategory, window_change() ),
+            make_event( grab::EventKind::A11yButtonClicked, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yMenuOpened, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yMenuClosed, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yFocusChanged, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yTextChanged, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yStateChanged, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::AppTabChanged,
+                        integrationCategory,
                         integration_event() ),
-            make_event( grab::EventKind::app_context_update,
-                        kIntegrationCategory,
+            make_event( grab::EventKind::AppContextUpdate,
+                        integrationCategory,
                         integration_event() ),
-            make_event( grab::EventKind::browser_tab_switched,
-                        kBrowserCategory,
+            make_event( grab::EventKind::BrowserTabSwitched,
+                        browserCategory,
                         browser_tab() ),
-            make_event( grab::EventKind::state_snapshot,
-                        kStateCategory,
+            make_event( grab::EventKind::StateSnapshot,
+                        stateCategory,
                         state_snapshot() ),
         };
     }
@@ -311,7 +301,7 @@ namespace
         EXPECT_EQ( actual.kind, expected.kind );
         EXPECT_EQ( actual.category, expected.category );
         EXPECT_DOUBLE_EQ( actual.timestamp, expected.timestamp );
-        EXPECT_EQ( actual.sequence, kDecodedSequence );
+        EXPECT_EQ( actual.sequence, decodedSequence );
         expect_payload_eq( expected.payload, actual.payload );
     }
 
@@ -320,7 +310,7 @@ namespace
     valid_key_down_wire()
     {
         const auto event =
-            make_event( grab::EventKind::key_down, kInputCategory, input_key() );
+            make_event( grab::EventKind::KeyDown, inputCategory, input_key() );
         auto wire = grab::transport::to_wire( event );
         EXPECT_TRUE( wire.has_value() );
         return *wire;
@@ -351,34 +341,34 @@ TEST( Codec,
     const auto unspecified_decoded = grab::transport::from_wire( unspecified_wire );
 
     ASSERT_FALSE( unspecified_decoded.has_value() );
-    EXPECT_EQ( unspecified_decoded.error().code, kProtocolErrorCode );
+    EXPECT_EQ( unspecified_decoded.error().code, protocolErrorCode );
 
     eventgrab::v1::Event unknown_wire = valid_key_down_wire();
-    unknown_wire.set_kind( static_cast<eventgrab::v1::EventKind>( kUnknownKindNumber ) );
+    unknown_wire.set_kind( static_cast<eventgrab::v1::EventKind>( unknownKindNumber ) );
 
     const auto unknown_decoded = grab::transport::from_wire( unknown_wire );
 
     ASSERT_FALSE( unknown_decoded.has_value() );
-    EXPECT_EQ( unknown_decoded.error().code, kProtocolErrorCode );
+    EXPECT_EQ( unknown_decoded.error().code, protocolErrorCode );
 }
 
 TEST( Codec,
       MissingRequiredFieldRejected )
 {
     eventgrab::v1::Event wire = valid_key_down_wire();
-    EXPECT_EQ( wire.mutable_data()->erase( "key_code" ), kSingleErasedEntry );
+    EXPECT_EQ( wire.mutable_data()->erase( "key_code" ), singleErasedEntry );
 
     const auto decoded = grab::transport::from_wire( wire );
 
     ASSERT_FALSE( decoded.has_value() );
-    EXPECT_EQ( decoded.error().code, kProtocolErrorCode );
+    EXPECT_EQ( decoded.error().code, protocolErrorCode );
 }
 
 TEST( Codec,
       OversizedDataRejected )
 {
     eventgrab::v1::Event wire = valid_key_down_wire();
-    for( int index = 0; index < grab::transport::kMaxDataEntries + kOversizedEntryPad;
+    for( int index = 0; index < grab::transport::maxDataEntries + oversizedEntryPad;
          ++index )
     {
         const auto [iter, inserted] =
@@ -391,21 +381,21 @@ TEST( Codec,
     const auto decoded = grab::transport::from_wire( wire );
 
     ASSERT_FALSE( decoded.has_value() );
-    EXPECT_EQ( decoded.error().code, kProtocolErrorCode );
+    EXPECT_EQ( decoded.error().code, protocolErrorCode );
 }
 
 TEST( Codec,
       TimestampPreserved )
 {
     const auto event =
-        make_event( grab::EventKind::mouse_move, kInputCategory, mouse_move() );
+        make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() );
 
     auto wire = grab::transport::to_wire( event );
     ASSERT_TRUE( wire.has_value() );
-    EXPECT_DOUBLE_EQ( wire->timestamp(), kExpectedTimestamp );
+    EXPECT_DOUBLE_EQ( wire->timestamp(), expectedTimestamp );
 
     auto decoded = grab::transport::from_wire( *wire );
     ASSERT_TRUE( decoded.has_value() );
-    EXPECT_DOUBLE_EQ( decoded->timestamp, kExpectedTimestamp );
-    EXPECT_EQ( decoded->sequence, kDecodedSequence );
+    EXPECT_DOUBLE_EQ( decoded->timestamp, expectedTimestamp );
+    EXPECT_EQ( decoded->sequence, decodedSequence );
 }

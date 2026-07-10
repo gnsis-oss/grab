@@ -68,7 +68,7 @@ namespace grab
     {
         public:
 
-            static constexpr std::size_t kDefaultQueueDepth = 1'024U;
+            static constexpr std::size_t defaultQueueDepth = 1'024U;
 
             EventBus();
             ~EventBus();
@@ -86,7 +86,7 @@ namespace grab
             [[nodiscard]]
             Subscription
             subscribe( EventFilter filter,
-                       std::size_t max_queue = kDefaultQueueDepth );
+                       std::size_t max_queue = defaultQueueDepth );
 
         private:
 

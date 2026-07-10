@@ -20,7 +20,7 @@ namespace
     {
         return grab::SessionDesc{
             .name        = session_name,
-            .mode        = grab::SessionMode::offscreen,
+            .mode        = grab::SessionMode::Offscreen,
             .geometry    = default_geometry,
             .app_command = {},
         };
@@ -43,9 +43,9 @@ TEST( FakeSessionProvider,
       CanBeConfiguredToFail )
 {
     grab::test::FakeSessionProvider provider;
-    provider.fail_next_create( grab::ErrorCode::provider_failed, failure_message );
+    provider.fail_next_create( grab::ErrorCode::ProviderFailed, failure_message );
     const auto runtime = provider.create( desc() );
 
     ASSERT_FALSE( runtime.has_value() );
-    EXPECT_EQ( runtime.error().code, grab::ErrorCode::provider_failed );
+    EXPECT_EQ( runtime.error().code, grab::ErrorCode::ProviderFailed );
 }

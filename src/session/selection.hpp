@@ -21,9 +21,9 @@ namespace grab::session
 
     struct SessionModeReport
     {
-            grab::SessionMode       mode = grab::SessionMode::offscreen;
+            grab::SessionMode       mode = grab::SessionMode::Offscreen;
             std::string             provider;
-            grab::AvailabilityState state = grab::AvailabilityState::unavailable;
+            grab::AvailabilityState state = grab::AvailabilityState::Unavailable;
             std::string             reason;
     };
 

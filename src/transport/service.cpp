@@ -26,7 +26,7 @@ namespace grab::transport
     namespace
     {
 
-        constexpr auto kSubscribePollInterval = std::chrono::milliseconds{ 100 };
+        constexpr auto subscribePollInterval = std::chrono::milliseconds{ 100 };
 
         struct EventTypeRecord
         {
@@ -41,7 +41,7 @@ namespace grab::transport
                 bool                    notified = false;
         };
 
-        constexpr auto kKnownEventTypes = std::to_array<EventTypeRecord>( {
+        constexpr auto knownEventTypes = std::to_array<EventTypeRecord>( {
             EventTypeRecord{
                             .kind     = eventgrab::v1::INPUT_KEY_DOWN,
                             .category = eventgrab::v1::EVENT_CATEGORY_INPUT,
@@ -152,50 +152,50 @@ namespace grab::transport
             switch( kind )
             {
                 case eventgrab::v1::INPUT_KEY_DOWN :
-                    return grab::EventKind::key_down;
+                    return grab::EventKind::KeyDown;
                 case eventgrab::v1::INPUT_KEY_UP :
-                    return grab::EventKind::key_up;
+                    return grab::EventKind::KeyUp;
                 case eventgrab::v1::INPUT_KEY_COMBO :
-                    return grab::EventKind::key_combo;
+                    return grab::EventKind::KeyCombo;
                 case eventgrab::v1::INPUT_MOUSE_CLICK :
-                    return grab::EventKind::mouse_click;
+                    return grab::EventKind::MouseClick;
                 case eventgrab::v1::INPUT_MOUSE_MOVE :
-                    return grab::EventKind::mouse_move;
+                    return grab::EventKind::MouseMove;
                 case eventgrab::v1::INPUT_IDLE_START :
-                    return grab::EventKind::idle_start;
+                    return grab::EventKind::IdleStart;
                 case eventgrab::v1::INPUT_IDLE_END :
-                    return grab::EventKind::idle_end;
+                    return grab::EventKind::IdleEnd;
                 case eventgrab::v1::WINDOW_FOCUS_CHANGED :
-                    return grab::EventKind::window_focus_changed;
+                    return grab::EventKind::WindowFocusChanged;
                 case eventgrab::v1::WINDOW_TITLE_CHANGED :
-                    return grab::EventKind::window_title_changed;
+                    return grab::EventKind::WindowTitleChanged;
                 case eventgrab::v1::WINDOW_CREATED :
-                    return grab::EventKind::window_created;
+                    return grab::EventKind::WindowCreated;
                 case eventgrab::v1::WINDOW_CLOSED :
-                    return grab::EventKind::window_closed;
+                    return grab::EventKind::WindowClosed;
                 case eventgrab::v1::A11Y_BUTTON_CLICKED :
-                    return grab::EventKind::a11y_button_clicked;
+                    return grab::EventKind::A11yButtonClicked;
                 case eventgrab::v1::A11Y_MENU_OPENED :
-                    return grab::EventKind::a11y_menu_opened;
+                    return grab::EventKind::A11yMenuOpened;
                 case eventgrab::v1::A11Y_MENU_CLOSED :
-                    return grab::EventKind::a11y_menu_closed;
+                    return grab::EventKind::A11yMenuClosed;
                 case eventgrab::v1::A11Y_FOCUS_CHANGED :
-                    return grab::EventKind::a11y_focus_changed;
+                    return grab::EventKind::A11yFocusChanged;
                 case eventgrab::v1::A11Y_TEXT_CHANGED :
-                    return grab::EventKind::a11y_text_changed;
+                    return grab::EventKind::A11yTextChanged;
                 case eventgrab::v1::A11Y_STATE_CHANGED :
-                    return grab::EventKind::a11y_state_changed;
+                    return grab::EventKind::A11yStateChanged;
                 case eventgrab::v1::APP_TAB_CHANGED :
-                    return grab::EventKind::app_tab_changed;
+                    return grab::EventKind::AppTabChanged;
                 case eventgrab::v1::APP_CONTEXT_UPDATE :
-                    return grab::EventKind::app_context_update;
+                    return grab::EventKind::AppContextUpdate;
                 case eventgrab::v1::BROWSER_TAB_SWITCHED :
-                    return grab::EventKind::browser_tab_switched;
+                    return grab::EventKind::BrowserTabSwitched;
                 case eventgrab::v1::STATE_SNAPSHOT :
-                    return grab::EventKind::state_snapshot;
+                    return grab::EventKind::StateSnapshot;
                 case eventgrab::v1::EVENT_KIND_UNSPECIFIED :
                 default :
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "invalid event filter kind" );
             }
         }
@@ -207,20 +207,20 @@ namespace grab::transport
             switch( category )
             {
                 case eventgrab::v1::EVENT_CATEGORY_INPUT :
-                    return grab::EventCategory::input;
+                    return grab::EventCategory::Input;
                 case eventgrab::v1::EVENT_CATEGORY_WINDOW :
-                    return grab::EventCategory::window;
+                    return grab::EventCategory::Window;
                 case eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY :
-                    return grab::EventCategory::accessibility;
+                    return grab::EventCategory::Accessibility;
                 case eventgrab::v1::EVENT_CATEGORY_INTEGRATION :
-                    return grab::EventCategory::integration;
+                    return grab::EventCategory::Integration;
                 case eventgrab::v1::EVENT_CATEGORY_BROWSER :
-                    return grab::EventCategory::browser;
+                    return grab::EventCategory::Browser;
                 case eventgrab::v1::EVENT_CATEGORY_STATE :
-                    return grab::EventCategory::state;
+                    return grab::EventCategory::State;
                 case eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED :
                 default :
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "invalid event filter category" );
             }
         }
@@ -279,7 +279,7 @@ namespace grab::transport
             if( !state->notified )
             {
                 state->data_ready.wait_for( lock,
-                                            kSubscribePollInterval,
+                                            subscribePollInterval,
                                             [&]
                                             {
                                                 return state->notified;
@@ -359,7 +359,7 @@ namespace grab::transport
 
         // Producer tracking lands with real backends; until then the service
         // reports the full static kind registry with active=false.
-        for( const auto& record : kKnownEventTypes )
+        for( const auto& record : knownEventTypes )
         {
             auto* type = response->add_types();
             type->set_kind( record.kind );

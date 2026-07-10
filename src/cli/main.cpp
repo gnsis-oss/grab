@@ -43,30 +43,30 @@
 namespace
 {
 
-    constexpr int           kUsageError              = 2;
-    constexpr int           kRuntimeError            = 1;
-    constexpr int           kSignalSuccess           = 0;
-    constexpr char          kCoordinateSeparator     = ',';
-    constexpr char          kDimensionSeparator      = 'x';
-    constexpr char          kUpperDimensionSeparator = 'X';
-    constexpr std::uint8_t  kDefaultButton           = 1U;
-    constexpr std::uint64_t kNoDiffPixels            = 0U;
-    constexpr std::time_t   kSignalPollSeconds       = 0;
-    constexpr auto          kSignalPollNanoseconds = decltype( timespec{}.tv_nsec ){ 0 };
+    constexpr int           usageError              = 2;
+    constexpr int           runtimeError            = 1;
+    constexpr int           signalSuccess           = 0;
+    constexpr char          coordinateSeparator     = ',';
+    constexpr char          dimensionSeparator      = 'x';
+    constexpr char          upperDimensionSeparator = 'X';
+    constexpr std::uint8_t  defaultButton           = 1U;
+    constexpr std::uint64_t noDiffPixels            = 0U;
+    constexpr std::time_t   signalPollSeconds       = 0;
+    constexpr auto          signalPollNanoseconds = decltype( timespec{}.tv_nsec ){ 0 };
 
     enum class CaptureTarget : std::uint8_t
     {
-        none,
-        window,
-        display,
-        region,
+        None,
+        Window,
+        Display,
+        Region,
     };
 
     using CaptureRegion = grab::geometry::Rectangle;
 
     struct CaptureOptions
     {
-            CaptureTarget         target = CaptureTarget::none;
+            CaptureTarget         target = CaptureTarget::None;
             std::string           wm_class;
             CaptureRegion         region;
             std::filesystem::path output;
@@ -107,7 +107,7 @@ namespace
     {
             grab::input::Point at;
             const char*        display = nullptr;
-            std::uint8_t       button  = kDefaultButton;
+            std::uint8_t       button  = defaultButton;
             bool               has_at  = false;
     };
 
@@ -201,7 +201,7 @@ namespace
             std::numeric_limits<std::int16_t>::min() ||
             value > std::numeric_limits<std::int16_t>::max() )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                std::string{ name } + " must be an int16 value" );
         }
 
@@ -226,7 +226,7 @@ namespace
             0U ||
             value > std::numeric_limits<std::uint16_t>::max() )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                std::string{ name } + " must be in range 1..65535" );
         }
 
@@ -250,7 +250,7 @@ namespace
             0U ||
             value > std::numeric_limits<std::uint8_t>::max() )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "button must be in range 1..255" );
         }
 
@@ -262,10 +262,10 @@ namespace
     parse_point( std::string_view text,
                  std::string_view option )
     {
-        const std::size_t separator = text.find( kCoordinateSeparator );
+        const std::size_t separator = text.find( coordinateSeparator );
         if( separator == std::string_view::npos )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                std::string{ option } + " must be X,Y" );
         }
 
@@ -294,8 +294,8 @@ namespace
     find_dimension_separator( std::string_view text,
                               std::size_t      offset ) noexcept
     {
-        const std::size_t lower = text.find( kDimensionSeparator, offset );
-        const std::size_t upper = text.find( kUpperDimensionSeparator, offset );
+        const std::size_t lower = text.find( dimensionSeparator, offset );
+        const std::size_t upper = text.find( upperDimensionSeparator, offset );
         if( lower == std::string_view::npos )
         {
             return upper;
@@ -315,18 +315,18 @@ namespace
     grab::Result<CaptureRegion>
     parse_capture_region( std::string_view text )
     {
-        const std::size_t first_separator = text.find( kCoordinateSeparator );
+        const std::size_t first_separator = text.find( coordinateSeparator );
         if( first_separator == std::string_view::npos )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "--region must be X,Y,WxH" );
         }
 
         const std::size_t second_separator =
-            text.find( kCoordinateSeparator, first_separator + 1U );
+            text.find( coordinateSeparator, first_separator + 1U );
         if( second_separator == std::string_view::npos )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "--region must be X,Y,WxH" );
         }
 
@@ -334,7 +334,7 @@ namespace
             find_dimension_separator( text, second_separator + 1U );
         if( dimension_separator == std::string_view::npos )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "--region must be X,Y,WxH" );
         }
 
@@ -401,22 +401,22 @@ namespace
     ) noexcept
     {
         // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <signal.h>.
-        if( ::sigemptyset( &signals ) != kSignalSuccess )
+        if( ::sigemptyset( &signals ) != signalSuccess )
         {
             return false;
         }
         // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <signal.h>.
-        if( ::sigaddset( &signals, SIGINT ) != kSignalSuccess )
+        if( ::sigaddset( &signals, SIGINT ) != signalSuccess )
         {
             return false;
         }
         // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <signal.h>.
-        if( ::sigaddset( &signals, SIGTERM ) != kSignalSuccess )
+        if( ::sigaddset( &signals, SIGTERM ) != signalSuccess )
         {
             return false;
         }
         // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <signal.h>.
-        return ::pthread_sigmask( SIG_BLOCK, &signals, nullptr ) == kSignalSuccess;
+        return ::pthread_sigmask( SIG_BLOCK, &signals, nullptr ) == signalSuccess;
     }
 
     void
@@ -459,8 +459,8 @@ namespace
     ) noexcept
     {
         const timespec timeout{
-            .tv_sec  = kSignalPollSeconds,
-            .tv_nsec = kSignalPollNanoseconds,
+            .tv_sec  = signalPollSeconds,
+            .tv_nsec = signalPollNanoseconds,
         };
         const int received = ::sigtimedwait( &signals, nullptr, &timeout );
         return received == SIGINT || received == SIGTERM;
@@ -471,15 +471,15 @@ namespace
     parse_daemon_options( std::span<char*>              args,
                           grab::service::DaemonOptions& options )
     {
-        constexpr std::string_view kEndpointFlag{ "--endpoint" };
-        constexpr std::string_view kStoreFlag{ "--store" };
+        constexpr std::string_view endpointFlag{ "--endpoint" };
+        constexpr std::string_view storeFlag{ "--store" };
 
         auto                       current = args.begin();
         while( current != args.end() )
         {
             const std::string_view arg = *current;
             ++current;
-            if( arg == kEndpointFlag )
+            if( arg == endpointFlag )
             {
                 if( current == args.end() )
                 {
@@ -490,7 +490,7 @@ namespace
                 continue;
             }
 
-            if( arg == kStoreFlag )
+            if( arg == storeFlag )
             {
                 if( current == args.end() )
                 {
@@ -511,9 +511,9 @@ namespace
     grab::Result<TypeOptions>
     parse_type_options( std::span<char*> args )
     {
-        constexpr std::string_view kTextFlag{ "--text" };
-        constexpr std::string_view kDisplayFlag{ "--display" };
-        constexpr std::string_view kLayoutFlag{ "--layout" };
+        constexpr std::string_view textFlag{ "--text" };
+        constexpr std::string_view displayFlag{ "--display" };
+        constexpr std::string_view layoutFlag{ "--layout" };
 
         TypeOptions                options;
         auto                       current = args.begin();
@@ -521,11 +521,11 @@ namespace
         {
             const std::string_view arg = *current;
             ++current;
-            if( arg == kTextFlag )
+            if( arg == textFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--text requires a value" );
                 }
                 options.text     = *current;
@@ -534,11 +534,11 @@ namespace
                 continue;
             }
 
-            if( arg == kDisplayFlag )
+            if( arg == displayFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--display requires a value" );
                 }
                 options.display = *current;
@@ -546,11 +546,11 @@ namespace
                 continue;
             }
 
-            if( arg == kLayoutFlag )
+            if( arg == layoutFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--layout requires a value" );
                 }
                 options.layout = *current;
@@ -558,13 +558,13 @@ namespace
                 continue;
             }
 
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown option for type: " + std::string{ arg } );
         }
 
         if( !options.has_text )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "type requires --text" );
         }
         return options;
@@ -574,9 +574,9 @@ namespace
     grab::Result<ClickOptions>
     parse_click_options( std::span<char*> args )
     {
-        constexpr std::string_view kAtFlag{ "--at" };
-        constexpr std::string_view kButtonFlag{ "--button" };
-        constexpr std::string_view kDisplayFlag{ "--display" };
+        constexpr std::string_view atFlag{ "--at" };
+        constexpr std::string_view buttonFlag{ "--button" };
+        constexpr std::string_view displayFlag{ "--display" };
 
         ClickOptions               options;
         auto                       current = args.begin();
@@ -584,11 +584,11 @@ namespace
         {
             const std::string_view arg = *current;
             ++current;
-            if( arg == kAtFlag )
+            if( arg == atFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--at requires a value" );
                 }
                 auto point = parse_point( *current, "--at" );
@@ -602,11 +602,11 @@ namespace
                 continue;
             }
 
-            if( arg == kButtonFlag )
+            if( arg == buttonFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--button requires a value" );
                 }
                 auto button = parse_button( *current );
@@ -619,11 +619,11 @@ namespace
                 continue;
             }
 
-            if( arg == kDisplayFlag )
+            if( arg == displayFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--display requires a value" );
                 }
                 options.display = *current;
@@ -631,14 +631,13 @@ namespace
                 continue;
             }
 
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown option for click: " + std::string{ arg } );
         }
 
         if( !options.has_at )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
-                               "click requires --at" );
+            return grab::fail( grab::ErrorCode::InvalidArgument, "click requires --at" );
         }
         return options;
     }
@@ -647,9 +646,9 @@ namespace
     grab::Result<DragOptions>
     parse_drag_options( std::span<char*> args )
     {
-        constexpr std::string_view kFromFlag{ "--from" };
-        constexpr std::string_view kToFlag{ "--to" };
-        constexpr std::string_view kDisplayFlag{ "--display" };
+        constexpr std::string_view fromFlag{ "--from" };
+        constexpr std::string_view toFlag{ "--to" };
+        constexpr std::string_view displayFlag{ "--display" };
 
         DragOptions                options;
         auto                       current = args.begin();
@@ -657,11 +656,11 @@ namespace
         {
             const std::string_view arg = *current;
             ++current;
-            if( arg == kFromFlag )
+            if( arg == fromFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--from requires a value" );
                 }
                 auto point = parse_point( *current, "--from" );
@@ -675,11 +674,11 @@ namespace
                 continue;
             }
 
-            if( arg == kToFlag )
+            if( arg == toFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--to requires a value" );
                 }
                 auto point = parse_point( *current, "--to" );
@@ -693,11 +692,11 @@ namespace
                 continue;
             }
 
-            if( arg == kDisplayFlag )
+            if( arg == displayFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--display requires a value" );
                 }
                 options.display = *current;
@@ -705,13 +704,13 @@ namespace
                 continue;
             }
 
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown option for drag: " + std::string{ arg } );
         }
 
         if( !options.has_from || !options.has_to )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "drag requires --from and --to" );
         }
         return options;
@@ -721,9 +720,9 @@ namespace
     grab::Result<void>
     require_no_capture_target( const CaptureOptions& options )
     {
-        if( options.target != CaptureTarget::none )
+        if( options.target != CaptureTarget::None )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "capture requires exactly one target" );
         }
         return {};
@@ -733,10 +732,10 @@ namespace
     grab::Result<CaptureOptions>
     parse_capture_options( std::span<char*> args )
     {
-        constexpr std::string_view kWindowFlag{ "--window" };
-        constexpr std::string_view kDisplayFlag{ "--display" };
-        constexpr std::string_view kRegionFlag{ "--region" };
-        constexpr std::string_view kOutFlag{ "--out" };
+        constexpr std::string_view windowFlag{ "--window" };
+        constexpr std::string_view displayFlag{ "--display" };
+        constexpr std::string_view regionFlag{ "--region" };
+        constexpr std::string_view outFlag{ "--out" };
 
         CaptureOptions             options;
         auto                       current = args.begin();
@@ -744,7 +743,7 @@ namespace
         {
             const std::string_view arg = *current;
             ++current;
-            if( arg == kWindowFlag )
+            if( arg == windowFlag )
             {
                 auto target = require_no_capture_target( options );
                 if( !target.has_value() )
@@ -753,27 +752,27 @@ namespace
                 }
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--window requires a value" );
                 }
-                options.target   = CaptureTarget::window;
+                options.target   = CaptureTarget::Window;
                 options.wm_class = *current;
                 ++current;
                 continue;
             }
 
-            if( arg == kDisplayFlag )
+            if( arg == displayFlag )
             {
                 auto target = require_no_capture_target( options );
                 if( !target.has_value() )
                 {
                     return std::unexpected( std::move( target.error() ) );
                 }
-                options.target = CaptureTarget::display;
+                options.target = CaptureTarget::Display;
                 continue;
             }
 
-            if( arg == kRegionFlag )
+            if( arg == regionFlag )
             {
                 auto target = require_no_capture_target( options );
                 if( !target.has_value() )
@@ -782,7 +781,7 @@ namespace
                 }
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--region requires a value" );
                 }
                 auto region = parse_capture_region( *current );
@@ -790,17 +789,17 @@ namespace
                 {
                     return std::unexpected( std::move( region.error() ) );
                 }
-                options.target = CaptureTarget::region;
+                options.target = CaptureTarget::Region;
                 options.region = *region;
                 ++current;
                 continue;
             }
 
-            if( arg == kOutFlag )
+            if( arg == outFlag )
             {
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--out requires a value" );
                 }
                 options.output     = std::filesystem::path{ *current };
@@ -809,18 +808,18 @@ namespace
                 continue;
             }
 
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown option for capture: " + std::string{ arg } );
         }
 
-        if( options.target == CaptureTarget::none )
+        if( options.target == CaptureTarget::None )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "capture requires --window, --display, or --region" );
         }
         if( !options.has_output || options.output.empty() )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "capture requires --out" );
         }
         return options;
@@ -830,8 +829,8 @@ namespace
     grab::Result<BatchOptions>
     parse_batch_options( std::span<char*> args )
     {
-        constexpr std::string_view kWindowFlag{ "--window" };
-        constexpr std::string_view kOutFlag{ "--out" };
+        constexpr std::string_view windowFlag{ "--window" };
+        constexpr std::string_view outFlag{ "--out" };
 
         BatchOptions               options;
         auto                       current = args.begin();
@@ -839,30 +838,30 @@ namespace
         {
             const std::string_view arg = *current;
             ++current;
-            if( arg != kWindowFlag )
+            if( arg != windowFlag )
             {
                 return grab::fail(
-                    grab::ErrorCode::invalid_argument,
+                    grab::ErrorCode::InvalidArgument,
                     "batch expects repeated --window WMCLASS --out FILE"
                 );
             }
             if( current == args.end() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--window requires a value" );
             }
             std::vector<std::string> candidates{ std::string{ *current } };
             ++current;
 
-            if( current == args.end() || std::string_view{ *current } != kOutFlag )
+            if( current == args.end() || std::string_view{ *current } != outFlag )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--window must be followed by --out" );
             }
             ++current;
             if( current == args.end() )
             {
-                return grab::fail( grab::ErrorCode::invalid_argument,
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--out requires a value" );
             }
 
@@ -875,7 +874,7 @@ namespace
 
         if( options.items.empty() )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "batch requires at least one --window/--out pair" );
         }
         return options;
@@ -885,13 +884,13 @@ namespace
     grab::Result<CompareOptions>
     parse_compare_options( std::span<char*> args )
     {
-        constexpr std::string_view kNotifyFlag{ "--notify" };
+        constexpr std::string_view notifyFlag{ "--notify" };
 
         CompareOptions             options;
         for( const char* const raw_arg : args )
         {
             const std::string_view arg = raw_arg;
-            if( arg == kNotifyFlag )
+            if( arg == notifyFlag )
             {
                 options.notify = true;
                 continue;
@@ -911,13 +910,13 @@ namespace
                 continue;
             }
 
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "compare requires A.png B.png [--notify]" );
         }
 
         if( !options.has_first || !options.has_second )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "compare requires A.png and B.png" );
         }
         return options;
@@ -927,8 +926,8 @@ namespace
     grab::Result<WatchOptions>
     parse_watch_options( std::span<char*> args )
     {
-        constexpr std::string_view kWindowFlag{ "--window" };
-        constexpr std::string_view kOutFlag{ "--out" };
+        constexpr std::string_view windowFlag{ "--window" };
+        constexpr std::string_view outFlag{ "--out" };
 
         WatchOptions               options;
         auto                       current = args.begin();
@@ -936,16 +935,16 @@ namespace
         {
             const std::string_view arg = *current;
             ++current;
-            if( arg == kWindowFlag )
+            if( arg == windowFlag )
             {
                 if( options.has_window )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "watch accepts one --window" );
                 }
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--window requires a value" );
                 }
                 options.wm_class   = *current;
@@ -954,16 +953,16 @@ namespace
                 continue;
             }
 
-            if( arg == kOutFlag )
+            if( arg == outFlag )
             {
                 if( options.has_output )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "watch accepts one --out" );
                 }
                 if( current == args.end() )
                 {
-                    return grab::fail( grab::ErrorCode::invalid_argument,
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "--out requires a value" );
                 }
                 options.output     = std::filesystem::path{ *current };
@@ -972,13 +971,13 @@ namespace
                 continue;
             }
 
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown option for watch: " + std::string{ arg } );
         }
 
         if( !options.has_window || !options.has_output || options.output.empty() )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "watch requires --window and --out" );
         }
         return options;
@@ -991,23 +990,22 @@ namespace
     {
         switch( options.target )
         {
-            case CaptureTarget::window :
+            case CaptureTarget::Window :
                 return screen.window_by_class( { options.wm_class } );
-            case CaptureTarget::display :
+            case CaptureTarget::Display :
                 return screen.display();
-            case CaptureTarget::region :
+            case CaptureTarget::Region :
                 return screen.region(
                     static_cast<std::int16_t>( options.region.x ),
                     static_cast<std::int16_t>( options.region.y ),
                     static_cast<std::uint16_t>( options.region.width ),
                     static_cast<std::uint16_t>( options.region.height )
                 );
-            case CaptureTarget::none :
-                return grab::fail( grab::ErrorCode::invalid_argument,
+            case CaptureTarget::None :
+                return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "capture target is missing" );
         }
-        return grab::fail( grab::ErrorCode::internal_fault,
-                           "capture target is invalid" );
+        return grab::fail( grab::ErrorCode::InternalFault, "capture target is invalid" );
     }
 
     [[nodiscard]]
@@ -1018,7 +1016,7 @@ namespace
         if( bytes.size() >
             static_cast<std::size_t>( std::numeric_limits<std::streamsize>::max() ) )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "PNG output is too large to write" );
         }
 
@@ -1034,7 +1032,7 @@ namespace
         std::ofstream stream{ path, std::ios::binary };
         if( !stream )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "failed to open output file: " + path.string() );
         }
 
@@ -1045,7 +1043,7 @@ namespace
         }
         if( !stream )
         {
-            return grab::fail( grab::ErrorCode::provider_failed,
+            return grab::fail( grab::ErrorCode::ProviderFailed,
                                "failed to write output file: " + path.string() );
         }
 
@@ -1063,7 +1061,7 @@ namespace
         ( void )std::fwrite( output.data(), sizeof( char ), output.size(), stdout );
         ( void )std::fputs( " (", stdout );
         ( void )std::fwrite( width.data(), sizeof( char ), width.size(), stdout );
-        ( void )std::fputc( kDimensionSeparator, stdout );
+        ( void )std::fputc( dimensionSeparator, stdout );
         ( void )std::fwrite( height.data(), sizeof( char ), height.size(), stdout );
         ( void )std::fputs( ")\n", stdout );
     }
@@ -1125,21 +1123,21 @@ namespace
         {
             print_error( options.error().message );
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         auto input = grab::Input::open( options->display, options->layout );
         if( !input.has_value() )
         {
             print_fatal( input.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto result = input->type_text( options->text );
         if( !result.has_value() )
         {
             print_fatal( result.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
         return 0;
     }
@@ -1152,14 +1150,14 @@ namespace
         {
             print_error( options.error().message );
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         auto input = grab::Input::open( options->display );
         if( !input.has_value() )
         {
             print_fatal( input.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto result = input->click_at( static_cast<std::int16_t>( options->at.x ),
@@ -1168,7 +1166,7 @@ namespace
         if( !result.has_value() )
         {
             print_fatal( result.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
         return 0;
     }
@@ -1181,21 +1179,21 @@ namespace
         {
             print_error( options.error().message );
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         auto input = grab::Input::open( options->display );
         if( !input.has_value() )
         {
             print_fatal( input.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto result = input->drag( options->from, options->to );
         if( !result.has_value() )
         {
             print_fatal( result.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
         return 0;
     }
@@ -1208,35 +1206,35 @@ namespace
         {
             print_error( options.error().message );
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         auto screen = grab::Screen::open();
         if( !screen.has_value() )
         {
             print_fatal( screen.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto image = capture_image( *screen, *options );
         if( !image.has_value() )
         {
             print_fatal( image.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto encoded = grab::codec::encode_png( *image );
         if( !encoded.has_value() )
         {
             print_fatal( encoded.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto written = write_png_file( options->output, *encoded );
         if( !written.has_value() )
         {
             print_fatal( written.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         print_capture_success( options->output, *image );
@@ -1251,25 +1249,25 @@ namespace
         {
             print_error( options.error().message );
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         auto screen = grab::Screen::open();
         if( !screen.has_value() )
         {
             print_fatal( screen.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto result = grab::screen::batch_capture( *screen, options->items );
         if( !result.has_value() )
         {
             print_fatal( result.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         print_batch_success( *result );
-        return result->misses.empty() ? 0 : kRuntimeError;
+        return result->misses.empty() ? 0 : runtimeError;
     }
 
     int
@@ -1280,7 +1278,7 @@ namespace
         {
             print_error( options.error().message );
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         std::optional<grab::notify::Notifier> notifier;
@@ -1290,7 +1288,7 @@ namespace
             if( !opened.has_value() )
             {
                 print_fatal( opened.error().message.c_str() );
-                return kRuntimeError;
+                return runtimeError;
             }
             notifier = std::move( *opened );
         }
@@ -1302,11 +1300,11 @@ namespace
         if( !diff.has_value() )
         {
             print_fatal( diff.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         print_compare_success( *diff );
-        return diff->diff_pixels == kNoDiffPixels ? 0 : kRuntimeError;
+        return diff->diff_pixels == noDiffPixels ? 0 : runtimeError;
     }
 
     int
@@ -1317,14 +1315,14 @@ namespace
         {
             print_error( options.error().message );
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         sigset_t signals{};
         if( !configure_daemon_signal_mask( signals ) )
         {
             print_fatal( "failed to configure watch signal handling" );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto screen = grab::Screen::open();
@@ -1332,7 +1330,7 @@ namespace
         {
             restore_daemon_signal_mask( signals );
             print_fatal( screen.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         ( void )std::fputs( "watching for title changes; press Ctrl-C to stop\n",
@@ -1350,7 +1348,7 @@ namespace
         if( !captured.has_value() )
         {
             print_fatal( captured.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         print_watch_success( *captured );
@@ -1364,14 +1362,14 @@ namespace
         if( !parse_daemon_options( args, options ) )
         {
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         sigset_t signals{};
         if( !configure_daemon_signal_mask( signals ) )
         {
             print_fatal( "failed to configure daemon signal handling" );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         auto daemon = grab::service::Daemon::start( std::move( options ) );
@@ -1379,7 +1377,7 @@ namespace
         {
             restore_daemon_signal_mask( signals );
             print_fatal( daemon.error().message.c_str() );
-            return kRuntimeError;
+            return runtimeError;
         }
 
         SignalState signal_state;
@@ -1404,95 +1402,95 @@ namespace
         if( argc < 2 )
         {
             print_usage();
-            return kUsageError;
+            return usageError;
         }
 
         const std::span<char*>     args( argv, static_cast<std::size_t>( argc ) );
         const auto                 cli_args = args.subspan( 1 );
         const std::string_view     command  = cli_args.front();
-        constexpr std::string_view kDoctorCommand{ "doctor" };
-        constexpr std::string_view kDaemonCommand{ "daemon" };
-        constexpr std::string_view kTypeCommand{ "type" };
-        constexpr std::string_view kClickCommand{ "click" };
-        constexpr std::string_view kDragCommand{ "drag" };
-        constexpr std::string_view kCaptureCommand{ "capture" };
-        constexpr std::string_view kBatchCommand{ "batch" };
-        constexpr std::string_view kCompareCommand{ "compare" };
-        constexpr std::string_view kWatchCommand{ "watch" };
-        constexpr std::string_view kKeyCommand{ "key" };
-        constexpr std::string_view kDragCurveCommand{ "drag-curve" };
-        constexpr std::string_view kSessionCommand{ "session" };
-        constexpr std::string_view kJsonFlag{ "--json" };
+        constexpr std::string_view doctorCommand{ "doctor" };
+        constexpr std::string_view daemonCommand{ "daemon" };
+        constexpr std::string_view typeCommand{ "type" };
+        constexpr std::string_view clickCommand{ "click" };
+        constexpr std::string_view dragCommand{ "drag" };
+        constexpr std::string_view captureCommand{ "capture" };
+        constexpr std::string_view batchCommand{ "batch" };
+        constexpr std::string_view compareCommand{ "compare" };
+        constexpr std::string_view watchCommand{ "watch" };
+        constexpr std::string_view keyCommand{ "key" };
+        constexpr std::string_view dragCurveCommand{ "drag-curve" };
+        constexpr std::string_view sessionCommand{ "session" };
+        constexpr std::string_view jsonFlag{ "--json" };
 
-        if( command == kDoctorCommand )
+        if( command == doctorCommand )
         {
             bool as_json = false;
             for( const char* arg : cli_args.subspan( 1 ) )
             {
-                if( std::string_view( arg ) == kJsonFlag )
+                if( std::string_view( arg ) == jsonFlag )
                 {
                     as_json = true;
                 }
                 else
                 {
                     print_usage();
-                    return kUsageError;
+                    return usageError;
                 }
             }
             return run_doctor_command( as_json );
         }
 
-        if( command == kDaemonCommand )
+        if( command == daemonCommand )
         {
             return run_daemon_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kTypeCommand )
+        if( command == typeCommand )
         {
             return run_type_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kClickCommand )
+        if( command == clickCommand )
         {
             return run_click_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kDragCommand )
+        if( command == dragCommand )
         {
             return run_drag_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kCaptureCommand )
+        if( command == captureCommand )
         {
             return run_capture_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kBatchCommand )
+        if( command == batchCommand )
         {
             return run_batch_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kCompareCommand )
+        if( command == compareCommand )
         {
             return run_compare_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kWatchCommand )
+        if( command == watchCommand )
         {
             return run_watch_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kKeyCommand )
+        if( command == keyCommand )
         {
             return grab::cli::run_key_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kDragCurveCommand )
+        if( command == dragCurveCommand )
         {
             return grab::cli::run_drag_curve_command( cli_args.subspan( 1 ) );
         }
 
-        if( command == kSessionCommand )
+        if( command == sessionCommand )
         {
             std::vector<std::string_view> session_args;
             session_args.reserve( cli_args.size() - 1U );
@@ -1504,7 +1502,7 @@ namespace
         }
 
         print_usage();
-        return kUsageError;
+        return usageError;
     }
 
 }    // namespace

@@ -27,32 +27,32 @@ extern "C"
 namespace
 {
 
-    constexpr const char*      kXvfbDisplay        = ":91";
-    constexpr const char*      kBadDisplay         = ":bad-nonexistent-91";
-    constexpr const char*      kOutputExtension    = ".mp4";
-    constexpr const char*      kOutputPrefix       = "grab-record-test-";
-    constexpr std::uint32_t    kRecordFps          = 10U;
-    constexpr std::uint32_t    kShortClipFrames    = 10U;
-    constexpr std::uint32_t    kUnlimitedFrames    = 0U;
-    constexpr std::uint32_t    kFirstTempIndex     = 1U;
-    constexpr std::uint32_t    kTempIndexStep      = 1U;
-    constexpr std::uint32_t    kRequiredPackets    = 1U;
-    constexpr auto             kThreadReadyTimeout = std::chrono::seconds{ 2 };
-    constexpr auto             kPostTimeout        = std::chrono::seconds{ 2 };
-    constexpr auto             kRecordTimeout      = std::chrono::seconds{ 8 };
-    constexpr auto             kManualStopWarmup   = std::chrono::milliseconds{ 500 };
-    constexpr auto             kPollInterval       = std::chrono::milliseconds{ 100 };
-    constexpr int              kLibavSuccess       = 0;
-    constexpr int              kNoVideoStream      = -1;
+    constexpr const char*      xvfbDisplay        = ":91";
+    constexpr const char*      badDisplay         = ":bad-nonexistent-91";
+    constexpr const char*      outputExtension    = ".mp4";
+    constexpr const char*      outputPrefix       = "grab-record-test-";
+    constexpr std::uint32_t    recordFps          = 10U;
+    constexpr std::uint32_t    shortClipFrames    = 10U;
+    constexpr std::uint32_t    unlimitedFrames    = 0U;
+    constexpr std::uint32_t    firstTempIndex     = 1U;
+    constexpr std::uint32_t    tempIndexStep      = 1U;
+    constexpr std::uint32_t    requiredPackets    = 1U;
+    constexpr auto             threadReadyTimeout = std::chrono::seconds{ 2 };
+    constexpr auto             postTimeout        = std::chrono::seconds{ 2 };
+    constexpr auto             recordTimeout      = std::chrono::seconds{ 8 };
+    constexpr auto             manualStopWarmup   = std::chrono::milliseconds{ 500 };
+    constexpr auto             pollInterval       = std::chrono::milliseconds{ 100 };
+    constexpr int              libavSuccess       = 0;
+    constexpr int              noVideoStream      = -1;
 
-    std::atomic<std::uint32_t> g_next_temp_index{ kFirstTempIndex };
+    std::atomic<std::uint32_t> g_next_temp_index{ firstTempIndex };
 
     [[nodiscard]]
     std::string
     libav_error_message( int code )
     {
         std::array<char, AV_ERROR_MAX_STRING_SIZE> buffer{};
-        if( av_strerror( code, buffer.data(), buffer.size() ) < kLibavSuccess )
+        if( av_strerror( code, buffer.data(), buffer.size() ) < libavSuccess )
         {
             return "unknown libav error " + std::to_string( code );
         }
@@ -65,14 +65,14 @@ namespace
 
             TempMediaPath() :
                 path_( std::filesystem::temp_directory_path() /
-                       ( std::string{ kOutputPrefix } +
+                       ( std::string{ outputPrefix } +
                          std::to_string( static_cast<long long>( ::getpid() ) ) +
                          "-" +
                          std::to_string(
-                             g_next_temp_index.fetch_add( kTempIndexStep,
+                             g_next_temp_index.fetch_add( tempIndexStep,
                                                           std::memory_order_relaxed )
                          ) +
-                         kOutputExtension ) )
+                         outputExtension ) )
             {
                 std::error_code error;
                 std::filesystem::remove( path_, error );
@@ -142,7 +142,7 @@ namespace
             bool
             wait_until_started()
             {
-                return started_future_.wait_for( kThreadReadyTimeout ) ==
+                return started_future_.wait_for( threadReadyTimeout ) ==
                        std::future_status::ready;
             }
 
@@ -275,7 +275,7 @@ namespace
         const std::string path_string = path.string();
         const int         open_result =
             avformat_open_input( &raw_context, path_string.c_str(), nullptr, nullptr );
-        if( open_result < kLibavSuccess )
+        if( open_result < libavSuccess )
         {
             return testing::AssertionFailure()
                 << "avformat_open_input failed: " << libav_error_message( open_result );
@@ -283,13 +283,13 @@ namespace
         InputFormat input{ raw_context };
 
         const int   stream_result = avformat_find_stream_info( input.get(), nullptr );
-        if( stream_result < kLibavSuccess )
+        if( stream_result < libavSuccess )
         {
             return testing::AssertionFailure() << "avformat_find_stream_info failed: "
                                                << libav_error_message( stream_result );
         }
 
-        int video_stream = kNoVideoStream;
+        int video_stream = noVideoStream;
         for( unsigned int index = 0U; index < input.get()->nb_streams; ++index )
         {
             const AVStream* const stream = input.get()->streams[index];
@@ -310,7 +310,7 @@ namespace
             }
         }
 
-        if( video_stream == kNoVideoStream )
+        if( video_stream == noVideoStream )
         {
             return testing::AssertionFailure() << "no video stream found";
         }
@@ -322,14 +322,14 @@ namespace
         }
 
         std::uint32_t video_packets = 0U;
-        while( av_read_frame( input.get(), packet.get() ) >= kLibavSuccess )
+        while( av_read_frame( input.get(), packet.get() ) >= libavSuccess )
         {
             if( packet.get()->stream_index == video_stream )
             {
                 ++video_packets;
             }
             av_packet_unref( packet.get() );
-            if( video_packets >= kRequiredPackets )
+            if( video_packets >= requiredPackets )
             {
                 return testing::AssertionSuccess();
             }
@@ -342,7 +342,7 @@ namespace
     testing::AssertionResult
     wait_until_demuxable( const std::filesystem::path& path )
     {
-        const auto deadline = std::chrono::steady_clock::now() + kRecordTimeout;
+        const auto deadline = std::chrono::steady_clock::now() + recordTimeout;
         testing::AssertionResult last_result = testing::AssertionFailure()
                                             << "recording was never checked";
         while( std::chrono::steady_clock::now() < deadline )
@@ -352,7 +352,7 @@ namespace
             {
                 return testing::AssertionSuccess();
             }
-            std::this_thread::sleep_for( kPollInterval );
+            std::this_thread::sleep_for( pollInterval );
         }
         return last_result;
     }
@@ -368,10 +368,10 @@ TEST( Recorder,
 
     auto recorder = grab::screen::Recorder::start( reactor.reactor(),
                                                    grab::screen::RecordOptions{
-                                                       .display    = kXvfbDisplay,
+                                                       .display    = xvfbDisplay,
                                                        .path       = path.string(),
-                                                       .fps        = kRecordFps,
-                                                       .max_frames = kShortClipFrames,
+                                                       .fps        = recordFps,
+                                                       .max_frames = shortClipFrames,
                                                    } );
     ASSERT_TRUE( recorder.has_value() ) << recorder.error().message;
 
@@ -396,14 +396,14 @@ TEST( Recorder,
 
     auto recorder = grab::screen::Recorder::start( reactor.reactor(),
                                                    grab::screen::RecordOptions{
-                                                       .display    = kXvfbDisplay,
+                                                       .display    = xvfbDisplay,
                                                        .path       = path.string(),
-                                                       .fps        = kRecordFps,
-                                                       .max_frames = kUnlimitedFrames,
+                                                       .fps        = recordFps,
+                                                       .max_frames = unlimitedFrames,
                                                    } );
     ASSERT_TRUE( recorder.has_value() ) << recorder.error().message;
 
-    std::this_thread::sleep_for( kManualStopWarmup );
+    std::this_thread::sleep_for( manualStopWarmup );
 
     auto first_stop = recorder->stop();
     EXPECT_TRUE( first_stop.has_value() ) << first_stop.error().message;
@@ -426,14 +426,14 @@ TEST( Recorder,
 
     auto recorder = grab::screen::Recorder::start( reactor.reactor(),
                                                    grab::screen::RecordOptions{
-                                                       .display    = kBadDisplay,
+                                                       .display    = badDisplay,
                                                        .path       = path.string(),
-                                                       .fps        = kRecordFps,
-                                                       .max_frames = kShortClipFrames,
+                                                       .fps        = recordFps,
+                                                       .max_frames = shortClipFrames,
                                                    } );
 
     ASSERT_FALSE( recorder.has_value() );
-    EXPECT_EQ( recorder.error().code, grab::ErrorCode::device_inaccessible );
+    EXPECT_EQ( recorder.error().code, grab::ErrorCode::DeviceInaccessible );
 
     std::promise<void> posted;
     auto               posted_future = posted.get_future();
@@ -443,7 +443,7 @@ TEST( Recorder,
             posted.set_value();
         }
     );
-    EXPECT_EQ( posted_future.wait_for( kPostTimeout ), std::future_status::ready );
+    EXPECT_EQ( posted_future.wait_for( postTimeout ), std::future_status::ready );
 
     reactor.stop();
     EXPECT_TRUE( reactor.run_result().has_value() )

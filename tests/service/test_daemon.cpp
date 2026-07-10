@@ -32,30 +32,30 @@
 namespace
 {
 
-    constexpr std::string_view kUnixEndpointPrefix     = "unix:";
-    constexpr std::string_view kTempRootName           = "grab-daemon-tests";
-    constexpr std::string_view kNameSeparator          = "-";
-    constexpr std::string_view kUnknownTestName        = "unknown";
-    constexpr std::string_view kSocketFileName         = "daemon.sock";
-    constexpr std::string_view kStoreDirName           = "store";
-    constexpr std::string_view kJsonlExtension         = ".jsonl";
-    constexpr std::string_view kPersistedTypeNeedle    = R"("type":"input.key_down")";
-    constexpr std::string_view kPersistedKeyCodeNeedle = R"("code":30)";
-    constexpr std::string_view kPersistedKeyNameNeedle = R"("name":"A")";
-    constexpr std::string_view kTransportStartFailurePrefix =
+    constexpr std::string_view unixEndpointPrefix     = "unix:";
+    constexpr std::string_view tempRootName           = "grab-daemon-tests";
+    constexpr std::string_view nameSeparator          = "-";
+    constexpr std::string_view unknownTestName        = "unknown";
+    constexpr std::string_view socketFileName         = "daemon.sock";
+    constexpr std::string_view storeDirName           = "store";
+    constexpr std::string_view jsonlExtension         = ".jsonl";
+    constexpr std::string_view persistedTypeNeedle    = R"("type":"input.key_down")";
+    constexpr std::string_view persistedKeyCodeNeedle = R"("code":30)";
+    constexpr std::string_view persistedKeyNameNeedle = R"("name":"A")";
+    constexpr std::string_view transportStartFailurePrefix =
         "failed to start transport server at unix:";
-    constexpr auto          kUnaryDeadline           = std::chrono::seconds{ 2 };
-    constexpr auto          kShutdownDeadline        = std::chrono::milliseconds{ 500 };
-    constexpr auto          kStreamDeadline          = std::chrono::seconds{ 5 };
-    constexpr auto          kStreamReadyTimeout      = std::chrono::seconds{ 2 };
-    constexpr auto          kStreamResultTimeout     = std::chrono::seconds{ 2 };
-    constexpr auto          kPersistencePollInterval = std::chrono::milliseconds{ 20 };
-    constexpr std::size_t   kPersistenceAttempts     = 100U;
-    constexpr double        kEventTimestamp          = 1'704'067'200.0;
-    constexpr std::uint64_t kNoSequence              = 0U;
-    constexpr std::uint32_t kKeyDownCode             = 30U;
-    constexpr std::string_view kKeyDownName          = "A";
-    constexpr auto             kCancelledCode        = grpc::StatusCode::CANCELLED;
+    constexpr auto             unaryDeadline       = std::chrono::seconds{ 2 };
+    constexpr auto             shutdownDeadline    = std::chrono::milliseconds{ 500 };
+    constexpr auto             streamDeadline      = std::chrono::seconds{ 5 };
+    constexpr auto             streamReadyTimeout  = std::chrono::seconds{ 2 };
+    constexpr auto             streamResultTimeout = std::chrono::seconds{ 2 };
+    constexpr auto             persistencePollInterval = std::chrono::milliseconds{ 20 };
+    constexpr std::size_t      persistenceAttempts     = 100U;
+    constexpr double           eventTimestamp          = 1'704'067'200.0;
+    constexpr std::uint64_t    noSequence              = 0U;
+    constexpr std::uint32_t    keyDownCode             = 30U;
+    constexpr std::string_view keyDownName             = "A";
+    constexpr auto             cancelledCode           = grpc::StatusCode::CANCELLED;
 
     [[nodiscard]]
     std::string
@@ -65,11 +65,11 @@ namespace
             ::testing::UnitTest::GetInstance()->current_test_info();
         if( test_info == nullptr )
         {
-            return std::string{ kUnknownTestName };
+            return std::string{ unknownTestName };
         }
 
         return test_info->test_suite_name() +
-               std::string{ kNameSeparator } +
+               std::string{ nameSeparator } +
                test_info->name();
     }
 
@@ -79,11 +79,11 @@ namespace
 
             TempDaemonDir() :
                 root_( std::filesystem::temp_directory_path() /
-                       std::string{ kTempRootName } /
+                       std::string{ tempRootName } /
                        current_test_name() ),
-                store_( root_ / std::string{ kStoreDirName } ),
-                socket_( root_ / std::string{ kSocketFileName } ),
-                endpoint_( std::string{ kUnixEndpointPrefix } + socket_.string() )
+                store_( root_ / std::string{ storeDirName } ),
+                socket_( root_ / std::string{ socketFileName } ),
+                endpoint_( std::string{ unixEndpointPrefix } + socket_.string() )
             {
                 std::error_code ec;
                 const auto      removed = std::filesystem::remove_all( root_, ec );
@@ -212,7 +212,7 @@ namespace
     transport_start_blocked( const grab::Result<T>& result )
     {
         return !result.has_value() &&
-               result.error().message.starts_with( kTransportStartFailurePrefix );
+               result.error().message.starts_with( transportStartFailurePrefix );
     }
 
     [[nodiscard]]
@@ -220,13 +220,13 @@ namespace
     key_down_event()
     {
         return grab::Event{
-            .timestamp = kEventTimestamp,
-            .sequence  = kNoSequence,
-            .kind      = grab::EventKind::key_down,
-            .category  = grab::EventCategory::input,
+            .timestamp = eventTimestamp,
+            .sequence  = noSequence,
+            .kind      = grab::EventKind::KeyDown,
+            .category  = grab::EventCategory::Input,
             .payload   = grab::Payload{ grab::InputKey{
-                .code = kKeyDownCode,
-                .name = std::string{ kKeyDownName },
+                .code = keyDownCode,
+                .name = std::string{ keyDownName },
             } },
         };
     }
@@ -273,7 +273,7 @@ namespace
     push_wire_event( eventgrab::v1::EventGrabService::Stub& stub,
                      const eventgrab::v1::Event&            wire )
     {
-        return push_wire_event( stub, wire, kUnaryDeadline );
+        return push_wire_event( stub, wire, unaryDeadline );
     }
 
     [[nodiscard]]
@@ -283,7 +283,7 @@ namespace
         RunningSubscribe running;
         running.context = std::make_unique<grpc::ClientContext>();
         running.context->set_deadline( std::chrono::system_clock::now() +
-                                       kStreamDeadline );
+                                       streamDeadline );
 
         eventgrab::v1::EventFilter     filter;
         std::promise<void>             ready_promise;
@@ -326,7 +326,7 @@ namespace
     StreamReadResult
     finish_subscription( RunningSubscribe& subscriber )
     {
-        if( subscriber.result.wait_for( kStreamResultTimeout ) !=
+        if( subscriber.result.wait_for( streamResultTimeout ) !=
             std::future_status::ready )
         {
             subscriber.cancel();
@@ -356,16 +356,16 @@ namespace
     bool
     stream_finished_cleanly( const grpc::Status& status ) noexcept
     {
-        return status.ok() || status.error_code() == kCancelledCode;
+        return status.ok() || status.error_code() == cancelledCode;
     }
 
     [[nodiscard]]
     bool
     line_contains_persisted_event( std::string_view line )
     {
-        return line.contains( kPersistedTypeNeedle ) &&
-               line.contains( kPersistedKeyCodeNeedle ) &&
-               line.contains( kPersistedKeyNameNeedle );
+        return line.contains( persistedTypeNeedle ) &&
+               line.contains( persistedKeyCodeNeedle ) &&
+               line.contains( persistedKeyNameNeedle );
     }
 
     [[nodiscard]]
@@ -401,7 +401,7 @@ namespace
         {
             const auto path = iter->path();
             if( path.extension() ==
-                kJsonlExtension &&
+                jsonlExtension &&
                 file_contains_persisted_event( path ) )
             {
                 return true;
@@ -415,13 +415,13 @@ namespace
     bool
     wait_for_persisted_event( const std::filesystem::path& dir )
     {
-        for( std::size_t attempt = 0U; attempt < kPersistenceAttempts; ++attempt )
+        for( std::size_t attempt = 0U; attempt < persistenceAttempts; ++attempt )
         {
             if( persisted_event_present( dir ) )
             {
                 return true;
             }
-            std::this_thread::sleep_for( kPersistencePollInterval );
+            std::this_thread::sleep_for( persistencePollInterval );
         }
         return false;
     }
@@ -445,7 +445,7 @@ TEST( Daemon,
     auto stub       = make_stub( daemon.endpoint() );
 
     auto subscriber = start_subscribe( *stub );
-    ASSERT_EQ( subscriber.ready.wait_for( kStreamReadyTimeout ),
+    ASSERT_EQ( subscriber.ready.wait_for( streamReadyTimeout ),
                std::future_status::ready );
 
     const auto expected = key_down_wire();
@@ -480,7 +480,7 @@ TEST( Daemon,
     daemon.shutdown();
     daemon.shutdown();
 
-    const auto status = push_wire_event( *stub, key_down_wire(), kShutdownDeadline );
+    const auto status = push_wire_event( *stub, key_down_wire(), shutdownDeadline );
     EXPECT_FALSE( status.ok() );
 }
 
@@ -501,7 +501,7 @@ TEST( Daemon,
     auto stub       = make_stub( daemon.endpoint() );
 
     auto subscriber = start_subscribe( *stub );
-    ASSERT_EQ( subscriber.ready.wait_for( kStreamReadyTimeout ),
+    ASSERT_EQ( subscriber.ready.wait_for( streamReadyTimeout ),
                std::future_status::ready );
 
     const auto expected = key_down_wire();

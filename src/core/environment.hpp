@@ -9,11 +9,11 @@ namespace grab::core
 
     enum class SessionType : std::uint8_t
     {
-        unknown,
-        x11,
-        wayland,
-        headless,
-        count,
+        Unknown,
+        X11,
+        Wayland,
+        Headless,
+        Count,
     };
 
     struct InputDeviceAccess
@@ -24,7 +24,7 @@ namespace grab::core
 
     struct Environment
     {
-            SessionType                    session          = SessionType::unknown;
+            SessionType                    session          = SessionType::Unknown;
             bool                           xwayland_present = false;
             std::string                    compositor;
             std::string                    desktop;

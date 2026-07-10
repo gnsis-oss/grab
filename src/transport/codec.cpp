@@ -22,36 +22,36 @@ namespace grab::transport
     namespace
     {
 
-        constexpr std::uint64_t    kNoSequence     = 0U;
+        constexpr std::uint64_t    noSequence     = 0U;
 
-        constexpr std::string_view kKeyCode        = "key_code";
-        constexpr std::string_view kKeyName        = "key_name";
-        constexpr std::string_view kText           = "text";
-        constexpr std::string_view kButton         = "button";
-        constexpr std::string_view kButtonName     = "button_name";
-        constexpr std::string_view kAxis           = "axis";
-        constexpr std::string_view kDelta          = "delta";
-        constexpr std::string_view kIdleS          = "idle_s";
-        constexpr std::string_view kApp            = "app";
-        constexpr std::string_view kPid            = "pid";
-        constexpr std::string_view kTitle          = "title";
-        constexpr std::string_view kPrevTitle      = "prev_title";
-        constexpr std::string_view kDurationS      = "duration_s";
-        constexpr std::string_view kRole           = "role";
-        constexpr std::string_view kName           = "name";
-        constexpr std::string_view kDetail         = "detail";
-        constexpr std::string_view kState          = "state";
-        constexpr std::string_view kJson           = "json";
-        constexpr std::string_view kTabTitle       = "tab_title";
-        constexpr std::string_view kPrevTabTitle   = "prev_tab_title";
-        constexpr std::string_view kProtocolPrefix = "malformed event: ";
+        constexpr std::string_view keyCode        = "key_code";
+        constexpr std::string_view keyName        = "key_name";
+        constexpr std::string_view textKey        = "text";
+        constexpr std::string_view buttonKey      = "button";
+        constexpr std::string_view buttonName     = "button_name";
+        constexpr std::string_view axisKey        = "axis";
+        constexpr std::string_view deltaKey       = "delta";
+        constexpr std::string_view idleS          = "idle_s";
+        constexpr std::string_view appKey         = "app";
+        constexpr std::string_view pidKey         = "pid";
+        constexpr std::string_view titleKey       = "title";
+        constexpr std::string_view prevTitle      = "prev_title";
+        constexpr std::string_view durationS      = "duration_s";
+        constexpr std::string_view roleKey        = "role";
+        constexpr std::string_view nameKey        = "name";
+        constexpr std::string_view detailKey      = "detail";
+        constexpr std::string_view state          = "state";
+        constexpr std::string_view jsonKey        = "json";
+        constexpr std::string_view tabTitle       = "tab_title";
+        constexpr std::string_view prevTabTitle   = "prev_tab_title";
+        constexpr std::string_view protocolPrefix = "malformed event: ";
 
         [[nodiscard]]
         std::unexpected<grab::Error>
         protocol_error( std::string message )
         {
-            return grab::fail( grab::ErrorCode::protocol_error,
-                               std::string{ kProtocolPrefix } + std::move( message ) );
+            return grab::fail( grab::ErrorCode::ProtocolError,
+                               std::string{ protocolPrefix } + std::move( message ) );
         }
 
         [[nodiscard]]
@@ -60,49 +60,49 @@ namespace grab::transport
         {
             switch( kind )
             {
-                case grab::EventKind::key_down :
+                case grab::EventKind::KeyDown :
                     return eventgrab::v1::INPUT_KEY_DOWN;
-                case grab::EventKind::key_up :
+                case grab::EventKind::KeyUp :
                     return eventgrab::v1::INPUT_KEY_UP;
-                case grab::EventKind::key_combo :
+                case grab::EventKind::KeyCombo :
                     return eventgrab::v1::INPUT_KEY_COMBO;
-                case grab::EventKind::mouse_click :
+                case grab::EventKind::MouseClick :
                     return eventgrab::v1::INPUT_MOUSE_CLICK;
-                case grab::EventKind::mouse_move :
+                case grab::EventKind::MouseMove :
                     return eventgrab::v1::INPUT_MOUSE_MOVE;
-                case grab::EventKind::idle_start :
+                case grab::EventKind::IdleStart :
                     return eventgrab::v1::INPUT_IDLE_START;
-                case grab::EventKind::idle_end :
+                case grab::EventKind::IdleEnd :
                     return eventgrab::v1::INPUT_IDLE_END;
-                case grab::EventKind::window_focus_changed :
+                case grab::EventKind::WindowFocusChanged :
                     return eventgrab::v1::WINDOW_FOCUS_CHANGED;
-                case grab::EventKind::window_title_changed :
+                case grab::EventKind::WindowTitleChanged :
                     return eventgrab::v1::WINDOW_TITLE_CHANGED;
-                case grab::EventKind::window_created :
+                case grab::EventKind::WindowCreated :
                     return eventgrab::v1::WINDOW_CREATED;
-                case grab::EventKind::window_closed :
+                case grab::EventKind::WindowClosed :
                     return eventgrab::v1::WINDOW_CLOSED;
-                case grab::EventKind::a11y_button_clicked :
+                case grab::EventKind::A11yButtonClicked :
                     return eventgrab::v1::A11Y_BUTTON_CLICKED;
-                case grab::EventKind::a11y_menu_opened :
+                case grab::EventKind::A11yMenuOpened :
                     return eventgrab::v1::A11Y_MENU_OPENED;
-                case grab::EventKind::a11y_menu_closed :
+                case grab::EventKind::A11yMenuClosed :
                     return eventgrab::v1::A11Y_MENU_CLOSED;
-                case grab::EventKind::a11y_focus_changed :
+                case grab::EventKind::A11yFocusChanged :
                     return eventgrab::v1::A11Y_FOCUS_CHANGED;
-                case grab::EventKind::a11y_text_changed :
+                case grab::EventKind::A11yTextChanged :
                     return eventgrab::v1::A11Y_TEXT_CHANGED;
-                case grab::EventKind::a11y_state_changed :
+                case grab::EventKind::A11yStateChanged :
                     return eventgrab::v1::A11Y_STATE_CHANGED;
-                case grab::EventKind::app_tab_changed :
+                case grab::EventKind::AppTabChanged :
                     return eventgrab::v1::APP_TAB_CHANGED;
-                case grab::EventKind::app_context_update :
+                case grab::EventKind::AppContextUpdate :
                     return eventgrab::v1::APP_CONTEXT_UPDATE;
-                case grab::EventKind::browser_tab_switched :
+                case grab::EventKind::BrowserTabSwitched :
                     return eventgrab::v1::BROWSER_TAB_SWITCHED;
-                case grab::EventKind::state_snapshot :
+                case grab::EventKind::StateSnapshot :
                     return eventgrab::v1::STATE_SNAPSHOT;
-                case grab::EventKind::unspecified :
+                case grab::EventKind::Unspecified :
                     return eventgrab::v1::EVENT_KIND_UNSPECIFIED;
             }
 
@@ -116,47 +116,47 @@ namespace grab::transport
             switch( kind )
             {
                 case eventgrab::v1::INPUT_KEY_DOWN :
-                    return grab::EventKind::key_down;
+                    return grab::EventKind::KeyDown;
                 case eventgrab::v1::INPUT_KEY_UP :
-                    return grab::EventKind::key_up;
+                    return grab::EventKind::KeyUp;
                 case eventgrab::v1::INPUT_KEY_COMBO :
-                    return grab::EventKind::key_combo;
+                    return grab::EventKind::KeyCombo;
                 case eventgrab::v1::INPUT_MOUSE_CLICK :
-                    return grab::EventKind::mouse_click;
+                    return grab::EventKind::MouseClick;
                 case eventgrab::v1::INPUT_MOUSE_MOVE :
-                    return grab::EventKind::mouse_move;
+                    return grab::EventKind::MouseMove;
                 case eventgrab::v1::INPUT_IDLE_START :
-                    return grab::EventKind::idle_start;
+                    return grab::EventKind::IdleStart;
                 case eventgrab::v1::INPUT_IDLE_END :
-                    return grab::EventKind::idle_end;
+                    return grab::EventKind::IdleEnd;
                 case eventgrab::v1::WINDOW_FOCUS_CHANGED :
-                    return grab::EventKind::window_focus_changed;
+                    return grab::EventKind::WindowFocusChanged;
                 case eventgrab::v1::WINDOW_TITLE_CHANGED :
-                    return grab::EventKind::window_title_changed;
+                    return grab::EventKind::WindowTitleChanged;
                 case eventgrab::v1::WINDOW_CREATED :
-                    return grab::EventKind::window_created;
+                    return grab::EventKind::WindowCreated;
                 case eventgrab::v1::WINDOW_CLOSED :
-                    return grab::EventKind::window_closed;
+                    return grab::EventKind::WindowClosed;
                 case eventgrab::v1::A11Y_BUTTON_CLICKED :
-                    return grab::EventKind::a11y_button_clicked;
+                    return grab::EventKind::A11yButtonClicked;
                 case eventgrab::v1::A11Y_MENU_OPENED :
-                    return grab::EventKind::a11y_menu_opened;
+                    return grab::EventKind::A11yMenuOpened;
                 case eventgrab::v1::A11Y_MENU_CLOSED :
-                    return grab::EventKind::a11y_menu_closed;
+                    return grab::EventKind::A11yMenuClosed;
                 case eventgrab::v1::A11Y_FOCUS_CHANGED :
-                    return grab::EventKind::a11y_focus_changed;
+                    return grab::EventKind::A11yFocusChanged;
                 case eventgrab::v1::A11Y_TEXT_CHANGED :
-                    return grab::EventKind::a11y_text_changed;
+                    return grab::EventKind::A11yTextChanged;
                 case eventgrab::v1::A11Y_STATE_CHANGED :
-                    return grab::EventKind::a11y_state_changed;
+                    return grab::EventKind::A11yStateChanged;
                 case eventgrab::v1::APP_TAB_CHANGED :
-                    return grab::EventKind::app_tab_changed;
+                    return grab::EventKind::AppTabChanged;
                 case eventgrab::v1::APP_CONTEXT_UPDATE :
-                    return grab::EventKind::app_context_update;
+                    return grab::EventKind::AppContextUpdate;
                 case eventgrab::v1::BROWSER_TAB_SWITCHED :
-                    return grab::EventKind::browser_tab_switched;
+                    return grab::EventKind::BrowserTabSwitched;
                 case eventgrab::v1::STATE_SNAPSHOT :
-                    return grab::EventKind::state_snapshot;
+                    return grab::EventKind::StateSnapshot;
                 case eventgrab::v1::EVENT_KIND_UNSPECIFIED :
                 default :
                     return protocol_error( "unknown event kind" );
@@ -169,19 +169,19 @@ namespace grab::transport
         {
             switch( category )
             {
-                case grab::EventCategory::input :
+                case grab::EventCategory::Input :
                     return eventgrab::v1::EVENT_CATEGORY_INPUT;
-                case grab::EventCategory::window :
+                case grab::EventCategory::Window :
                     return eventgrab::v1::EVENT_CATEGORY_WINDOW;
-                case grab::EventCategory::accessibility :
+                case grab::EventCategory::Accessibility :
                     return eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY;
-                case grab::EventCategory::integration :
+                case grab::EventCategory::Integration :
                     return eventgrab::v1::EVENT_CATEGORY_INTEGRATION;
-                case grab::EventCategory::browser :
+                case grab::EventCategory::Browser :
                     return eventgrab::v1::EVENT_CATEGORY_BROWSER;
-                case grab::EventCategory::state :
+                case grab::EventCategory::State :
                     return eventgrab::v1::EVENT_CATEGORY_STATE;
-                case grab::EventCategory::unspecified :
+                case grab::EventCategory::Unspecified :
                     return eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED;
             }
 
@@ -195,19 +195,19 @@ namespace grab::transport
             switch( category )
             {
                 case eventgrab::v1::EVENT_CATEGORY_INPUT :
-                    return grab::EventCategory::input;
+                    return grab::EventCategory::Input;
                 case eventgrab::v1::EVENT_CATEGORY_WINDOW :
-                    return grab::EventCategory::window;
+                    return grab::EventCategory::Window;
                 case eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY :
-                    return grab::EventCategory::accessibility;
+                    return grab::EventCategory::Accessibility;
                 case eventgrab::v1::EVENT_CATEGORY_INTEGRATION :
-                    return grab::EventCategory::integration;
+                    return grab::EventCategory::Integration;
                 case eventgrab::v1::EVENT_CATEGORY_BROWSER :
-                    return grab::EventCategory::browser;
+                    return grab::EventCategory::Browser;
                 case eventgrab::v1::EVENT_CATEGORY_STATE :
-                    return grab::EventCategory::state;
+                    return grab::EventCategory::State;
                 case eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED :
-                    return grab::EventCategory::unspecified;
+                    return grab::EventCategory::Unspecified;
                 default :
                     return protocol_error( "unknown event category" );
             }
@@ -387,49 +387,49 @@ namespace grab::transport
         encode_input_key( eventgrab::v1::Event& wire,
                           const grab::InputKey& payload )
         {
-            set_data( wire, kKeyCode, uint_to_string( payload.code ) );
-            set_data( wire, kKeyName, payload.name );
+            set_data( wire, keyCode, uint_to_string( payload.code ) );
+            set_data( wire, keyName, payload.name );
         }
 
         void
         encode_key_combo( eventgrab::v1::Event& wire,
                           const grab::KeyCombo& payload )
         {
-            set_data( wire, kText, payload.text );
+            set_data( wire, textKey, payload.text );
         }
 
         void
         encode_mouse_click( eventgrab::v1::Event&   wire,
                             const grab::MouseClick& payload )
         {
-            set_data( wire, kButton, uint_to_string( payload.button ) );
-            set_data( wire, kButtonName, payload.name );
+            set_data( wire, buttonKey, uint_to_string( payload.button ) );
+            set_data( wire, buttonName, payload.name );
         }
 
         void
         encode_mouse_move( eventgrab::v1::Event&  wire,
                            const grab::MouseMove& payload )
         {
-            set_data( wire, kAxis, payload.axis );
-            set_data( wire, kDelta, double_to_string( payload.delta ) );
+            set_data( wire, axisKey, payload.axis );
+            set_data( wire, deltaKey, double_to_string( payload.delta ) );
         }
 
         void
         encode_idle( eventgrab::v1::Event& wire,
                      const grab::Idle&     payload )
         {
-            set_data( wire, kIdleS, double_to_string( payload.idle_s ) );
+            set_data( wire, idleS, double_to_string( payload.idle_s ) );
         }
 
         void
         encode_window_change( eventgrab::v1::Event&     wire,
                               const grab::WindowChange& payload )
         {
-            set_data( wire, kApp, payload.app );
-            set_data( wire, kPid, payload.pid.to_string() );
-            set_data( wire, kTitle, payload.title );
-            set_data( wire, kPrevTitle, payload.prev_title );
-            set_data( wire, kDurationS, double_to_string( payload.duration_s ) );
+            set_data( wire, appKey, payload.app );
+            set_data( wire, pidKey, payload.pid.to_string() );
+            set_data( wire, titleKey, payload.title );
+            set_data( wire, prevTitle, payload.prev_title );
+            set_data( wire, durationS, double_to_string( payload.duration_s ) );
         }
 
         void
@@ -437,49 +437,49 @@ namespace grab::transport
                            grab::EventKind        kind,
                            const grab::A11yEvent& payload )
         {
-            set_data( wire, kApp, payload.app );
-            set_data( wire, kRole, payload.role );
-            set_data( wire, kName, payload.name );
-            if( kind == grab::EventKind::a11y_state_changed )
+            set_data( wire, appKey, payload.app );
+            set_data( wire, roleKey, payload.role );
+            set_data( wire, nameKey, payload.name );
+            if( kind == grab::EventKind::A11yStateChanged )
             {
-                set_data( wire, kState, payload.detail );
+                set_data( wire, state, payload.detail );
                 return;
             }
-            set_data( wire, kDetail, payload.detail );
+            set_data( wire, detailKey, payload.detail );
         }
 
         void
         encode_integration_event( eventgrab::v1::Event&         wire,
                                   const grab::IntegrationEvent& payload )
         {
-            set_data( wire, kApp, payload.app );
-            set_data( wire, kTitle, payload.title );
-            set_data( wire, kDetail, payload.detail );
-            set_data( wire, kJson, payload.json );
+            set_data( wire, appKey, payload.app );
+            set_data( wire, titleKey, payload.title );
+            set_data( wire, detailKey, payload.detail );
+            set_data( wire, jsonKey, payload.json );
         }
 
         void
         encode_browser_tab( eventgrab::v1::Event&   wire,
                             const grab::BrowserTab& payload )
         {
-            set_data( wire, kApp, payload.app );
-            set_data( wire, kPid, payload.pid.to_string() );
-            set_data( wire, kTabTitle, payload.tab_title );
-            set_data( wire, kPrevTabTitle, payload.prev_tab_title );
+            set_data( wire, appKey, payload.app );
+            set_data( wire, pidKey, payload.pid.to_string() );
+            set_data( wire, tabTitle, payload.tab_title );
+            set_data( wire, prevTabTitle, payload.prev_tab_title );
         }
 
         void
         encode_state_snapshot( eventgrab::v1::Event&      wire,
                                const grab::StateSnapshot& payload )
         {
-            set_data( wire, kJson, payload.json );
+            set_data( wire, jsonKey, payload.json );
         }
 
         [[nodiscard]]
         grab::Result<void>
         validate_size( const eventgrab::v1::Event& wire )
         {
-            if( wire.data_size() > kMaxDataEntries )
+            if( wire.data_size() > maxDataEntries )
             {
                 return protocol_error( "too many data entries" );
             }
@@ -487,8 +487,8 @@ namespace grab::transport
             for( const auto& [key, value] : wire.data() )
             {
                 if( key.size() >
-                    static_cast<std::size_t>( kMaxValueBytes ) ||
-                    value.size() > static_cast<std::size_t>( kMaxValueBytes ) )
+                    static_cast<std::size_t>( maxValueBytes ) ||
+                    value.size() > static_cast<std::size_t>( maxValueBytes ) )
                 {
                     return protocol_error( "data entry exceeds maximum byte size" );
                 }
@@ -501,7 +501,7 @@ namespace grab::transport
         grab::Result<grab::InputKey>
         decode_input_key( const eventgrab::v1::Event& wire )
         {
-            auto code = required_uint32( wire, kKeyCode );
+            auto code = required_uint32( wire, keyCode );
             if( !code.has_value() )
             {
                 return std::unexpected( code.error() );
@@ -509,7 +509,7 @@ namespace grab::transport
 
             return grab::InputKey{
                 .code = *code,
-                .name = optional_string( wire, kKeyName ),
+                .name = optional_string( wire, keyName ),
             };
         }
 
@@ -517,7 +517,7 @@ namespace grab::transport
         grab::Result<grab::KeyCombo>
         decode_key_combo( const eventgrab::v1::Event& wire )
         {
-            auto text = required_string( wire, kText );
+            auto text = required_string( wire, textKey );
             if( !text.has_value() )
             {
                 return std::unexpected( text.error() );
@@ -530,7 +530,7 @@ namespace grab::transport
         grab::Result<grab::MouseClick>
         decode_mouse_click( const eventgrab::v1::Event& wire )
         {
-            auto button = required_uint32( wire, kButton );
+            auto button = required_uint32( wire, buttonKey );
             if( !button.has_value() )
             {
                 return std::unexpected( button.error() );
@@ -538,7 +538,7 @@ namespace grab::transport
 
             return grab::MouseClick{
                 .button = *button,
-                .name   = optional_string( wire, kButtonName ),
+                .name   = optional_string( wire, buttonName ),
             };
         }
 
@@ -546,13 +546,13 @@ namespace grab::transport
         grab::Result<grab::MouseMove>
         decode_mouse_move( const eventgrab::v1::Event& wire )
         {
-            auto axis = required_string( wire, kAxis );
+            auto axis = required_string( wire, axisKey );
             if( !axis.has_value() )
             {
                 return std::unexpected( axis.error() );
             }
 
-            auto delta = required_double( wire, kDelta );
+            auto delta = required_double( wire, deltaKey );
             if( !delta.has_value() )
             {
                 return std::unexpected( delta.error() );
@@ -566,9 +566,9 @@ namespace grab::transport
         decode_idle( const eventgrab::v1::Event& wire,
                      grab::EventKind             kind )
         {
-            auto idle_s = kind == grab::EventKind::idle_start
-                            ? required_double( wire, kIdleS )
-                            : optional_double( wire, kIdleS );
+            auto idle_s = kind == grab::EventKind::IdleStart
+                            ? required_double( wire, idleS )
+                            : optional_double( wire, idleS );
             if( !idle_s.has_value() )
             {
                 return std::unexpected( idle_s.error() );
@@ -582,25 +582,25 @@ namespace grab::transport
         decode_window_change( const eventgrab::v1::Event& wire,
                               grab::EventKind             kind )
         {
-            auto app = required_string( wire, kApp );
+            auto app = required_string( wire, appKey );
             if( !app.has_value() )
             {
                 return std::unexpected( app.error() );
             }
-            auto pid = required_string( wire, kPid );
+            auto pid = required_string( wire, pidKey );
             if( !pid.has_value() )
             {
                 return std::unexpected( pid.error() );
             }
-            auto title = required_string( wire, kTitle );
+            auto title = required_string( wire, titleKey );
             if( !title.has_value() )
             {
                 return std::unexpected( title.error() );
             }
-            const auto prev_title = optional_string( wire, kPrevTitle );
-            auto       duration_s = kind == grab::EventKind::window_closed
-                                      ? required_double( wire, kDurationS )
-                                      : optional_double( wire, kDurationS );
+            const auto prev_title = optional_string( wire, prevTitle );
+            auto       duration_s = kind == grab::EventKind::WindowClosed
+                                      ? required_double( wire, durationS )
+                                      : optional_double( wire, durationS );
             if( !duration_s.has_value() )
             {
                 return std::unexpected( duration_s.error() );
@@ -620,20 +620,20 @@ namespace grab::transport
         decode_a11y_event( const eventgrab::v1::Event& wire,
                            grab::EventKind             kind )
         {
-            auto name = required_string( wire, kName );
+            auto name = required_string( wire, nameKey );
             if( !name.has_value() )
             {
                 return std::unexpected( name.error() );
             }
 
-            if( kind == grab::EventKind::a11y_focus_changed )
+            if( kind == grab::EventKind::A11yFocusChanged )
             {
-                auto app = required_string( wire, kApp );
+                auto app = required_string( wire, appKey );
                 if( !app.has_value() )
                 {
                     return std::unexpected( app.error() );
                 }
-                auto role = required_string( wire, kRole );
+                auto role = required_string( wire, roleKey );
                 if( !role.has_value() )
                 {
                     return std::unexpected( role.error() );
@@ -643,31 +643,31 @@ namespace grab::transport
                     .app    = *app,
                     .role   = *role,
                     .name   = *name,
-                    .detail = optional_string( wire, kDetail ),
+                    .detail = optional_string( wire, detailKey ),
                 };
             }
 
-            if( kind == grab::EventKind::a11y_state_changed )
+            if( kind == grab::EventKind::A11yStateChanged )
             {
-                auto detail = required_string( wire, kState );
+                auto detail = required_string( wire, state );
                 if( !detail.has_value() )
                 {
                     return std::unexpected( detail.error() );
                 }
 
                 return grab::A11yEvent{
-                    .app    = optional_string( wire, kApp ),
-                    .role   = optional_string( wire, kRole ),
+                    .app    = optional_string( wire, appKey ),
+                    .role   = optional_string( wire, roleKey ),
                     .name   = *name,
                     .detail = *detail,
                 };
             }
 
             return grab::A11yEvent{
-                .app    = optional_string( wire, kApp ),
-                .role   = optional_string( wire, kRole ),
+                .app    = optional_string( wire, appKey ),
+                .role   = optional_string( wire, roleKey ),
                 .name   = *name,
-                .detail = optional_string( wire, kDetail ),
+                .detail = optional_string( wire, detailKey ),
             };
         }
 
@@ -675,22 +675,22 @@ namespace grab::transport
         grab::Result<grab::IntegrationEvent>
         decode_integration_event( const eventgrab::v1::Event& wire )
         {
-            auto app = required_string( wire, kApp );
+            auto app = required_string( wire, appKey );
             if( !app.has_value() )
             {
                 return std::unexpected( app.error() );
             }
-            auto title = required_string( wire, kTitle );
+            auto title = required_string( wire, titleKey );
             if( !title.has_value() )
             {
                 return std::unexpected( title.error() );
             }
-            auto detail = required_string( wire, kDetail );
+            auto detail = required_string( wire, detailKey );
             if( !detail.has_value() )
             {
                 return std::unexpected( detail.error() );
             }
-            auto json = required_string( wire, kJson );
+            auto json = required_string( wire, jsonKey );
             if( !json.has_value() )
             {
                 return std::unexpected( json.error() );
@@ -708,17 +708,17 @@ namespace grab::transport
         grab::Result<grab::BrowserTab>
         decode_browser_tab( const eventgrab::v1::Event& wire )
         {
-            auto app = required_string( wire, kApp );
+            auto app = required_string( wire, appKey );
             if( !app.has_value() )
             {
                 return std::unexpected( app.error() );
             }
-            auto pid = required_string( wire, kPid );
+            auto pid = required_string( wire, pidKey );
             if( !pid.has_value() )
             {
                 return std::unexpected( pid.error() );
             }
-            auto tab_title = required_string( wire, kTabTitle );
+            auto tab_title = required_string( wire, tabTitle );
             if( !tab_title.has_value() )
             {
                 return std::unexpected( tab_title.error() );
@@ -727,7 +727,7 @@ namespace grab::transport
                 .app            = *app,
                 .pid            = grab::Pid::from_string( *pid ),
                 .tab_title      = *tab_title,
-                .prev_tab_title = optional_string( wire, kPrevTabTitle ),
+                .prev_tab_title = optional_string( wire, prevTabTitle ),
             };
         }
 
@@ -735,7 +735,7 @@ namespace grab::transport
         grab::Result<grab::StateSnapshot>
         decode_state_snapshot( const eventgrab::v1::Event& wire )
         {
-            auto json = required_string( wire, kJson );
+            auto json = required_string( wire, jsonKey );
             if( !json.has_value() )
             {
                 return std::unexpected( json.error() );
@@ -751,38 +751,38 @@ namespace grab::transport
         {
             switch( kind )
             {
-                case grab::EventKind::key_down :
-                case grab::EventKind::key_up :
+                case grab::EventKind::KeyDown :
+                case grab::EventKind::KeyUp :
                     return decode_input_key( wire );
-                case grab::EventKind::key_combo :
+                case grab::EventKind::KeyCombo :
                     return decode_key_combo( wire );
-                case grab::EventKind::mouse_click :
+                case grab::EventKind::MouseClick :
                     return decode_mouse_click( wire );
-                case grab::EventKind::mouse_move :
+                case grab::EventKind::MouseMove :
                     return decode_mouse_move( wire );
-                case grab::EventKind::idle_start :
-                case grab::EventKind::idle_end :
+                case grab::EventKind::IdleStart :
+                case grab::EventKind::IdleEnd :
                     return decode_idle( wire, kind );
-                case grab::EventKind::window_focus_changed :
-                case grab::EventKind::window_title_changed :
-                case grab::EventKind::window_created :
-                case grab::EventKind::window_closed :
+                case grab::EventKind::WindowFocusChanged :
+                case grab::EventKind::WindowTitleChanged :
+                case grab::EventKind::WindowCreated :
+                case grab::EventKind::WindowClosed :
                     return decode_window_change( wire, kind );
-                case grab::EventKind::a11y_button_clicked :
-                case grab::EventKind::a11y_menu_opened :
-                case grab::EventKind::a11y_menu_closed :
-                case grab::EventKind::a11y_focus_changed :
-                case grab::EventKind::a11y_text_changed :
-                case grab::EventKind::a11y_state_changed :
+                case grab::EventKind::A11yButtonClicked :
+                case grab::EventKind::A11yMenuOpened :
+                case grab::EventKind::A11yMenuClosed :
+                case grab::EventKind::A11yFocusChanged :
+                case grab::EventKind::A11yTextChanged :
+                case grab::EventKind::A11yStateChanged :
                     return decode_a11y_event( wire, kind );
-                case grab::EventKind::app_tab_changed :
-                case grab::EventKind::app_context_update :
+                case grab::EventKind::AppTabChanged :
+                case grab::EventKind::AppContextUpdate :
                     return decode_integration_event( wire );
-                case grab::EventKind::browser_tab_switched :
+                case grab::EventKind::BrowserTabSwitched :
                     return decode_browser_tab( wire );
-                case grab::EventKind::state_snapshot :
+                case grab::EventKind::StateSnapshot :
                     return decode_state_snapshot( wire );
-                case grab::EventKind::unspecified :
+                case grab::EventKind::Unspecified :
                     return protocol_error( "unknown event kind" );
             }
 
@@ -794,7 +794,7 @@ namespace grab::transport
     grab::Result<eventgrab::v1::Event>
     to_wire( const grab::Event& event )
     {
-        if( event.kind == grab::EventKind::unspecified )
+        if( event.kind == grab::EventKind::Unspecified )
         {
             return protocol_error( "unknown event kind" );
         }
@@ -806,55 +806,55 @@ namespace grab::transport
 
         switch( event.kind )
         {
-            case grab::EventKind::key_down :
-            case grab::EventKind::key_up :
+            case grab::EventKind::KeyDown :
+            case grab::EventKind::KeyUp :
                 encode_input_key( wire, std::get<grab::InputKey>( event.payload ) );
                 break;
-            case grab::EventKind::key_combo :
+            case grab::EventKind::KeyCombo :
                 encode_key_combo( wire, std::get<grab::KeyCombo>( event.payload ) );
                 break;
-            case grab::EventKind::mouse_click :
+            case grab::EventKind::MouseClick :
                 encode_mouse_click( wire, std::get<grab::MouseClick>( event.payload ) );
                 break;
-            case grab::EventKind::mouse_move :
+            case grab::EventKind::MouseMove :
                 encode_mouse_move( wire, std::get<grab::MouseMove>( event.payload ) );
                 break;
-            case grab::EventKind::idle_start :
-            case grab::EventKind::idle_end :
+            case grab::EventKind::IdleStart :
+            case grab::EventKind::IdleEnd :
                 encode_idle( wire, std::get<grab::Idle>( event.payload ) );
                 break;
-            case grab::EventKind::window_focus_changed :
-            case grab::EventKind::window_title_changed :
-            case grab::EventKind::window_created :
-            case grab::EventKind::window_closed :
+            case grab::EventKind::WindowFocusChanged :
+            case grab::EventKind::WindowTitleChanged :
+            case grab::EventKind::WindowCreated :
+            case grab::EventKind::WindowClosed :
                 encode_window_change( wire,
                                       std::get<grab::WindowChange>( event.payload ) );
                 break;
-            case grab::EventKind::a11y_button_clicked :
-            case grab::EventKind::a11y_menu_opened :
-            case grab::EventKind::a11y_menu_closed :
-            case grab::EventKind::a11y_focus_changed :
-            case grab::EventKind::a11y_text_changed :
-            case grab::EventKind::a11y_state_changed :
+            case grab::EventKind::A11yButtonClicked :
+            case grab::EventKind::A11yMenuOpened :
+            case grab::EventKind::A11yMenuClosed :
+            case grab::EventKind::A11yFocusChanged :
+            case grab::EventKind::A11yTextChanged :
+            case grab::EventKind::A11yStateChanged :
                 encode_a11y_event( wire,
                                    event.kind,
                                    std::get<grab::A11yEvent>( event.payload ) );
                 break;
-            case grab::EventKind::app_tab_changed :
-            case grab::EventKind::app_context_update :
+            case grab::EventKind::AppTabChanged :
+            case grab::EventKind::AppContextUpdate :
                 encode_integration_event(
                     wire,
                     std::get<grab::IntegrationEvent>( event.payload )
                 );
                 break;
-            case grab::EventKind::browser_tab_switched :
+            case grab::EventKind::BrowserTabSwitched :
                 encode_browser_tab( wire, std::get<grab::BrowserTab>( event.payload ) );
                 break;
-            case grab::EventKind::state_snapshot :
+            case grab::EventKind::StateSnapshot :
                 encode_state_snapshot( wire,
                                        std::get<grab::StateSnapshot>( event.payload ) );
                 break;
-            case grab::EventKind::unspecified :
+            case grab::EventKind::Unspecified :
                 return protocol_error( "unknown event kind" );
         }
 
@@ -890,7 +890,7 @@ namespace grab::transport
 
         return grab::Event{
             .timestamp = wire.timestamp(),
-            .sequence  = kNoSequence,
+            .sequence  = noSequence,
             .kind      = *kind,
             .category  = *category,
             .payload   = std::move( *payload ),

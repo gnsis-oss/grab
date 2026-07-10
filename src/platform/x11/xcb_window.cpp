@@ -142,7 +142,7 @@ namespace grab::platform::x11
 
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    std::string{ operation } + " failed" );
             }
             return reply;
@@ -155,7 +155,7 @@ namespace grab::platform::x11
             const int length = xcb_get_property_value_length( &reply );
             if( length < 0 )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_get_property returned an invalid data length" );
             }
             return static_cast<std::size_t>( length );
@@ -172,7 +172,7 @@ namespace grab::platform::x11
             }
             if( *byte_count % sizeof( xcb_window_t ) != 0U )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "_NET_CLIENT_LIST has an invalid byte length" );
             }
 
@@ -186,7 +186,7 @@ namespace grab::platform::x11
                 static_cast<const xcb_window_t*>( xcb_get_property_value( &reply ) );
             if( data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "_NET_CLIENT_LIST has no data" );
             }
             const std::span<const xcb_window_t> windows{ data, window_count };
@@ -220,7 +220,7 @@ namespace grab::platform::x11
                 XCB_ATOM_WINDOW ||
                 ( *reply )->format != expected_window_format )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "_NET_CLIENT_LIST has an unexpected type" );
             }
             return copy_client_list( **reply );
@@ -268,7 +268,7 @@ namespace grab::platform::x11
             );
             if( data == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "WM_CLASS has no data" );
             }
             return parse_wm_class( std::span<const std::uint8_t>{ data, *byte_count } );
@@ -289,7 +289,7 @@ namespace grab::platform::x11
 
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_get_window_attributes failed" );
             }
             return reply->map_state == XCB_MAP_STATE_VIEWABLE;
@@ -310,7 +310,7 @@ namespace grab::platform::x11
 
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_get_geometry failed for window" );
             }
             return *reply;
@@ -335,7 +335,7 @@ namespace grab::platform::x11
 
             if( error != nullptr || reply == nullptr )
             {
-                return grab::fail( grab::ErrorCode::provider_failed,
+                return grab::fail( grab::ErrorCode::ProviderFailed,
                                    "xcb_translate_coordinates failed for window" );
             }
             return *reply;
@@ -377,14 +377,14 @@ namespace grab::platform::x11
                  const WindowMatch&   match )
     {
         auto client_list_atom =
-            intern_atom( conn, client_list_atom_name, XcbAtomMode::only_if_exists );
+            intern_atom( conn, client_list_atom_name, XcbAtomMode::OnlyIfExists );
         if( !client_list_atom.has_value() )
         {
             return grab::fail( client_list_atom.error().code,
                                client_list_atom.error().message );
         }
         auto wm_class_atom =
-            intern_atom( conn, wm_class_atom_name, XcbAtomMode::only_if_exists );
+            intern_atom( conn, wm_class_atom_name, XcbAtomMode::OnlyIfExists );
         if( !wm_class_atom.has_value() )
         {
             return grab::fail( wm_class_atom.error().code,
@@ -426,7 +426,7 @@ namespace grab::platform::x11
 
         if( !last_match.valid )
         {
-            return grab::fail( grab::ErrorCode::window_not_found,
+            return grab::fail( grab::ErrorCode::WindowNotFound,
                                "no visible window matches " + match.app );
         }
         return last_match;
@@ -438,7 +438,7 @@ namespace grab::platform::x11
     {
         if( !window.valid )
         {
-            return grab::fail( grab::ErrorCode::invalid_argument,
+            return grab::fail( grab::ErrorCode::InvalidArgument,
                                "window reference is invalid" );
         }
 

@@ -174,7 +174,7 @@ namespace grab::platform::x11
         }
 
         auto atom =
-            intern_atom( conn, active_window_atom_name, XcbAtomMode::create_if_missing );
+            intern_atom( conn, active_window_atom_name, XcbAtomMode::CreateIfMissing );
         if( !atom.has_value() )
         {
             return;
