@@ -32,16 +32,17 @@
 namespace
 {
 
-    constexpr std::string_view unixEndpointPrefix     = "unix:";
-    constexpr std::string_view tempRootName           = "grab-daemon-tests";
-    constexpr std::string_view nameSeparator          = "-";
-    constexpr std::string_view unknownTestName        = "unknown";
-    constexpr std::string_view socketFileName         = "daemon.sock";
-    constexpr std::string_view storeDirName           = "store";
-    constexpr std::string_view jsonlExtension         = ".jsonl";
-    constexpr std::string_view persistedTypeNeedle    = R"("type":"input.key_down")";
-    constexpr std::string_view persistedKeyCodeNeedle = R"("code":30)";
-    constexpr std::string_view persistedKeyNameNeedle = R"("name":"A")";
+    constexpr std::string_view unixEndpointPrefix      = "unix:";
+    constexpr std::string_view tempRootName            = "grab-daemon-tests";
+    constexpr std::string_view nameSeparator           = "-";
+    constexpr std::string_view unknownTestName         = "unknown";
+    constexpr std::string_view socketFileName          = "daemon.sock";
+    constexpr std::string_view storeDirName            = "store";
+    constexpr std::string_view jsonlExtension          = ".jsonl";
+    constexpr std::string_view persistedTypeNeedle     = R"("type":"input.key_down")";
+    constexpr std::string_view persistedCategoryNeedle = R"("category":"input")";
+    constexpr std::string_view persistedKeyCodeNeedle  = R"("key_code":30)";
+    constexpr std::string_view persistedKeyNameNeedle  = R"("key_name":"A")";
     constexpr std::string_view transportStartFailurePrefix =
         "failed to start transport server at unix:";
     constexpr auto             unaryDeadline       = std::chrono::seconds{ 2 };
@@ -364,6 +365,7 @@ namespace
     line_contains_persisted_event( std::string_view line )
     {
         return line.contains( persistedTypeNeedle ) &&
+               line.contains( persistedCategoryNeedle ) &&
                line.contains( persistedKeyCodeNeedle ) &&
                line.contains( persistedKeyNameNeedle );
     }

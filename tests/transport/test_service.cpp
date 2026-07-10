@@ -3,6 +3,7 @@
 #include "eventgrab/v1/service.pb.h"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/event_descriptor.hpp"
 #include "transport/codec.hpp"
 #include "transport/server.hpp"
 #include "transport/service.hpp"

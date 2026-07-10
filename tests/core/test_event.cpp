@@ -1,4 +1,5 @@
 #include "grab/event.hpp"
+#include "grab/event_descriptor.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

@@ -1,6 +1,7 @@
 #include "core/permission.hpp"
 #include "grab/event.hpp"
-#include "grab/event_wire.hpp"
+#include "grab/event_descriptor.hpp"
+#include "grab/payload_fields.hpp"
 #include "grab/result.hpp"
 #include "storage/jsonl_sink.hpp"
 
@@ -150,31 +151,6 @@ namespace grab::storage
         }
 
         [[nodiscard]]
-        std::string_view
-        category_name( grab::EventCategory category ) noexcept
-        {
-            switch( category )
-            {
-                case grab::EventCategory::Unspecified :
-                    return "unspecified";
-                case grab::EventCategory::Input :
-                    return "input";
-                case grab::EventCategory::Window :
-                    return "window";
-                case grab::EventCategory::Accessibility :
-                    return "accessibility";
-                case grab::EventCategory::Integration :
-                    return "integration";
-                case grab::EventCategory::Browser :
-                    return "browser";
-                case grab::EventCategory::State :
-                    return "state";
-            }
-
-            return "unspecified";
-        }
-
-        [[nodiscard]]
         grab::Result<void>
         ensure_json_number( double value )
         {
@@ -188,36 +164,45 @@ namespace grab::storage
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::InputKey& payload )
+        serialize_payload( grab::EventKind,
+                           const grab::InputKey& payload )
         {
             return OrderedJson{
-                {"code", payload.code},
-                {"name", payload.name},
+                {std::string{ grab::field_name( grab::PayloadField::KeyCode ) },
+                 payload.code},
+                {std::string{ grab::field_name( grab::PayloadField::KeyName ) },
+                 payload.name},
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::KeyCombo& payload )
+        serialize_payload( grab::EventKind,
+                           const grab::KeyCombo& payload )
         {
             return OrderedJson{
-                { "text", payload.text },
+                { std::string{ grab::field_name( grab::PayloadField::Text ) },
+                 payload.text },
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::MouseClick& payload )
+        serialize_payload( grab::EventKind,
+                           const grab::MouseClick& payload )
         {
             return OrderedJson{
-                {"button", payload.button},
-                {  "name",   payload.name},
+                {    std::string{ grab::field_name( grab::PayloadField::Button ) },
+                 payload.button},
+                {std::string{ grab::field_name( grab::PayloadField::ButtonName ) },
+                 payload.name  },
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::MouseMove& payload )
+        serialize_payload( grab::EventKind,
+                           const grab::MouseMove& payload )
         {
             auto result = ensure_json_number( payload.delta );
             if( !result.has_value() )
@@ -225,14 +210,17 @@ namespace grab::storage
                 return std::unexpected( std::move( result.error() ) );
             }
             return OrderedJson{
-                { "axis",  payload.axis},
-                {"delta", payload.delta},
+                { std::string{ grab::field_name( grab::PayloadField::Axis ) },
+                 payload.axis },
+                {std::string{ grab::field_name( grab::PayloadField::Delta ) },
+                 payload.delta},
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::Idle& payload )
+        serialize_payload( grab::EventKind,
+                           const grab::Idle& payload )
         {
             auto result = ensure_json_number( payload.idle_s );
             if( !result.has_value() )
@@ -240,13 +228,15 @@ namespace grab::storage
                 return std::unexpected( std::move( result.error() ) );
             }
             return OrderedJson{
-                { "idle_s", payload.idle_s },
+                { std::string{ grab::field_name( grab::PayloadField::IdleSeconds ) },
+                 payload.idle_s },
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::WindowChange& payload )
+        serialize_payload( grab::EventKind,
+                           const grab::WindowChange& payload )
         {
             auto result = ensure_json_number( payload.duration_s );
             if( !result.has_value() )
@@ -254,67 +244,92 @@ namespace grab::storage
                 return std::unexpected( std::move( result.error() ) );
             }
             return OrderedJson{
-                {       "app",             payload.app},
-                {       "pid", payload.pid.to_string()},
-                {     "title",           payload.title},
-                {"prev_title",      payload.prev_title},
-                {"duration_s",      payload.duration_s},
+                {            std::string{ grab::field_name( grab::PayloadField::App ) },
+                 payload.app            },
+                {            std::string{ grab::field_name( grab::PayloadField::Pid ) },
+                 payload.pid.to_string()},
+                {          std::string{ grab::field_name( grab::PayloadField::Title ) },
+                 payload.title          },
+                {      std::string{ grab::field_name( grab::PayloadField::PrevTitle ) },
+                 payload.prev_title     },
+                {std::string{ grab::field_name( grab::PayloadField::DurationSeconds ) },
+                 payload.duration_s     },
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::A11yEvent& payload )
+        serialize_payload( grab::EventKind        kind,
+                           const grab::A11yEvent& payload )
+        {
+            const auto detail_field = kind == grab::EventKind::A11yStateChanged
+                                        ? grab::PayloadField::State
+                                        : grab::PayloadField::Detail;
+            return OrderedJson{
+                { std::string{ grab::field_name( grab::PayloadField::App ) },
+                 payload.app                                                                },
+                {std::string{ grab::field_name( grab::PayloadField::Role ) },
+                 payload.role                                                               },
+                {std::string{ grab::field_name( grab::PayloadField::Name ) },
+                 payload.name                                                               },
+                {            std::string{ grab::field_name( detail_field ) }, payload.detail},
+            };
+        }
+
+        [[nodiscard]]
+        grab::Result<OrderedJson>
+        serialize_payload( grab::EventKind,
+                           const grab::IntegrationEvent& payload )
         {
             return OrderedJson{
-                {   "app",    payload.app},
-                {  "role",   payload.role},
-                {  "name",   payload.name},
-                {"detail", payload.detail},
+                {   std::string{ grab::field_name( grab::PayloadField::App ) },
+                 payload.app   },
+                { std::string{ grab::field_name( grab::PayloadField::Title ) },
+                 payload.title },
+                {std::string{ grab::field_name( grab::PayloadField::Detail ) },
+                 payload.detail},
+                {  std::string{ grab::field_name( grab::PayloadField::Json ) },
+                 payload.json  },
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::IntegrationEvent& payload )
+        serialize_payload( grab::EventKind,
+                           const grab::BrowserTab& payload )
         {
             return OrderedJson{
-                {   "app",    payload.app},
-                { "title",  payload.title},
-                {"detail", payload.detail},
-                {  "json",   payload.json},
+                {         std::string{ grab::field_name( grab::PayloadField::App ) },
+                 payload.app            },
+                {         std::string{ grab::field_name( grab::PayloadField::Pid ) },
+                 payload.pid.to_string()},
+                {    std::string{ grab::field_name( grab::PayloadField::TabTitle ) },
+                 payload.tab_title      },
+                {std::string{ grab::field_name( grab::PayloadField::PrevTabTitle ) },
+                 payload.prev_tab_title },
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::BrowserTab& payload )
+        serialize_payload( grab::EventKind,
+                           const grab::StateSnapshot& payload )
         {
             return OrderedJson{
-                {           "app",             payload.app},
-                {           "pid", payload.pid.to_string()},
-                {     "tab_title",       payload.tab_title},
-                {"prev_tab_title",  payload.prev_tab_title},
+                { std::string{ grab::field_name( grab::PayloadField::Json ) },
+                 payload.json },
             };
         }
 
         [[nodiscard]]
         grab::Result<OrderedJson>
-        serialize_payload( const grab::StateSnapshot& payload )
-        {
-            return OrderedJson{
-                { "json", payload.json },
-            };
-        }
-
-        [[nodiscard]]
-        grab::Result<OrderedJson>
-        serialize_payload( const grab::Payload& payload )
+        serialize_payload( grab::EventKind      kind,
+                           const grab::Payload& payload )
         {
             return std::visit(
-                []( const auto& typed_payload ) -> grab::Result<OrderedJson>
+                [kind]( const auto& typed_payload ) -> grab::Result<OrderedJson>
                 {
-                    return serialize_payload( typed_payload );
+                    return serialize_payload( kind, typed_payload );
                 },
                 payload
             );
@@ -329,17 +344,17 @@ namespace grab::storage
             {
                 return std::unexpected( std::move( timestamp.error() ) );
             }
-            auto data = serialize_payload( event.payload );
+            auto data = serialize_payload( event.kind, event.payload );
             if( !data.has_value() )
             {
                 return std::unexpected( std::move( data.error() ) );
             }
 
             const OrderedJson line{
-                {  "ts",                                event.timestamp},
-                {"type",   std::string{ grab::wire_name( event.kind ) }},
-                {"tier", std::string{ category_name( event.category ) }},
-                {"data",                             std::move( *data )},
+                {      "ts",                                      event.timestamp},
+                {    "type",         std::string{ grab::wire_name( event.kind ) }},
+                {"category", std::string{ grab::category_name( event.category ) }},
+                {    "data",                                   std::move( *data )},
             };
             return line.dump();
         }

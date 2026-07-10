@@ -1,5 +1,6 @@
 #include "eventgrab/v1/events.pb.h"
 #include "grab/event.hpp"
+#include "grab/payload_fields.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "transport/codec.hpp"
@@ -23,28 +24,8 @@ namespace grab::transport
     {
 
         constexpr std::uint64_t    noSequence     = 0U;
-
-        constexpr std::string_view keyCode        = "key_code";
-        constexpr std::string_view keyName        = "key_name";
-        constexpr std::string_view textKey        = "text";
-        constexpr std::string_view buttonKey      = "button";
-        constexpr std::string_view buttonName     = "button_name";
-        constexpr std::string_view axisKey        = "axis";
-        constexpr std::string_view deltaKey       = "delta";
-        constexpr std::string_view idleS          = "idle_s";
-        constexpr std::string_view appKey         = "app";
-        constexpr std::string_view pidKey         = "pid";
-        constexpr std::string_view titleKey       = "title";
-        constexpr std::string_view prevTitle      = "prev_title";
-        constexpr std::string_view durationS      = "duration_s";
-        constexpr std::string_view roleKey        = "role";
-        constexpr std::string_view nameKey        = "name";
-        constexpr std::string_view detailKey      = "detail";
-        constexpr std::string_view state          = "state";
-        constexpr std::string_view jsonKey        = "json";
-        constexpr std::string_view tabTitle       = "tab_title";
-        constexpr std::string_view prevTabTitle   = "prev_tab_title";
         constexpr std::string_view protocolPrefix = "malformed event: ";
+        using grab::PayloadField;
 
         [[nodiscard]]
         std::unexpected<grab::Error>
@@ -387,49 +368,63 @@ namespace grab::transport
         encode_input_key( eventgrab::v1::Event& wire,
                           const grab::InputKey& payload )
         {
-            set_data( wire, keyCode, uint_to_string( payload.code ) );
-            set_data( wire, keyName, payload.name );
+            set_data( wire,
+                      grab::field_name( PayloadField::KeyCode ),
+                      uint_to_string( payload.code ) );
+            set_data( wire, grab::field_name( PayloadField::KeyName ), payload.name );
         }
 
         void
         encode_key_combo( eventgrab::v1::Event& wire,
                           const grab::KeyCombo& payload )
         {
-            set_data( wire, textKey, payload.text );
+            set_data( wire, grab::field_name( PayloadField::Text ), payload.text );
         }
 
         void
         encode_mouse_click( eventgrab::v1::Event&   wire,
                             const grab::MouseClick& payload )
         {
-            set_data( wire, buttonKey, uint_to_string( payload.button ) );
-            set_data( wire, buttonName, payload.name );
+            set_data( wire,
+                      grab::field_name( PayloadField::Button ),
+                      uint_to_string( payload.button ) );
+            set_data( wire, grab::field_name( PayloadField::ButtonName ), payload.name );
         }
 
         void
         encode_mouse_move( eventgrab::v1::Event&  wire,
                            const grab::MouseMove& payload )
         {
-            set_data( wire, axisKey, payload.axis );
-            set_data( wire, deltaKey, double_to_string( payload.delta ) );
+            set_data( wire, grab::field_name( PayloadField::Axis ), payload.axis );
+            set_data( wire,
+                      grab::field_name( PayloadField::Delta ),
+                      double_to_string( payload.delta ) );
         }
 
         void
         encode_idle( eventgrab::v1::Event& wire,
                      const grab::Idle&     payload )
         {
-            set_data( wire, idleS, double_to_string( payload.idle_s ) );
+            set_data( wire,
+                      grab::field_name( PayloadField::IdleSeconds ),
+                      double_to_string( payload.idle_s ) );
         }
 
         void
         encode_window_change( eventgrab::v1::Event&     wire,
                               const grab::WindowChange& payload )
         {
-            set_data( wire, appKey, payload.app );
-            set_data( wire, pidKey, payload.pid.to_string() );
-            set_data( wire, titleKey, payload.title );
-            set_data( wire, prevTitle, payload.prev_title );
-            set_data( wire, durationS, double_to_string( payload.duration_s ) );
+            set_data( wire, grab::field_name( PayloadField::App ), payload.app );
+            set_data( wire,
+                      grab::field_name( PayloadField::Pid ),
+                      payload.pid.to_string() );
+            set_data( wire, grab::field_name( PayloadField::Title ), payload.title );
+            set_data( wire,
+                      grab::field_name( PayloadField::PrevTitle ),
+                      payload.prev_title );
+            set_data( wire,
+                      grab::field_name( PayloadField::DurationSeconds ),
+                      double_to_string( payload.duration_s ) );
         }
 
         void
@@ -437,42 +432,50 @@ namespace grab::transport
                            grab::EventKind        kind,
                            const grab::A11yEvent& payload )
         {
-            set_data( wire, appKey, payload.app );
-            set_data( wire, roleKey, payload.role );
-            set_data( wire, nameKey, payload.name );
+            set_data( wire, grab::field_name( PayloadField::App ), payload.app );
+            set_data( wire, grab::field_name( PayloadField::Role ), payload.role );
+            set_data( wire, grab::field_name( PayloadField::Name ), payload.name );
             if( kind == grab::EventKind::A11yStateChanged )
             {
-                set_data( wire, state, payload.detail );
+                set_data( wire,
+                          grab::field_name( PayloadField::State ),
+                          payload.detail );
                 return;
             }
-            set_data( wire, detailKey, payload.detail );
+            set_data( wire, grab::field_name( PayloadField::Detail ), payload.detail );
         }
 
         void
         encode_integration_event( eventgrab::v1::Event&         wire,
                                   const grab::IntegrationEvent& payload )
         {
-            set_data( wire, appKey, payload.app );
-            set_data( wire, titleKey, payload.title );
-            set_data( wire, detailKey, payload.detail );
-            set_data( wire, jsonKey, payload.json );
+            set_data( wire, grab::field_name( PayloadField::App ), payload.app );
+            set_data( wire, grab::field_name( PayloadField::Title ), payload.title );
+            set_data( wire, grab::field_name( PayloadField::Detail ), payload.detail );
+            set_data( wire, grab::field_name( PayloadField::Json ), payload.json );
         }
 
         void
         encode_browser_tab( eventgrab::v1::Event&   wire,
                             const grab::BrowserTab& payload )
         {
-            set_data( wire, appKey, payload.app );
-            set_data( wire, pidKey, payload.pid.to_string() );
-            set_data( wire, tabTitle, payload.tab_title );
-            set_data( wire, prevTabTitle, payload.prev_tab_title );
+            set_data( wire, grab::field_name( PayloadField::App ), payload.app );
+            set_data( wire,
+                      grab::field_name( PayloadField::Pid ),
+                      payload.pid.to_string() );
+            set_data( wire,
+                      grab::field_name( PayloadField::TabTitle ),
+                      payload.tab_title );
+            set_data( wire,
+                      grab::field_name( PayloadField::PrevTabTitle ),
+                      payload.prev_tab_title );
         }
 
         void
         encode_state_snapshot( eventgrab::v1::Event&      wire,
                                const grab::StateSnapshot& payload )
         {
-            set_data( wire, jsonKey, payload.json );
+            set_data( wire, grab::field_name( PayloadField::Json ), payload.json );
         }
 
         [[nodiscard]]
@@ -501,7 +504,8 @@ namespace grab::transport
         grab::Result<grab::InputKey>
         decode_input_key( const eventgrab::v1::Event& wire )
         {
-            auto code = required_uint32( wire, keyCode );
+            auto code =
+                required_uint32( wire, grab::field_name( PayloadField::KeyCode ) );
             if( !code.has_value() )
             {
                 return std::unexpected( code.error() );
@@ -509,7 +513,8 @@ namespace grab::transport
 
             return grab::InputKey{
                 .code = *code,
-                .name = optional_string( wire, keyName ),
+                .name =
+                    optional_string( wire, grab::field_name( PayloadField::KeyName ) ),
             };
         }
 
@@ -517,7 +522,7 @@ namespace grab::transport
         grab::Result<grab::KeyCombo>
         decode_key_combo( const eventgrab::v1::Event& wire )
         {
-            auto text = required_string( wire, textKey );
+            auto text = required_string( wire, grab::field_name( PayloadField::Text ) );
             if( !text.has_value() )
             {
                 return std::unexpected( text.error() );
@@ -530,7 +535,8 @@ namespace grab::transport
         grab::Result<grab::MouseClick>
         decode_mouse_click( const eventgrab::v1::Event& wire )
         {
-            auto button = required_uint32( wire, buttonKey );
+            auto button =
+                required_uint32( wire, grab::field_name( PayloadField::Button ) );
             if( !button.has_value() )
             {
                 return std::unexpected( button.error() );
@@ -538,7 +544,8 @@ namespace grab::transport
 
             return grab::MouseClick{
                 .button = *button,
-                .name   = optional_string( wire, buttonName ),
+                .name = optional_string( wire,
+                                         grab::field_name( PayloadField::ButtonName ) ),
             };
         }
 
@@ -546,13 +553,14 @@ namespace grab::transport
         grab::Result<grab::MouseMove>
         decode_mouse_move( const eventgrab::v1::Event& wire )
         {
-            auto axis = required_string( wire, axisKey );
+            auto axis = required_string( wire, grab::field_name( PayloadField::Axis ) );
             if( !axis.has_value() )
             {
                 return std::unexpected( axis.error() );
             }
 
-            auto delta = required_double( wire, deltaKey );
+            auto delta =
+                required_double( wire, grab::field_name( PayloadField::Delta ) );
             if( !delta.has_value() )
             {
                 return std::unexpected( delta.error() );
@@ -566,9 +574,12 @@ namespace grab::transport
         decode_idle( const eventgrab::v1::Event& wire,
                      grab::EventKind             kind )
         {
-            auto idle_s = kind == grab::EventKind::IdleStart
-                            ? required_double( wire, idleS )
-                            : optional_double( wire, idleS );
+            auto idle_s =
+                kind == grab::EventKind::IdleStart
+                    ? required_double( wire,
+                                       grab::field_name( PayloadField::IdleSeconds ) )
+                    : optional_double( wire,
+                                       grab::field_name( PayloadField::IdleSeconds ) );
             if( !idle_s.has_value() )
             {
                 return std::unexpected( idle_s.error() );
@@ -582,25 +593,33 @@ namespace grab::transport
         decode_window_change( const eventgrab::v1::Event& wire,
                               grab::EventKind             kind )
         {
-            auto app = required_string( wire, appKey );
+            auto app = required_string( wire, grab::field_name( PayloadField::App ) );
             if( !app.has_value() )
             {
                 return std::unexpected( app.error() );
             }
-            auto pid = required_string( wire, pidKey );
+            auto pid = required_string( wire, grab::field_name( PayloadField::Pid ) );
             if( !pid.has_value() )
             {
                 return std::unexpected( pid.error() );
             }
-            auto title = required_string( wire, titleKey );
+            auto title =
+                required_string( wire, grab::field_name( PayloadField::Title ) );
             if( !title.has_value() )
             {
                 return std::unexpected( title.error() );
             }
-            const auto prev_title = optional_string( wire, prevTitle );
-            auto       duration_s = kind == grab::EventKind::WindowClosed
-                                      ? required_double( wire, durationS )
-                                      : optional_double( wire, durationS );
+            const auto prev_title =
+                optional_string( wire, grab::field_name( PayloadField::PrevTitle ) );
+            auto duration_s = kind == grab::EventKind::WindowClosed
+                                ? required_double(
+                                      wire,
+                                      grab::field_name( PayloadField::DurationSeconds )
+                                  )
+                                : optional_double(
+                                      wire,
+                                      grab::field_name( PayloadField::DurationSeconds )
+                                  );
             if( !duration_s.has_value() )
             {
                 return std::unexpected( duration_s.error() );
@@ -620,7 +639,7 @@ namespace grab::transport
         decode_a11y_event( const eventgrab::v1::Event& wire,
                            grab::EventKind             kind )
         {
-            auto name = required_string( wire, nameKey );
+            auto name = required_string( wire, grab::field_name( PayloadField::Name ) );
             if( !name.has_value() )
             {
                 return std::unexpected( name.error() );
@@ -628,46 +647,54 @@ namespace grab::transport
 
             if( kind == grab::EventKind::A11yFocusChanged )
             {
-                auto app = required_string( wire, appKey );
+                auto app =
+                    required_string( wire, grab::field_name( PayloadField::App ) );
                 if( !app.has_value() )
                 {
                     return std::unexpected( app.error() );
                 }
-                auto role = required_string( wire, roleKey );
+                auto role =
+                    required_string( wire, grab::field_name( PayloadField::Role ) );
                 if( !role.has_value() )
                 {
                     return std::unexpected( role.error() );
                 }
 
                 return grab::A11yEvent{
-                    .app    = *app,
-                    .role   = *role,
-                    .name   = *name,
-                    .detail = optional_string( wire, detailKey ),
+                    .app  = *app,
+                    .role = *role,
+                    .name = *name,
+                    .detail =
+                        optional_string( wire,
+                                         grab::field_name( PayloadField::Detail ) ),
                 };
             }
 
             if( kind == grab::EventKind::A11yStateChanged )
             {
-                auto detail = required_string( wire, state );
+                auto detail =
+                    required_string( wire, grab::field_name( PayloadField::State ) );
                 if( !detail.has_value() )
                 {
                     return std::unexpected( detail.error() );
                 }
 
                 return grab::A11yEvent{
-                    .app    = optional_string( wire, appKey ),
-                    .role   = optional_string( wire, roleKey ),
+                    .app =
+                        optional_string( wire, grab::field_name( PayloadField::App ) ),
+                    .role =
+                        optional_string( wire, grab::field_name( PayloadField::Role ) ),
                     .name   = *name,
                     .detail = *detail,
                 };
             }
 
             return grab::A11yEvent{
-                .app    = optional_string( wire, appKey ),
-                .role   = optional_string( wire, roleKey ),
-                .name   = *name,
-                .detail = optional_string( wire, detailKey ),
+                .app  = optional_string( wire, grab::field_name( PayloadField::App ) ),
+                .role = optional_string( wire, grab::field_name( PayloadField::Role ) ),
+                .name = *name,
+                .detail =
+                    optional_string( wire, grab::field_name( PayloadField::Detail ) ),
             };
         }
 
@@ -675,22 +702,24 @@ namespace grab::transport
         grab::Result<grab::IntegrationEvent>
         decode_integration_event( const eventgrab::v1::Event& wire )
         {
-            auto app = required_string( wire, appKey );
+            auto app = required_string( wire, grab::field_name( PayloadField::App ) );
             if( !app.has_value() )
             {
                 return std::unexpected( app.error() );
             }
-            auto title = required_string( wire, titleKey );
+            auto title =
+                required_string( wire, grab::field_name( PayloadField::Title ) );
             if( !title.has_value() )
             {
                 return std::unexpected( title.error() );
             }
-            auto detail = required_string( wire, detailKey );
+            auto detail =
+                required_string( wire, grab::field_name( PayloadField::Detail ) );
             if( !detail.has_value() )
             {
                 return std::unexpected( detail.error() );
             }
-            auto json = required_string( wire, jsonKey );
+            auto json = required_string( wire, grab::field_name( PayloadField::Json ) );
             if( !json.has_value() )
             {
                 return std::unexpected( json.error() );
@@ -708,26 +737,29 @@ namespace grab::transport
         grab::Result<grab::BrowserTab>
         decode_browser_tab( const eventgrab::v1::Event& wire )
         {
-            auto app = required_string( wire, appKey );
+            auto app = required_string( wire, grab::field_name( PayloadField::App ) );
             if( !app.has_value() )
             {
                 return std::unexpected( app.error() );
             }
-            auto pid = required_string( wire, pidKey );
+            auto pid = required_string( wire, grab::field_name( PayloadField::Pid ) );
             if( !pid.has_value() )
             {
                 return std::unexpected( pid.error() );
             }
-            auto tab_title = required_string( wire, tabTitle );
+            auto tab_title =
+                required_string( wire, grab::field_name( PayloadField::TabTitle ) );
             if( !tab_title.has_value() )
             {
                 return std::unexpected( tab_title.error() );
             }
             return grab::BrowserTab{
-                .app            = *app,
-                .pid            = grab::Pid::from_string( *pid ),
-                .tab_title      = *tab_title,
-                .prev_tab_title = optional_string( wire, prevTabTitle ),
+                .app       = *app,
+                .pid       = grab::Pid::from_string( *pid ),
+                .tab_title = *tab_title,
+                .prev_tab_title =
+                    optional_string( wire,
+                                     grab::field_name( PayloadField::PrevTabTitle ) ),
             };
         }
 
@@ -735,7 +767,7 @@ namespace grab::transport
         grab::Result<grab::StateSnapshot>
         decode_state_snapshot( const eventgrab::v1::Event& wire )
         {
-            auto json = required_string( wire, jsonKey );
+            auto json = required_string( wire, grab::field_name( PayloadField::Json ) );
             if( !json.has_value() )
             {
                 return std::unexpected( json.error() );

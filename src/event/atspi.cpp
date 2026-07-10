@@ -2,6 +2,7 @@
 #include "event/atspi.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
 
 #include <algorithm>

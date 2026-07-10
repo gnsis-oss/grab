@@ -2,7 +2,8 @@
 #include "event/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
-#include "grab/event_wire.hpp"
+#include "grab/event_descriptor.hpp"
+#include "grab/payload_fields.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 
@@ -55,14 +56,9 @@ namespace grab::event
                                                  static_cast<std::uint32_t>( EPOLLHUP );
 
         constexpr std::string_view typeKey     = "type";
-        constexpr std::string_view appKey      = "app";
-        constexpr std::string_view pidKey      = "pid";
-        constexpr std::string_view titleKey    = "title";
-        constexpr std::string_view tabTitleKey = "tab_title";
-        constexpr std::string_view prevTabTitleKey = "prev_tab_title";
-        constexpr std::string_view detailKey       = "detail";
-        constexpr std::string_view jsonKey         = "json";
-        constexpr std::string_view timestampKey    = "timestamp";
+        constexpr std::string_view timestampKey = "timestamp";
+
+        using grab::PayloadField;
 
         struct ReadResult
         {
@@ -179,11 +175,13 @@ namespace grab::event
         std::string
         title_field( const nlohmann::json& object )
         {
-            if( const auto title = field_value( object, titleKey ); title.has_value() )
+            if( const auto title =
+                    field_value( object, grab::field_name( PayloadField::Title ) );
+                title.has_value() )
             {
                 return *title;
             }
-            return field_or_empty( object, tabTitleKey );
+            return field_or_empty( object, grab::field_name( PayloadField::TabTitle ) );
         }
 
         [[nodiscard]]
@@ -191,7 +189,8 @@ namespace grab::event
         detail_field( const nlohmann::json& object,
                       std::string_view      type )
         {
-            if( const auto detail = field_value( object, detailKey );
+            if( const auto detail =
+                    field_value( object, grab::field_name( PayloadField::Detail ) );
                 detail.has_value() )
             {
                 return *detail;
@@ -204,7 +203,9 @@ namespace grab::event
         json_field( const nlohmann::json& object,
                     std::string_view      original_json )
         {
-            if( const auto json = field_value( object, jsonKey ); json.has_value() )
+            if( const auto json =
+                    field_value( object, grab::field_name( PayloadField::Json ) );
+                json.has_value() )
             {
                 return *json;
             }
@@ -243,10 +244,17 @@ namespace grab::event
                 .kind      = kind,
                 .category  = grab::category_of( kind ),
                 .payload   = grab::Payload{ grab::BrowserTab{
-                    .app = field_or_empty( object, appKey ),
-                    .pid = grab::Pid::from_string( field_or_empty( object, pidKey ) ),
-                    .tab_title      = field_or_empty( object, tabTitleKey ),
-                    .prev_tab_title = field_or_empty( object, prevTabTitleKey ),
+                    .app =
+                        field_or_empty( object, grab::field_name( PayloadField::App ) ),
+                    .pid = grab::Pid::from_string(
+                        field_or_empty( object, grab::field_name( PayloadField::Pid ) )
+                    ),
+                    .tab_title =
+                        field_or_empty( object,
+                                        grab::field_name( PayloadField::TabTitle ) ),
+                    .prev_tab_title =
+                        field_or_empty( object,
+                                        grab::field_name( PayloadField::PrevTabTitle ) ),
                 } },
             };
         }
@@ -264,7 +272,8 @@ namespace grab::event
                 .kind      = kind,
                 .category  = grab::category_of( kind ),
                 .payload   = grab::Payload{ grab::IntegrationEvent{
-                    .app    = field_or_empty( object, appKey ),
+                    .app =
+                        field_or_empty( object, grab::field_name( PayloadField::App ) ),
                     .title  = title_field( object ),
                     .detail = detail_field( object, type ),
                     .json   = json_field( object, original_json ),

@@ -28,12 +28,26 @@ namespace
     constexpr std::string_view fourthDayFileName   = "2024-01-04.jsonl";
     constexpr std::string_view fifthDayFileName    = "2024-01-05.jsonl";
     constexpr std::string_view typeKey             = "type";
-    constexpr std::string_view tierKey             = "tier";
+    constexpr std::string_view categoryKey         = "category";
+    constexpr std::string_view oldTierKey          = "tier";
     constexpr std::string_view timestampKey        = "ts";
     constexpr std::string_view dataKey             = "data";
     constexpr std::string_view keyDownTypeName     = "input.key_down";
-    constexpr std::string_view inputTierName       = "input";
+    constexpr std::string_view inputCategoryName   = "input";
+    constexpr std::string_view keyCodeKey          = "key_code";
+    constexpr std::string_view keyNameKey          = "key_name";
+    constexpr std::string_view oldCodeKey          = "code";
+    constexpr std::string_view oldNameKey          = "name";
+    constexpr std::string_view buttonKey           = "button";
+    constexpr std::string_view buttonNameKey       = "button_name";
+    constexpr std::string_view stateKey            = "state";
+    constexpr std::string_view detailKey           = "detail";
     constexpr std::string_view keyName             = "A";
+    constexpr std::string_view mouseButtonName     = "left";
+    constexpr std::string_view a11yApp             = "Editor";
+    constexpr std::string_view a11yRole            = "toggle";
+    constexpr std::string_view a11yName            = "Sidebar";
+    constexpr std::string_view a11yState           = "checked";
     constexpr char             jsonQuote           = '"';
     constexpr char             jsonEscape          = '\\';
     constexpr char             fillerByte          = 'x';
@@ -42,6 +56,7 @@ namespace
     constexpr std::uint64_t    firstSequence       = 1U;
     constexpr std::uint64_t    secondSequence      = firstSequence + 1U;
     constexpr std::uint32_t    keyCode             = 30U;
+    constexpr std::uint32_t    mouseButton         = 1U;
     constexpr double           oneSecond           = 1.0;
     constexpr double           thirdDayOffsetDays  = 2.0;
     constexpr std::size_t      bufferLimit         = 3U;
@@ -110,6 +125,42 @@ namespace
             .payload   = grab::Payload{ grab::InputKey{
                 .code = keyCode,
                 .name = std::string{ keyName },
+            } },
+        };
+    }
+
+    [[nodiscard]]
+    grab::Event
+    make_mouse_click_event( double        timestamp,
+                            std::uint64_t sequence )
+    {
+        return grab::Event{
+            .timestamp = timestamp,
+            .sequence  = sequence,
+            .kind      = grab::EventKind::MouseClick,
+            .category  = grab::EventCategory::Input,
+            .payload   = grab::Payload{ grab::MouseClick{
+                .button = mouseButton,
+                .name   = std::string{ mouseButtonName },
+            } },
+        };
+    }
+
+    [[nodiscard]]
+    grab::Event
+    make_a11y_state_event( double        timestamp,
+                           std::uint64_t sequence )
+    {
+        return grab::Event{
+            .timestamp = timestamp,
+            .sequence  = sequence,
+            .kind      = grab::EventKind::A11yStateChanged,
+            .category  = grab::EventCategory::Accessibility,
+            .payload   = grab::Payload{ grab::A11yEvent{
+                .app    = std::string{ a11yApp },
+                .role   = std::string{ a11yRole },
+                .name   = std::string{ a11yName },
+                .detail = std::string{ a11yState },
             } },
         };
     }
@@ -308,9 +359,9 @@ TEST( JsonlSink,
 }
 
 TEST( JsonlSink,
-      LineFormatHasTsTypeTierData )
+      LineFormatHasTsTypeCategoryData )
 {
-    const TempDir temp( "LineFormatHasTsTypeTierData" );
+    const TempDir temp( "LineFormatHasTsTypeCategoryData" );
     auto          sink_result = grab::storage::JsonlSink::open(
         make_options( temp.path(), bufferLimit, generousFileLimit, tinyDiskBudgetMb )
     );
@@ -327,12 +378,79 @@ TEST( JsonlSink,
 
     EXPECT_TRUE( has_json_key( line, timestampKey ) );
     EXPECT_TRUE( has_json_key( line, typeKey ) );
-    EXPECT_TRUE( has_json_key( line, tierKey ) );
+    EXPECT_TRUE( has_json_key( line, categoryKey ) );
+    EXPECT_FALSE( has_json_key( line, oldTierKey ) );
     EXPECT_TRUE( has_json_key( line, dataKey ) );
     EXPECT_EQ( json_string_field( line, typeKey ).value_or( std::string{} ),
                keyDownTypeName );
-    EXPECT_EQ( json_string_field( line, tierKey ).value_or( std::string{} ),
-               inputTierName );
+    EXPECT_EQ( json_string_field( line, categoryKey ).value_or( std::string{} ),
+               inputCategoryName );
+}
+
+TEST( JsonlSink,
+      SerializesInputKeyPayloadWithCanonicalKeys )
+{
+    const TempDir temp( "SerializesInputKeyPayloadWithCanonicalKeys" );
+    auto          sink_result = grab::storage::JsonlSink::open(
+        make_options( temp.path(), flushEveryWrite, generousFileLimit, tinyDiskBudgetMb )
+    );
+    ASSERT_TRUE( is_ok( sink_result ) );
+    auto sink = std::move( sink_result ).value();
+
+    ASSERT_TRUE( is_ok( sink.write( make_key_event( firstDayTimestamp,
+                                                    firstSequence ) ) ) );
+
+    const auto lines = read_lines( temp.path() / std::string{ firstDayFileName } );
+    ASSERT_EQ( lines.size(), singleLineCount );
+    const std::string_view line = lines.front();
+
+    EXPECT_TRUE( has_json_key( line, keyCodeKey ) );
+    EXPECT_TRUE( has_json_key( line, keyNameKey ) );
+    EXPECT_FALSE( has_json_key( line, oldCodeKey ) );
+    EXPECT_FALSE( has_json_key( line, oldNameKey ) );
+}
+
+TEST( JsonlSink,
+      SerializesMouseClickPayloadWithCanonicalButtonName )
+{
+    const TempDir temp( "SerializesMouseClickPayloadWithCanonicalButtonName" );
+    auto          sink_result = grab::storage::JsonlSink::open(
+        make_options( temp.path(), flushEveryWrite, generousFileLimit, tinyDiskBudgetMb )
+    );
+    ASSERT_TRUE( is_ok( sink_result ) );
+    auto sink = std::move( sink_result ).value();
+
+    ASSERT_TRUE( is_ok( sink.write( make_mouse_click_event( firstDayTimestamp,
+                                                            firstSequence ) ) ) );
+
+    const auto lines = read_lines( temp.path() / std::string{ firstDayFileName } );
+    ASSERT_EQ( lines.size(), singleLineCount );
+    const std::string_view line = lines.front();
+
+    EXPECT_TRUE( has_json_key( line, buttonKey ) );
+    EXPECT_TRUE( has_json_key( line, buttonNameKey ) );
+    EXPECT_FALSE( has_json_key( line, oldNameKey ) );
+}
+
+TEST( JsonlSink,
+      SerializesA11yStateChangedPayloadWithStateKey )
+{
+    const TempDir temp( "SerializesA11yStateChangedPayloadWithStateKey" );
+    auto          sink_result = grab::storage::JsonlSink::open(
+        make_options( temp.path(), flushEveryWrite, generousFileLimit, tinyDiskBudgetMb )
+    );
+    ASSERT_TRUE( is_ok( sink_result ) );
+    auto sink = std::move( sink_result ).value();
+
+    ASSERT_TRUE( is_ok( sink.write( make_a11y_state_event( firstDayTimestamp,
+                                                           firstSequence ) ) ) );
+
+    const auto lines = read_lines( temp.path() / std::string{ firstDayFileName } );
+    ASSERT_EQ( lines.size(), singleLineCount );
+    const std::string_view line = lines.front();
+
+    EXPECT_TRUE( has_json_key( line, stateKey ) );
+    EXPECT_FALSE( has_json_key( line, detailKey ) );
 }
 
 TEST( JsonlSink,

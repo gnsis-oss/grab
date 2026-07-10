@@ -134,46 +134,6 @@ namespace grab
             Payload       payload;
     };
 
-    [[nodiscard]]
-    constexpr EventCategory
-    category_of( EventKind kind ) noexcept
-    {
-        switch( kind )
-        {
-            case EventKind::KeyDown :
-            case EventKind::KeyUp :
-            case EventKind::KeyCombo :
-            case EventKind::MouseClick :
-            case EventKind::MouseMove :
-            case EventKind::IdleStart :
-            case EventKind::IdleEnd :
-                return EventCategory::Input;
-            case EventKind::WindowFocusChanged :
-            case EventKind::WindowTitleChanged :
-            case EventKind::WindowCreated :
-            case EventKind::WindowClosed :
-                return EventCategory::Window;
-            case EventKind::A11yButtonClicked :
-            case EventKind::A11yMenuOpened :
-            case EventKind::A11yMenuClosed :
-            case EventKind::A11yFocusChanged :
-            case EventKind::A11yTextChanged :
-            case EventKind::A11yStateChanged :
-                return EventCategory::Accessibility;
-            case EventKind::AppTabChanged :
-            case EventKind::AppContextUpdate :
-                return EventCategory::Integration;
-            case EventKind::BrowserTabSwitched :
-                return EventCategory::Browser;
-            case EventKind::StateSnapshot :
-                return EventCategory::State;
-            case EventKind::Unspecified :
-                return EventCategory::Unspecified;
-        }
-
-        return EventCategory::Unspecified;
-    }
-
     struct EventFilter
     {
             std::vector<EventKind>     kinds;

@@ -1,6 +1,7 @@
 #include "event/state.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/event_descriptor.hpp"
 
 #include <algorithm>
 #include <cstddef>

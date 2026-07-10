@@ -2,12 +2,19 @@
 #include "grab/event.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
+#include "storage/jsonl_sink.hpp"
 #include "transport/codec.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <set>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -17,26 +24,75 @@
 namespace
 {
 
-    constexpr double        timestamp           = 1729.125;
-    constexpr double        expectedTimestamp   = timestamp;
-    constexpr double        mouseDelta          = -4.5;
-    constexpr double        idleSeconds         = 30.25;
-    constexpr double        windowDuration      = 7.75;
-    constexpr std::int64_t  pidValue            = 1'234;
-    constexpr std::uint64_t sequence            = 42U;
-    constexpr std::uint64_t decodedSequence     = 0U;
-    constexpr std::uint32_t keyCode             = 30U;
-    constexpr std::uint32_t mouseButton         = 1U;
-    constexpr int           unknownKindNumber   = 9'999;
-    constexpr int           oversizedEntryPad   = 1;
-    constexpr int           singleErasedEntry   = 1;
-    constexpr auto          protocolErrorCode   = grab::ErrorCode::ProtocolError;
-    constexpr auto          inputCategory       = grab::EventCategory::Input;
-    constexpr auto          windowCategory      = grab::EventCategory::Window;
-    constexpr auto          a11yCategory        = grab::EventCategory::Accessibility;
-    constexpr auto          integrationCategory = grab::EventCategory::Integration;
-    constexpr auto          browserCategory     = grab::EventCategory::Browser;
-    constexpr auto          stateCategory       = grab::EventCategory::State;
+    constexpr double           timestamp            = 1729.125;
+    constexpr double           expectedTimestamp    = timestamp;
+    constexpr double           mouseDelta           = -4.5;
+    constexpr double           idleSeconds          = 30.25;
+    constexpr double           windowDuration       = 7.75;
+    constexpr std::int64_t     pidValue             = 1'234;
+    constexpr std::uint64_t    sequence             = 42U;
+    constexpr std::uint64_t    decodedSequence      = 0U;
+    constexpr std::uint32_t    keyCode              = 30U;
+    constexpr std::uint32_t    mouseButton          = 1U;
+    constexpr int              unknownKindNumber    = 9'999;
+    constexpr int              oversizedEntryPad    = 1;
+    constexpr int              singleErasedEntry    = 1;
+    constexpr std::size_t      jsonlFlushEveryWrite = 1U;
+    constexpr std::size_t      jsonlMaxFiles        = 4U;
+    constexpr std::size_t      jsonlMaxDiskMb       = 1U;
+    constexpr std::size_t      singleJsonlLine      = 1U;
+    constexpr auto             protocolErrorCode    = grab::ErrorCode::ProtocolError;
+    constexpr auto             inputCategory        = grab::EventCategory::Input;
+    constexpr auto             windowCategory       = grab::EventCategory::Window;
+    constexpr auto             a11yCategory         = grab::EventCategory::Accessibility;
+    constexpr auto             integrationCategory  = grab::EventCategory::Integration;
+    constexpr auto             browserCategory      = grab::EventCategory::Browser;
+    constexpr auto             stateCategory        = grab::EventCategory::State;
+    constexpr std::string_view codecJsonlTempRoot   = "codec_jsonl_tmp";
+    constexpr std::string_view unixEpochFileName    = "1970-01-01.jsonl";
+    constexpr std::string_view dataKey              = "data";
+    constexpr std::string_view inputKeyTempName     = "InputKeyPayloadKeyParity";
+    constexpr std::string_view mouseClickTempName   = "MouseClickPayloadKeyParity";
+    constexpr std::string_view a11yStateTempName    = "A11yStatePayloadKeyParity";
+
+    class TempDir
+    {
+        public:
+
+            explicit TempDir( std::string_view name ) :
+                path_( std::filesystem::current_path() /
+                       std::string{ codecJsonlTempRoot } /
+                       std::string{ name } )
+            {
+                std::error_code ec;
+                std::filesystem::remove_all( path_, ec );
+                std::filesystem::create_directories( path_, ec );
+            }
+
+            ~TempDir() noexcept
+            {
+                std::error_code ec;
+                std::filesystem::remove_all( path_, ec );
+            }
+
+            TempDir( const TempDir& ) = delete;
+            TempDir&
+            operator=( const TempDir& ) = delete;
+            TempDir( TempDir&& )        = delete;
+            TempDir&
+            operator=( TempDir&& ) = delete;
+
+            [[nodiscard]]
+            const std::filesystem::path&
+            path() const noexcept
+            {
+                return path_;
+            }
+
+        private:
+
+            std::filesystem::path path_;
+    };
 
     [[nodiscard]]
     grab::InputKey
@@ -316,6 +372,83 @@ namespace
         return *wire;
     }
 
+    [[nodiscard]]
+    grab::storage::JsonlOptions
+    jsonl_options( const std::filesystem::path& dir )
+    {
+        return grab::storage::JsonlOptions{
+            .dir          = dir,
+            .buffer_limit = jsonlFlushEveryWrite,
+            .max_files    = jsonlMaxFiles,
+            .max_disk_mb  = jsonlMaxDiskMb,
+        };
+    }
+
+    [[nodiscard]]
+    std::vector<std::string>
+    read_lines( const std::filesystem::path& file )
+    {
+        std::ifstream            input( file );
+        std::vector<std::string> lines;
+        std::string              line;
+        while( std::getline( input, line ) )
+        {
+            lines.push_back( line );
+        }
+        return lines;
+    }
+
+    [[nodiscard]]
+    std::set<std::string>
+    proto_data_keys( const eventgrab::v1::Event& wire )
+    {
+        std::set<std::string> keys;
+        for( const auto& [key, value] : wire.data() )
+        {
+            static_cast<void>( value );
+            keys.insert( key );
+        }
+        return keys;
+    }
+
+    [[nodiscard]]
+    std::set<std::string>
+    json_data_keys( const nlohmann::json& data )
+    {
+        std::set<std::string> keys;
+        for( const auto& [key, value] : data.items() )
+        {
+            static_cast<void>( value );
+            keys.insert( key );
+        }
+        return keys;
+    }
+
+    void
+    expect_jsonl_and_proto_payload_keys_match( const grab::Event& event,
+                                               std::string_view   temp_name )
+    {
+        const TempDir temp( temp_name );
+        auto          sink_result =
+            grab::storage::JsonlSink::open( jsonl_options( temp.path() ) );
+        ASSERT_TRUE( sink_result.has_value() ) << sink_result.error().message;
+        auto sink         = std::move( sink_result ).value();
+
+        auto write_result = sink.write( event );
+        ASSERT_TRUE( write_result.has_value() ) << write_result.error().message;
+
+        const auto lines = read_lines( temp.path() / std::string{ unixEpochFileName } );
+        ASSERT_EQ( lines.size(), singleJsonlLine );
+        const auto line = nlohmann::json::parse( lines.front() );
+        ASSERT_TRUE( line.contains( std::string{ dataKey } ) );
+
+        auto wire = grab::transport::to_wire( event );
+        ASSERT_TRUE( wire.has_value() ) << wire.error().message;
+
+        EXPECT_EQ( json_data_keys( line.at( std::string{ dataKey } ) ),
+                   proto_data_keys( *wire ) );
+    }
+
 }    // namespace
 
 TEST( Codec,
@@ -398,4 +531,21 @@ TEST( Codec,
     ASSERT_TRUE( decoded.has_value() );
     EXPECT_DOUBLE_EQ( decoded->timestamp, expectedTimestamp );
     EXPECT_EQ( decoded->sequence, decodedSequence );
+}
+
+TEST( Codec,
+      JsonlAndProtoPayloadKeysMatchCanonicalVocabulary )
+{
+    expect_jsonl_and_proto_payload_keys_match(
+        make_event( grab::EventKind::KeyDown, inputCategory, input_key() ),
+        inputKeyTempName
+    );
+    expect_jsonl_and_proto_payload_keys_match(
+        make_event( grab::EventKind::MouseClick, inputCategory, mouse_click() ),
+        mouseClickTempName
+    );
+    expect_jsonl_and_proto_payload_keys_match(
+        make_event( grab::EventKind::A11yStateChanged, a11yCategory, a11y_event() ),
+        a11yStateTempName
+    );
 }
