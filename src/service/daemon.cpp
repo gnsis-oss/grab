@@ -1,3 +1,6 @@
+#include "core/reactor.hpp"
+#include "event/platform_factory.hpp"
+#include "event/source_registry.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/result.hpp"
@@ -11,6 +14,7 @@
 #include <exception>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -19,14 +23,18 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace grab::service
 {
     namespace
     {
 
-        constexpr std::size_t storageQueueDepth  = 65'536U;
-        constexpr std::size_t storageBufferLimit = 1U;
+        constexpr std::size_t      storageQueueDepth  = 65'536U;
+        constexpr std::size_t      storageBufferLimit = 1U;
+        constexpr std::string_view reactorThreadStartStep =
+            "daemon reactor thread start";
+        constexpr std::string_view reactorRunStep = "daemon reactor run";
 
         struct DrainState
         {
@@ -113,6 +121,46 @@ namespace grab::service
             }
         }
 
+        class StartupSignal
+        {
+            public:
+
+                StartupSignal()                       = default;
+                ~StartupSignal()                      = default;
+
+                StartupSignal( const StartupSignal& ) = delete;
+                StartupSignal&
+                operator=( const StartupSignal& ) = delete;
+                StartupSignal( StartupSignal&& )  = delete;
+                StartupSignal&
+                operator=( StartupSignal&& ) = delete;
+
+                [[nodiscard]]
+                std::future<grab::Result<void>>
+                future()
+                {
+                    return result_.get_future();
+                }
+
+                void
+                report( grab::Result<void> result )
+                {
+                    const std::scoped_lock lock( mutex_ );
+                    if( reported_ )
+                    {
+                        return;
+                    }
+                    reported_ = true;
+                    result_.set_value( std::move( result ) );
+                }
+
+            private:
+
+                std::mutex                       mutex_;
+                bool                             reported_ = false;
+                std::promise<grab::Result<void>> result_;
+        };
+
     }    // namespace
 
     class Daemon::Impl
@@ -137,6 +185,10 @@ namespace grab::service
             grab::Result<void>
             start_transport();
 
+            [[nodiscard]]
+            grab::Result<void>
+            start_sources();
+
             void
             shutdown() noexcept;
 
@@ -154,6 +206,10 @@ namespace grab::service
             grab::Result<void>
             start_drain_thread();
 
+            [[nodiscard]]
+            grab::Result<void>
+            run_reactor();
+
             void
             drain_loop( std::promise<grab::Result<void>> ready ) noexcept;
 
@@ -167,14 +223,22 @@ namespace grab::service
             join_drain() noexcept;
 
             void
+            join_reactor() noexcept;
+
+            void
                                                  flush_and_close_sink() noexcept;
 
             std::string                          endpoint_;
             std::optional<std::filesystem::path> store_dir_;
-            grab::EventBus                       bus_;
+            std::function<std::vector<std::unique_ptr<grab::event::EventSource>>()>
+                                                            source_factory_;
+            grab::EventBus                                  bus_;
+            grab::core::Reactor                             reactor_;
+            grab::event::SourceRegistry                     registry_;
             std::optional<grab::transport::TransportServer> server_;
             std::optional<grab::storage::JsonlSink>         sink_;
             std::shared_ptr<DrainState>                     drain_state_;
+            std::thread                                     reactor_thread_;
             std::thread                                     drain_thread_;
             std::atomic_bool                                shutdown_started_{ false };
     };
@@ -182,6 +246,7 @@ namespace grab::service
     Daemon::Impl::Impl( DaemonOptions options ) :
         endpoint_( std::move( options.endpoint ) ),
         store_dir_( std::move( options.store_dir ) ),
+        source_factory_( std::move( options.source_factory ) ),
         drain_state_( std::make_shared<DrainState>() )
     {
     }
@@ -189,6 +254,12 @@ namespace grab::service
     Daemon::Impl::~Impl() noexcept
     {
         shutdown();
+        // shutdown() is idempotent and no-ops if it already ran (e.g. it was
+        // triggered from the reactor thread, where join_reactor() could not
+        // self-join). Join unconditionally here, on the owner thread, so a
+        // still-joinable reactor thread never reaches std::thread's terminating
+        // destructor.
+        join_reactor();
     }
 
     grab::Result<void>
@@ -226,6 +297,64 @@ namespace grab::service
     }
 
     grab::Result<void>
+    Daemon::Impl::start_sources()
+    {
+        const auto startup = std::make_shared<StartupSignal>();
+        auto       ready   = startup->future();
+
+        try
+        {
+            reactor_.post(
+                [startup]
+                {
+                    startup->report( grab::Result<void>{} );
+                }
+            );
+
+            reactor_thread_ = std::thread(
+                [this, startup]
+                {
+                    startup->report( run_reactor() );
+                }
+            );
+        }
+        catch( const std::exception& exception )
+        {
+            reactor_.stop();
+            join_reactor();
+            return exception_failure( reactorThreadStartStep, exception );
+        }
+        catch( ... )
+        {
+            reactor_.stop();
+            join_reactor();
+            return unknown_exception_failure( reactorThreadStartStep );
+        }
+
+        auto ready_result = ready.get();
+        if( !ready_result.has_value() )
+        {
+            auto error = std::move( ready_result.error() );
+            reactor_.stop();
+            join_reactor();
+            return std::unexpected( std::move( error ) );
+        }
+
+        auto sources =
+            source_factory_
+                ? source_factory_()
+                : grab::event::PlatformFactory::build( grab::event::SourceConfig{} );
+        for( auto& source : sources )
+        {
+            registry_.add( std::move( source ) );
+        }
+
+        auto start_result = registry_.start_all( reactor_, bus_ );
+        static_cast<void>( start_result );
+        return {};
+    }
+
+    grab::Result<void>
     Daemon::Impl::start_drain_thread()
     {
         std::promise<grab::Result<void>> ready_promise;
@@ -257,6 +386,23 @@ namespace grab::service
             return std::unexpected( std::move( ready_result.error() ) );
         }
         return {};
+    }
+
+    grab::Result<void>
+    Daemon::Impl::run_reactor()
+    {
+        try
+        {
+            return reactor_.run();
+        }
+        catch( const std::exception& exception )
+        {
+            return exception_failure( reactorRunStep, exception );
+        }
+        catch( ... )
+        {
+            return unknown_exception_failure( reactorRunStep );
+        }
     }
 
     void
@@ -359,6 +505,23 @@ namespace grab::service
     }
 
     void
+    Daemon::Impl::join_reactor() noexcept
+    {
+        try
+        {
+            if( reactor_thread_.joinable() &&
+                reactor_thread_.get_id() != std::this_thread::get_id() )
+            {
+                reactor_thread_.join();
+            }
+        }
+        catch( ... )
+        {
+            return;
+        }
+    }
+
+    void
     Daemon::Impl::flush_and_close_sink() noexcept
     {
         if( !sink_.has_value() )
@@ -386,6 +549,10 @@ namespace grab::service
         {
             return;
         }
+
+        registry_.stop_all();
+        reactor_.stop();
+        join_reactor();
 
         try
         {
@@ -459,6 +626,13 @@ namespace grab::service
             {
                 impl->shutdown();
                 return std::unexpected( std::move( transport_result.error() ) );
+            }
+
+            auto source_result = impl->start_sources();
+            if( !source_result.has_value() )
+            {
+                impl->shutdown();
+                return std::unexpected( std::move( source_result.error() ) );
             }
 
             return Daemon{ std::move( impl ) };

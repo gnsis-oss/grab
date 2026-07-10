@@ -3,9 +3,11 @@
 #include "grab/result.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace grab
 {
@@ -14,6 +16,13 @@ namespace grab
 
 }    // namespace grab
 
+namespace grab::event
+{
+
+    class EventSource;
+
+}    // namespace grab::event
+
 namespace grab::service
 {
 
@@ -21,6 +30,8 @@ namespace grab::service
     {
             std::string                          endpoint = "unix:/tmp/grab.sock";
             std::optional<std::filesystem::path> store_dir;
+            std::function<std::vector<std::unique_ptr<grab::event::EventSource>>()>
+                source_factory;
     };
 
     class Daemon

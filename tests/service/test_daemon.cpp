@@ -1,3 +1,5 @@
+#include "event/fake_source.hpp"
+#include "event/source.hpp"
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
@@ -27,6 +29,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 // clang-format on
 
 namespace
@@ -57,6 +60,10 @@ namespace
     constexpr std::uint32_t    keyDownCode             = 30U;
     constexpr std::string_view keyDownName             = "A";
     constexpr auto             cancelledCode           = grpc::StatusCode::CANCELLED;
+    constexpr std::string_view firstSourceName         = "first";
+    constexpr std::string_view secondSourceName        = "second";
+    constexpr std::string_view failingSourceName       = "failing";
+    constexpr std::string_view sourceFailureMessage    = "source failed";
 
     [[nodiscard]]
     std::string
@@ -243,6 +250,54 @@ namespace
             return {};
         }
         return *wire;
+    }
+
+    [[nodiscard]]
+    grab::Result<void>
+    failed_source_start()
+    {
+        return grab::fail( grab::ErrorCode::ProviderFailed,
+                           std::string{ sourceFailureMessage } );
+    }
+
+    [[nodiscard]]
+    std::unique_ptr<grab::test::FakeSource>
+    make_source( std::string name )
+    {
+        return std::make_unique<grab::test::FakeSource>( std::move( name ) );
+    }
+
+    [[nodiscard]]
+    std::vector<std::unique_ptr<grab::event::EventSource>>
+    make_source_list( std::vector<grab::test::FakeSource*>& sources_out )
+    {
+        auto first  = make_source( std::string{ firstSourceName } );
+        auto second = make_source( std::string{ secondSourceName } );
+
+        sources_out = { first.get(), second.get() };
+
+        std::vector<std::unique_ptr<grab::event::EventSource>> sources;
+        sources.emplace_back( std::move( first ) );
+        sources.emplace_back( std::move( second ) );
+        return sources;
+    }
+
+    [[nodiscard]]
+    std::vector<std::unique_ptr<grab::event::EventSource>>
+    make_degraded_source_list( std::vector<grab::test::FakeSource*>& sources_out )
+    {
+        auto first   = make_source( std::string{ firstSourceName } );
+        auto failing = make_source( std::string{ failingSourceName } );
+        auto second  = make_source( std::string{ secondSourceName } );
+        failing->set_start_result( failed_source_start() );
+
+        sources_out = { first.get(), failing.get(), second.get() };
+
+        std::vector<std::unique_ptr<grab::event::EventSource>> sources;
+        sources.emplace_back( std::move( first ) );
+        sources.emplace_back( std::move( failing ) );
+        sources.emplace_back( std::move( second ) );
+        return sources;
     }
 
     [[nodiscard]]
@@ -435,8 +490,9 @@ TEST( Daemon,
 {
     const TempDaemonDir temp;
     auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint  = temp.endpoint(),
-        .store_dir = temp.store_dir(),
+        .endpoint       = temp.endpoint(),
+        .store_dir      = temp.store_dir(),
+        .source_factory = {},
     } );
     if( transport_start_blocked( daemon_result ) )
     {
@@ -468,8 +524,9 @@ TEST( Daemon,
 {
     const TempDaemonDir temp;
     auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint  = temp.endpoint(),
-        .store_dir = std::nullopt,
+        .endpoint       = temp.endpoint(),
+        .store_dir      = std::nullopt,
+        .source_factory = {},
     } );
     if( transport_start_blocked( daemon_result ) )
     {
@@ -491,8 +548,9 @@ TEST( Daemon,
 {
     const TempDaemonDir temp;
     auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint  = temp.endpoint(),
-        .store_dir = std::nullopt,
+        .endpoint       = temp.endpoint(),
+        .store_dir      = std::nullopt,
+        .source_factory = {},
     } );
     if( transport_start_blocked( daemon_result ) )
     {
@@ -517,4 +575,72 @@ TEST( Daemon,
     EXPECT_FALSE( std::filesystem::exists( temp.store_dir() ) );
 
     daemon.shutdown();
+}
+
+TEST( Daemon,
+      StartsAndStopsInjectedSources )
+{
+    const TempDaemonDir                  temp;
+    std::vector<grab::test::FakeSource*> sources;
+
+    auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
+        .endpoint       = temp.endpoint(),
+        .store_dir      = std::nullopt,
+        .source_factory = [&sources]
+        {
+            return make_source_list( sources );
+        },
+    } );
+    if( transport_start_blocked( daemon_result ) )
+    {
+        GTEST_SKIP() << daemon_result.error().message;
+    }
+    ASSERT_TRUE( is_ok( daemon_result ) );
+    auto daemon = std::move( daemon_result ).value();
+
+    ASSERT_EQ( sources.size(), 2U );
+    EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Running );
+    EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Running );
+    EXPECT_EQ( sources.at( 0U )->start_calls(), 1U );
+    EXPECT_EQ( sources.at( 1U )->start_calls(), 1U );
+
+    daemon.shutdown();
+
+    EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Stopped );
+    EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Stopped );
+    EXPECT_EQ( sources.at( 0U )->stop_calls(), 1U );
+    EXPECT_EQ( sources.at( 1U )->stop_calls(), 1U );
+}
+
+TEST( Daemon,
+      StartsWhenInjectedSourceFails )
+{
+    const TempDaemonDir                  temp;
+    std::vector<grab::test::FakeSource*> sources;
+
+    auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
+        .endpoint       = temp.endpoint(),
+        .store_dir      = std::nullopt,
+        .source_factory = [&sources]
+        {
+            return make_degraded_source_list( sources );
+        },
+    } );
+    if( transport_start_blocked( daemon_result ) )
+    {
+        GTEST_SKIP() << daemon_result.error().message;
+    }
+    ASSERT_TRUE( is_ok( daemon_result ) );
+    auto daemon = std::move( daemon_result ).value();
+
+    ASSERT_EQ( sources.size(), 3U );
+    EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Running );
+    EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Failed );
+    EXPECT_EQ( sources.at( 2U )->state(), grab::event::SourceState::Running );
+
+    daemon.shutdown();
+
+    EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Stopped );
+    EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Failed );
+    EXPECT_EQ( sources.at( 2U )->state(), grab::event::SourceState::Stopped );
 }

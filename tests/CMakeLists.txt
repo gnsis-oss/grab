@@ -32,6 +32,8 @@ add_executable(grab_core_tests
     input/test_gestures.cpp
     input/test_input.cpp
     event/test_browser_bridge.cpp
+    event/test_source_registry.cpp
+    event/test_monitor_source.cpp
     event/test_event_descriptor.cpp
     event/test_payload_fields.cpp
     event/test_atspi.cpp

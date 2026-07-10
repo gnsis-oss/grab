@@ -109,6 +109,8 @@ add_library(grab_event STATIC
     src/event/atspi.cpp
     src/event/window_x11.cpp
     src/event/browser_bridge.cpp
+    src/event/source_registry.cpp
+    src/event/platform_factory.cpp
     src/event/state.cpp
     src/event/evdev.cpp
     src/event/xinput2.cpp
@@ -205,7 +207,7 @@ target_compile_features(grab_storage PUBLIC cxx_std_23)
 add_library(grab_service STATIC
     src/service/daemon.cpp
 )
-target_link_libraries(grab_service PUBLIC grab_core grab_transport grab_storage)
+target_link_libraries(grab_service PUBLIC grab_core grab_transport grab_storage grab_event)
 target_include_directories(grab_service PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_service PUBLIC cxx_std_23)
 
