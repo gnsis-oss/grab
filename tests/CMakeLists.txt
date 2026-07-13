@@ -84,6 +84,9 @@ gtest_discover_tests(grab_client_tests DISCOVERY_MODE PRE_TEST)
 add_executable(grab_kernel_tests
     kernel/action/test_transaction.cpp
     kernel/action/test_wait_engine.cpp
+    kernel/capture/test_damage_hint_auditor.cpp
+    kernel/capture/test_inject_gate.cpp
+    kernel/capture/test_tile_differ.cpp
     kernel/test_ui.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp

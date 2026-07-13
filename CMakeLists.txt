@@ -68,6 +68,9 @@ target_compile_definitions(grab_core PUBLIC
 add_library(grab_kernel STATIC
     src/kernel/action/transaction.cpp
     src/kernel/action/wait_engine.cpp
+    src/kernel/capture/damage_hint_auditor.cpp
+    src/kernel/capture/inject_gate.cpp
+    src/kernel/capture/tile_differ.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp
     src/kernel/query/evaluator.cpp
