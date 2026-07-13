@@ -12,6 +12,7 @@ add_executable(grab_core_tests
     core/test_doctor.cpp
     core/test_event.cpp
     core/test_event_bus.cpp
+    core/test_ids.cpp
     core/test_prober.cpp
     core/test_permission.cpp
     core/test_monitor.cpp
