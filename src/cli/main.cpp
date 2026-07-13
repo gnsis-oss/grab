@@ -1,6 +1,9 @@
 #include "cli/common.hpp"
 #include "cli/input_command.hpp"
 #include "cli/session_command.hpp"
+#include "client/client.hpp"
+#include "client/loopback_transport.hpp"
+#include "client/unix_socket_transport.hpp"
 #include "codec/png.hpp"
 #include "core/doctor.hpp"
 #include "core/prober.hpp"
@@ -31,6 +34,7 @@
 #include <functional>
 #include <ios>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 // NOLINTNEXTLINE(modernize-deprecated-headers,misc-include-cleaner): POSIX sigwait API.
@@ -1414,6 +1418,30 @@ namespace
         {
             restore_daemon_signal_mask( signals );
             print_fatal( daemon.error().message.c_str() );
+            return runtimeError;
+        }
+
+        // Keep daemon-local producers and socket clients on the same Client
+        // seam. Listing the descriptors is the existing protocol's health
+        // operation and verifies both bindings without changing CLI output.
+        grab::client::LoopbackTransport loopback_transport{ daemon->bus() };
+        grab::client::Client            loopback_client{ loopback_transport };
+        auto local_health = loopback_client.list_event_types();
+        if( !local_health.has_value() )
+        {
+            restore_daemon_signal_mask( signals );
+            print_fatal( local_health.error().message.c_str() );
+            return runtimeError;
+        }
+
+        grab::client::Client daemon_client{
+            std::make_unique<grab::client::UnixSocketTransport>( daemon->endpoint() )
+        };
+        auto remote_health = daemon_client.list_event_types();
+        if( !remote_health.has_value() )
+        {
+            restore_daemon_signal_mask( signals );
+            print_fatal( remote_health.error().message.c_str() );
             return runtimeError;
         }
 

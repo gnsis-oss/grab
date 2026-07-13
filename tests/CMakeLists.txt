@@ -74,7 +74,7 @@ include(GoogleTest)
 add_executable(grab_client_tests
     client/test_client.cpp
 )
-target_link_libraries(grab_client_tests PRIVATE grab_client GTest::gtest_main)
+target_link_libraries(grab_client_tests PRIVATE grab_client grab_transport GTest::gtest_main)
 target_include_directories(grab_client_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests)

@@ -229,8 +229,9 @@ target_compile_features(grab_transport PUBLIC cxx_std_23)
 add_library(grab_client STATIC
     src/client/client.cpp
     src/client/loopback_transport.cpp
+    src/client/unix_socket_transport.cpp
 )
-target_link_libraries(grab_client PUBLIC grab_core)
+target_link_libraries(grab_client PUBLIC grab_core PRIVATE grab_transport)
 target_include_directories(grab_client PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_client PUBLIC cxx_std_23)
 
@@ -255,7 +256,7 @@ add_executable(grab_cli
 )
 set_target_properties(grab_cli PROPERTIES OUTPUT_NAME grab)
 target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_service
-    grab_input_x11 grab_platform_x11 grab_session)
+    grab_client grab_input_x11 grab_platform_x11 grab_session)
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 

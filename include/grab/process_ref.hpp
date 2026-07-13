@@ -74,6 +74,13 @@ namespace grab
             id() const;
 
             [[nodiscard]]
+            int
+            pidfd() const noexcept
+            {
+                return pidfd_;
+            }
+
+            [[nodiscard]]
             bool
             alive() const;
 
