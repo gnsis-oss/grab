@@ -778,3 +778,26 @@ convergence point for the exit gate.
 **Phase-1 exit gate** (from spec §10 + canonical plan): one resolved generic node supports capture + pointer + keyboard + semantic invoke + watch through one call path (CLI and daemon both via the P1.10 client); every mutating verb returns a `Receipt`; daemon restart replays subscriptions; two Sessions in one process; admission control rejects honestly under load; v1 wire compatibility green.
 
 **Phases 2–3** (Wayland session/lease; agent surface) get their own spec + plan when Phase 1 gates — boundary contracts are frozen in spec §8 so nothing in Phases 0–1 may contradict them.
+
+---
+
+## Execution status (updated during orchestration)
+
+Branch `feat/grab-port`, worktree `.worktrees/integrate`. Baseline (pre-Phase-0) at `9f1f26b`. All commits below are single-author (repo user); every commit built clean under `-Werror`+clang-tidy and passed its tests.
+
+**Phase 0 — COMPLETE** (Tasks 0–12): vendored l0; generation-scoped ids; trace/origin vocabularies; error taxonomy (45 codes); operation context; coordinate-space transform graph; pidfd process ownership; typed options; Session/Workspace split; CI invariant gate; fake-source staleness gate.
+
+**Phase 1 — kernel + runtimes + client seam COMPLETE (P1.1–P1.9, P1.10a):**
+- P1.1/P1.2 object model + SPI + validating TreeStore + TargetRegistry + FakeRuntime
+- P1.3 `grab::sel` locator IR + query engine over injected TreeNav
+- P1.4 wait engine + action transaction + Receipt (input-commit boundary)
+- P1.5 X11Runtime (window discovery tree_source + pointer/keyboard execution routes)
+- P1.6 event envelope fields + subscription objects (SubscriptionId, replay, gap markers)
+- P1.7 seat correctness kit (ModifierGuard, per-seat lane, scratch keycodes)
+- P1.8 coordinate authority + Frame provenance + MatchEvidence; `(0,0)` sentinels banned
+- P1.9 AT-SPI semantic runtime (accessible→node mapping, facets, conservative aliasing)
+- P1.10a client Transport seam + LoopbackTransport + Client
+
+**REMAINING:** P1.10b (rewire CLI/daemon to the client + UnixSocketTransport + ensure-daemon/health/retry/subscription-replay); P1.11 (Command/Error descriptor registries); P1.12 (capture engine: TileDiffer, XDamage-as-hint, InjectGate); P1.13 (daemon hardening: admission control, per-peer sessions, close paths); then the X11 completion-gate scenario.
+
+**Known environmental test flakes (NOT code regressions):** `Recorder.RecordsShortClipToValidFile` (libavcodec flush timing) and `Workflow.WatchCapturesOnTitleChange` (needs the Xvfb fixture's window-managed display; fails under a bare manual Xvfb substitute) fail only under sustained system load / when the Xvfb fixture cannot provision displays. Both pass when displays are provisioned normally. All other tests (currently 369) pass.
