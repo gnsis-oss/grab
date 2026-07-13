@@ -50,6 +50,7 @@ add_library(grab_core STATIC
     src/core/registry.cpp
     src/core/resolver.cpp
     src/core/session.cpp
+    src/core/space_graph.cpp
 )
 target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
 target_link_libraries(grab_core PRIVATE grab_vendor_l0)
