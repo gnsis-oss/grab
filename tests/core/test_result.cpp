@@ -1,5 +1,6 @@
 #include "grab/result.hpp"
 
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <string>
 #include <string_view>
@@ -25,6 +26,7 @@ namespace
     constexpr int              answer                   = 42;
     constexpr auto             windowNotFoundCode   = grab::ErrorCode::WindowNotFound;
     constexpr std::string_view missingWindowMessage = "no such window";
+    constexpr std::size_t      errorDescriptorCount = 45U;
 
 }    // namespace
 
@@ -44,6 +46,22 @@ TEST( ErrorModel,
 {
     EXPECT_EQ( grab::name_of( staleWindowCode ), staleWindowName );
     EXPECT_EQ( grab::name_of( unsupportedCharacterCode ), unsupportedCharacterName );
+}
+
+TEST( ErrorModel,
+      DescriptorRegistryIsCompleteAndDrivesAccessors )
+{
+    const auto& descriptors = grab::error_descriptors();
+    ASSERT_EQ( descriptors.size(), errorDescriptorCount );
+
+    for( const auto& descriptor : descriptors )
+    {
+        EXPECT_EQ( grab::name_of( descriptor.code ), descriptor.name );
+        EXPECT_EQ( grab::category_of( descriptor.code ), descriptor.category );
+        EXPECT_EQ( grab::default_disposition_of( descriptor.code ),
+                   descriptor.default_disposition );
+        EXPECT_EQ( grab::retry_class_of( descriptor.code ), descriptor.retry );
+    }
 }
 
 TEST( ErrorModel,

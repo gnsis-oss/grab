@@ -85,105 +85,358 @@ namespace grab
         Overflowed            = 0X08'03,
     };
 
+    struct ErrorDescriptor
+    {
+            ErrorCode        code;
+            std::string_view name;
+            ErrorCategory    category;
+            ErrorDisposition default_disposition{ ErrorDisposition::Fatal };
+            RetryClass       retry{ RetryClass::Never };
+    };
+
     namespace detail
     {
 
         inline constexpr std::size_t errorCodeCount = 45U;
 
-        inline constexpr auto        errorCodeNames = EnumTable{
-            std::to_array( {
-                enum_entry( ErrorCode::EnvironmentChanged, "environment_changed" ),
-                enum_entry( ErrorCode::DisplayUnavailable, "display_unavailable" ),
-                enum_entry( ErrorCode::DeviceInaccessible, "device_inaccessible" ),
-                enum_entry( ErrorCode::TopologyChanged, "topology_changed" ),
-                enum_entry( ErrorCode::PermissionNeeded, "permission_needed" ),
-                enum_entry( ErrorCode::PermissionDenied, "permission_denied" ),
-                enum_entry( ErrorCode::LeaseClosed, "lease_closed" ),
-                enum_entry( ErrorCode::LeaseRevoked, "lease_revoked" ),
-                enum_entry( ErrorCode::OwnershipRequired, "ownership_required" ),
-                enum_entry( ErrorCode::WindowNotFound, "window_not_found" ),
-                enum_entry( ErrorCode::StaleWindow, "stale_window" ),
-                enum_entry( ErrorCode::GeometryUntrusted, "geometry_untrusted" ),
-                enum_entry( ErrorCode::StaleNode, "stale_node" ),
-                enum_entry( ErrorCode::TreeResynced, "tree_resynced" ),
-                enum_entry( ErrorCode::RuntimeRestarted, "runtime_restarted" ),
-                enum_entry( ErrorCode::TargetDetached, "target_detached" ),
-                enum_entry( ErrorCode::NoMatch, "no_match" ),
-                enum_entry( ErrorCode::AmbiguousMatch, "ambiguous_match" ),
-                enum_entry( ErrorCode::PropertyAbsent, "property_absent" ),
-                enum_entry( ErrorCode::PropertyUnsupported, "property_unsupported" ),
-                enum_entry( ErrorCode::PropertyUncached, "property_uncached" ),
-                enum_entry( ErrorCode::PropertyBackendFailed,
-                            "property_backend_failed" ),
-                enum_entry( ErrorCode::CapabilityUnavailable, "capability_unavailable" ),
-                enum_entry( ErrorCode::ProviderFailed, "provider_failed" ),
-                enum_entry( ErrorCode::ProtocolError, "protocol_error" ),
-                enum_entry( ErrorCode::InvalidArgument, "invalid_argument" ),
-                enum_entry( ErrorCode::IllegalFromCallback, "illegal_from_callback" ),
-                enum_entry( ErrorCode::UnsupportedCharacter, "unsupported_character" ),
-                enum_entry( ErrorCode::SessionClosed, "session_closed" ),
-                enum_entry( ErrorCode::SessionExists, "session_exists" ),
-                enum_entry( ErrorCode::SessionNotFound, "session_not_found" ),
-                enum_entry( ErrorCode::SessionDead, "session_dead" ),
-                enum_entry( ErrorCode::DeadlineExceeded, "deadline_exceeded" ),
-                enum_entry( ErrorCode::Cancelled, "cancelled" ),
-                enum_entry( ErrorCode::InternalFault, "internal_fault" ),
-                enum_entry( ErrorCode::NotActionable, "not_actionable" ),
-                enum_entry( ErrorCode::Occluded, "occluded" ),
-                enum_entry( ErrorCode::RouteUnavailable, "route_unavailable" ),
-                enum_entry( ErrorCode::PossiblyCommitted, "possibly_committed" ),
-                enum_entry( ErrorCode::VerificationFailed, "verification_failed" ),
-                enum_entry( ErrorCode::NeutralizationFailed, "neutralization_failed" ),
-                enum_entry( ErrorCode::QueueGap, "queue_gap" ),
-                enum_entry( ErrorCode::ResyncRequired, "resync_required" ),
-                enum_entry( ErrorCode::SubscriptionGone, "subscription_gone" ),
-                enum_entry( ErrorCode::Overflowed, "overflowed" ),
-            } ),
-        };
-        static_assert( enum_table_has_count( errorCodeNames,
-                                             errorCodeCount ) );
+        [[nodiscard]]
+        constexpr ErrorDescriptor
+        error_descriptor( ErrorCode        code,
+                          std::string_view name,
+                          ErrorCategory    category,
+                          ErrorDisposition default_disposition,
+                          RetryClass       retry ) noexcept
+        {
+            return ErrorDescriptor{
+                .code                = code,
+                .name                = name,
+                .category            = category,
+                .default_disposition = default_disposition,
+                .retry               = retry,
+            };
+        }
+
+        inline constexpr auto errorDescriptors = std::to_array<ErrorDescriptor>( {
+            error_descriptor( ErrorCode::EnvironmentChanged,
+                              "environment_changed",
+                              ErrorCategory::Environment,
+                              ErrorDisposition::RetrySame,
+                              RetryClass::ResolveOnly ),
+            error_descriptor( ErrorCode::DisplayUnavailable,
+                              "display_unavailable",
+                              ErrorCategory::Environment,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::DeviceInaccessible,
+                              "device_inaccessible",
+                              ErrorCategory::Environment,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::TopologyChanged,
+                              "topology_changed",
+                              ErrorCategory::Environment,
+                              ErrorDisposition::RetrySame,
+                              RetryClass::ResolveOnly ),
+            error_descriptor( ErrorCode::PermissionNeeded,
+                              "permission_needed",
+                              ErrorCategory::Permission,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::PermissionDenied,
+                              "permission_denied",
+                              ErrorCategory::Permission,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::LeaseClosed,
+                              "lease_closed",
+                              ErrorCategory::Permission,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::LeaseRevoked,
+                              "lease_revoked",
+                              ErrorCategory::Permission,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::OwnershipRequired,
+                              "ownership_required",
+                              ErrorCategory::Permission,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::WindowNotFound,
+                              "window_not_found",
+                              ErrorCategory::Target,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::StaleWindow,
+                              "stale_window",
+                              ErrorCategory::Target,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::GeometryUntrusted,
+                              "geometry_untrusted",
+                              ErrorCategory::Target,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::StaleNode,
+                              "stale_node",
+                              ErrorCategory::Target,
+                              ErrorDisposition::RetrySame,
+                              RetryClass::ResolveOnly ),
+            error_descriptor( ErrorCode::TreeResynced,
+                              "tree_resynced",
+                              ErrorCategory::Target,
+                              ErrorDisposition::RetrySame,
+                              RetryClass::ResolveOnly ),
+            error_descriptor( ErrorCode::RuntimeRestarted,
+                              "runtime_restarted",
+                              ErrorCategory::Target,
+                              ErrorDisposition::RetrySame,
+                              RetryClass::ResolveOnly ),
+            error_descriptor( ErrorCode::TargetDetached,
+                              "target_detached",
+                              ErrorCategory::Target,
+                              ErrorDisposition::RetrySame,
+                              RetryClass::ResolveOnly ),
+            error_descriptor( ErrorCode::NoMatch,
+                              "no_match",
+                              ErrorCategory::Target,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::AmbiguousMatch,
+                              "ambiguous_match",
+                              ErrorCategory::Target,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::PropertyAbsent,
+                              "property_absent",
+                              ErrorCategory::Target,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::PropertyUnsupported,
+                              "property_unsupported",
+                              ErrorCategory::Target,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::PropertyUncached,
+                              "property_uncached",
+                              ErrorCategory::Target,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::PropertyBackendFailed,
+                              "property_backend_failed",
+                              ErrorCategory::Target,
+                              ErrorDisposition::FallbackNext,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::CapabilityUnavailable,
+                              "capability_unavailable",
+                              ErrorCategory::Protocol,
+                              ErrorDisposition::FallbackNext,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::ProviderFailed,
+                              "provider_failed",
+                              ErrorCategory::Protocol,
+                              ErrorDisposition::FallbackNext,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::ProtocolError,
+                              "protocol_error",
+                              ErrorCategory::Protocol,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::InvalidArgument,
+                              "invalid_argument",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::IllegalFromCallback,
+                              "illegal_from_callback",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::UnsupportedCharacter,
+                              "unsupported_character",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::SessionClosed,
+                              "session_closed",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::SessionExists,
+                              "session_exists",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::SessionNotFound,
+                              "session_not_found",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::SessionDead,
+                              "session_dead",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::DeadlineExceeded,
+                              "deadline_exceeded",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::Cancelled,
+                              "cancelled",
+                              ErrorCategory::Usage,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::InternalFault,
+                              "internal_fault",
+                              ErrorCategory::InternalFault,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::NotActionable,
+                              "not_actionable",
+                              ErrorCategory::Action,
+                              ErrorDisposition::FallbackNext,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::Occluded,
+                              "occluded",
+                              ErrorCategory::Action,
+                              ErrorDisposition::FallbackNext,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::RouteUnavailable,
+                              "route_unavailable",
+                              ErrorCategory::Action,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::PossiblyCommitted,
+                              "possibly_committed",
+                              ErrorCategory::Action,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::VerificationFailed,
+                              "verification_failed",
+                              ErrorCategory::Action,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::NeutralizationFailed,
+                              "neutralization_failed",
+                              ErrorCategory::Action,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::QueueGap,
+                              "queue_gap",
+                              ErrorCategory::Stream,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::ResyncRequired,
+                              "resync_required",
+                              ErrorCategory::Stream,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::SubscriptionGone,
+                              "subscription_gone",
+                              ErrorCategory::Stream,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+            error_descriptor( ErrorCode::Overflowed,
+                              "overflowed",
+                              ErrorCategory::Stream,
+                              ErrorDisposition::Fatal,
+                              RetryClass::Never ),
+        } );
+
+        static_assert( errorDescriptors.size() == errorCodeCount );
+
+        [[nodiscard]]
+        consteval bool
+        error_descriptors_are_unique() noexcept
+        {
+            for( const auto& descriptor : errorDescriptors )
+            {
+                if( descriptor.name.empty() )
+                {
+                    return false;
+                }
+                std::size_t code_matches = 0U;
+                std::size_t name_matches = 0U;
+                for( const auto& candidate : errorDescriptors )
+                {
+                    code_matches += candidate.code == descriptor.code ? 1U : 0U;
+                    name_matches += candidate.name == descriptor.name ? 1U : 0U;
+                }
+                if( code_matches != 1U || name_matches != 1U )
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        static_assert( error_descriptors_are_unique() );
 
     }    // namespace detail
+
+    [[nodiscard]]
+    constexpr const std::array<ErrorDescriptor,
+                               detail::errorCodeCount>&
+    error_descriptors() noexcept
+    {
+        return detail::errorDescriptors;
+    }
 
     [[nodiscard]]
     constexpr ErrorCategory
     category_of( ErrorCode code ) noexcept
     {
-        constexpr std::uint16_t categoryShift          = 8U;
-        constexpr std::uint16_t environmentCategoryTag = 0X01U;
-        constexpr std::uint16_t permissionCategoryTag  = 0X02U;
-        constexpr std::uint16_t targetCategoryTag      = 0X03U;
-        constexpr std::uint16_t protocolCategoryTag    = 0X04U;
-        constexpr std::uint16_t usageCategoryTag       = 0X05U;
-        constexpr std::uint16_t actionCategoryTag      = 0X07U;
-        constexpr std::uint16_t streamCategoryTag      = 0X08U;
-
-        switch( static_cast<std::uint16_t>( code ) >> categoryShift )
+        for( const auto& descriptor : detail::errorDescriptors )
         {
-            case environmentCategoryTag :
-                return ErrorCategory::Environment;
-            case permissionCategoryTag :
-                return ErrorCategory::Permission;
-            case targetCategoryTag :
-                return ErrorCategory::Target;
-            case protocolCategoryTag :
-                return ErrorCategory::Protocol;
-            case usageCategoryTag :
-                return ErrorCategory::Usage;
-            case actionCategoryTag :
-                return ErrorCategory::Action;
-            case streamCategoryTag :
-                return ErrorCategory::Stream;
-            default :
-                return ErrorCategory::InternalFault;
+            if( descriptor.code == code )
+            {
+                return descriptor.category;
+            }
         }
+        return ErrorCategory::InternalFault;
     }
 
     [[nodiscard]]
     constexpr std::string_view
     name_of( ErrorCode code ) noexcept
     {
-        return detail::errorCodeNames.text_of( code, "internal_fault" );
+        for( const auto& descriptor : detail::errorDescriptors )
+        {
+            if( descriptor.code == code )
+            {
+                return descriptor.name;
+            }
+        }
+        return "internal_fault";
+    }
+
+    [[nodiscard]]
+    constexpr ErrorDisposition
+    default_disposition_of( ErrorCode code ) noexcept
+    {
+        for( const auto& descriptor : detail::errorDescriptors )
+        {
+            if( descriptor.code == code )
+            {
+                return descriptor.default_disposition;
+            }
+        }
+        return ErrorDisposition::Fatal;
+    }
+
+    [[nodiscard]]
+    constexpr RetryClass
+    retry_class_of( ErrorCode code ) noexcept
+    {
+        for( const auto& descriptor : detail::errorDescriptors )
+        {
+            if( descriptor.code == code )
+            {
+                return descriptor.retry;
+            }
+        }
+        return RetryClass::Never;
     }
 
     struct ProviderAttempt
