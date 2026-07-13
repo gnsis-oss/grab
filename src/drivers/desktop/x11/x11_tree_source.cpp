@@ -202,6 +202,33 @@ namespace grab::drivers::desktop::x11
         return targets_;
     }
 
+    grab::Result<xcb_window_t>
+    X11TreeSource::resolve_xid( const grab::WidgetRef& widget ) const
+    {
+        if( widget.runtime !=
+            runtime_ ||
+            widget.tree !=
+            firstTree ||
+            widget.epoch !=
+            grab::TreeEpoch{ firstEpoch } ||
+            widget.generation != grab::NodeGeneration{ 1U } )
+        {
+            return grab::fail( grab::ErrorCode::NoMatch,
+                               "widget does not belong to the X11 tree" );
+        }
+
+        const std::scoped_lock lock{ mutex_ };
+        for( const auto& [xid, binding] : bindings_ )
+        {
+            if( binding.node.value == widget.node )
+            {
+                return static_cast<xcb_window_t>( xid );
+            }
+        }
+        return grab::fail( grab::ErrorCode::NoMatch,
+                           "X11 widget is no longer available" );
+    }
+
     grab::Result<X11TreeSource::WindowBinding>
     X11TreeSource::observe_window( const grab::screen::WindowInfo& window,
                                    const grab::SpaceRect&          bounds )

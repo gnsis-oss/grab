@@ -286,6 +286,51 @@ TEST( X11TreeSource,
                grab::kernel::AliasValidity::Active );
 }
 
+TEST( X11TreeSource,
+      ResolveXidRejectsMismatchedAndStaleWidgetRefs )
+{
+    std::vector<grab::screen::WindowInfo> windows{
+        window_info( firstXid, firstTitle, firstClass, firstPid, firstBounds ),
+    };
+    grab::drivers::desktop::x11::X11TreeSource source{
+        runtimeId,
+        displayGeneration,
+        [&windows]() -> grab::Result<std::vector<grab::screen::WindowInfo>>
+        {
+            return windows;
+        },
+    };
+
+    const auto snapshot = source.snapshot( firstTree, operation_context() );
+    ASSERT_TRUE( snapshot.has_value() ) << snapshot.error().message;
+    ASSERT_EQ( snapshot->nodes().size(), 1U );
+    const auto&           node = snapshot->nodes().front();
+    const grab::WidgetRef widget{
+        .runtime    = snapshot->runtime,
+        .tree       = snapshot->tree,
+        .epoch      = snapshot->epoch,
+        .node       = node.id.value,
+        .generation = node.generation,
+    };
+
+    const auto xid = source.resolve_xid( widget );
+    ASSERT_TRUE( xid.has_value() ) << xid.error().message;
+    EXPECT_EQ( *xid, firstXid );
+
+    auto mismatched            = widget;
+    mismatched.runtime         = grab::RuntimeId{ runtimeId.value + 1U };
+    const auto mismatch_result = source.resolve_xid( mismatched );
+    ASSERT_FALSE( mismatch_result.has_value() );
+    EXPECT_EQ( mismatch_result.error().code, grab::ErrorCode::NoMatch );
+
+    windows.clear();
+    const auto retired = source.snapshot( firstTree, operation_context() );
+    ASSERT_TRUE( retired.has_value() ) << retired.error().message;
+    const auto stale = source.resolve_xid( widget );
+    ASSERT_FALSE( stale.has_value() );
+    EXPECT_EQ( stale.error().code, grab::ErrorCode::NoMatch );
+}
+
 // GoogleTest assertion macros inflate the reported cognitive complexity.
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 TEST( X11TreeSource,

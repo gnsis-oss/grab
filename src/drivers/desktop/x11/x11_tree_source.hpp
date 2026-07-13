@@ -50,6 +50,10 @@ namespace grab::drivers::desktop::x11
             const grab::kernel::TargetRegistry&
             target_registry() const noexcept;
 
+            [[nodiscard]]
+            grab::Result<xcb_window_t>
+            resolve_xid( const grab::WidgetRef& widget ) const;
+
         private:
 
             struct WindowBinding

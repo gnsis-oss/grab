@@ -1,15 +1,19 @@
+#include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_runtime.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
 #include "grab/context.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
+#include "input/seat.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "platform/x11/xcb_connection.hpp"
+#include "platform/x11/xkb_keymap.hpp"
 #include "spi/event_source.hpp"
 #include "spi/route.hpp"
 #include "spi/topology_source.hpp"
 #include "spi/tree_source.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -56,23 +60,48 @@ namespace grab::drivers::desktop::x11
             return std::unexpected( opened_connection.error() );
         }
 
-        connection_ = std::move( *opened_connection );
-        if( has_started_ )
+        connection_      = std::move( *opened_connection );
+
+        auto opened_seat = grab::input::Seat::open();
+        if( !opened_seat.has_value() )
         {
-            ++generation_;
+            connection_ = grab::platform::x11::XcbConnection{};
+            return std::unexpected( std::move( opened_seat.error() ) );
         }
-        has_started_ = true;
+
+        auto keymap = grab::platform::x11::make_keymap_from_connection( connection_ );
+        if( !keymap.has_value() )
+        {
+            connection_ = grab::platform::x11::XcbConnection{};
+            return std::unexpected( std::move( keymap.error() ) );
+        }
+
+        const auto next_generation = has_started_ ? generation_ + 1U : generation_;
         tree_source_ =
-            std::make_unique<X11TreeSource>( grab::RuntimeId{ generation_ },
-                                             grab::DisplayGeneration{ generation_ },
+            std::make_unique<X11TreeSource>( grab::RuntimeId{ next_generation },
+                                             grab::DisplayGeneration{ next_generation },
                                              connection_.get(),
                                              connection_.root() );
+        input_seat_     = std::make_unique<X11InputSeat>( std::move( *opened_seat ) );
+        pointer_route_  = std::make_unique<X11PointerRoute>( *tree_source_,
+                                                             connection_.get(),
+                                                             connection_.root(),
+                                                             *input_seat_ );
+        keyboard_route_ = std::make_unique<X11KeyboardRoute>( *tree_source_,
+                                                              connection_.get(),
+                                                              *input_seat_,
+                                                              std::move( *keymap ) );
+        generation_     = next_generation;
+        has_started_    = true;
         return {};
     }
 
     grab::Result<void>
     X11Runtime::stop()
     {
+        keyboard_route_.reset();
+        pointer_route_.reset();
+        input_seat_.reset();
         tree_source_.reset();
         connection_ = grab::platform::x11::XcbConnection{};
         return {};
@@ -109,7 +138,27 @@ namespace grab::drivers::desktop::x11
     std::span<const grab::spi::RouteDescriptor>
     X11Runtime::routes() const
     {
-        return {};
+        return x11_route_descriptors();
+    }
+
+    grab::spi::ActionRoute*
+    X11Runtime::action_route( std::size_t index )
+    {
+        if( index == 0U )
+        {
+            return pointer_route_.get();
+        }
+        if( index == 1U )
+        {
+            return keyboard_route_.get();
+        }
+        return nullptr;
+    }
+
+    grab::spi::InputSeat*
+    X11Runtime::input_seat()
+    {
+        return input_seat_.get();
     }
 
 }    // namespace grab::drivers::desktop::x11

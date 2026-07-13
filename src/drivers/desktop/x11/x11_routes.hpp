@@ -1,0 +1,133 @@
+#pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
+
+#include "grab/keymap.hpp"
+#include "input/seat.hpp"
+#include "spi/route.hpp"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
+#include <span>
+#include <xcb/xcb.h>
+
+namespace grab::drivers::desktop::x11
+{
+
+    class X11TreeSource;
+
+    class X11InputSeat final : public grab::spi::InputSeat
+    {
+        public:
+
+            explicit X11InputSeat( grab::input::Seat seat ) noexcept;
+
+            [[nodiscard]]
+            grab::Result<void>
+            move_pointer_absolute( std::int16_t x,
+                                   std::int16_t y );
+
+            [[nodiscard]]
+            grab::Result<void>
+            button( std::uint8_t button,
+                    bool         press );
+
+            [[nodiscard]]
+            grab::Result<void>
+            key( std::uint8_t keycode,
+                 bool         press );
+
+            [[nodiscard]]
+            grab::Result<void>
+            flush();
+
+            [[nodiscard]]
+            grab::Result<grab::NeutralizationOutcome>
+            neutralize( const grab::OperationContext& context ) override;
+
+        private:
+
+            grab::input::Seat      seat_;
+            std::array<bool, 256U> held_buttons_{};
+            std::array<bool, 256U> held_keys_{};
+            std::mutex             mutex_;
+    };
+
+    class X11PointerRoute final : public grab::spi::ActionRoute
+    {
+        public:
+
+            X11PointerRoute( X11TreeSource&    source,
+                             xcb_connection_t* connection,
+                             xcb_window_t      root,
+                             X11InputSeat&     seat ) noexcept;
+
+            [[nodiscard]]
+            grab::Result<std::unique_ptr<grab::spi::RouteReservation>>
+            reserve( const grab::spi::ActionRequest& action,
+                     const grab::OperationContext&   context ) override;
+
+        private:
+
+            X11TreeSource*    source_{};
+            xcb_connection_t* connection_{};
+            xcb_window_t      root_{};
+            X11InputSeat*     seat_{};
+    };
+
+    class X11KeyboardRoute final : public grab::spi::ActionRoute
+    {
+        public:
+
+            X11KeyboardRoute( X11TreeSource&    source,
+                              xcb_connection_t* connection,
+                              X11InputSeat&     seat,
+                              grab::Keymap      keymap ) noexcept;
+
+            [[nodiscard]]
+            grab::Result<std::unique_ptr<grab::spi::RouteReservation>>
+            reserve( const grab::spi::ActionRequest& action,
+                     const grab::OperationContext&   context ) override;
+
+        private:
+
+            X11TreeSource*    source_{};
+            xcb_connection_t* connection_{};
+            X11InputSeat*     seat_{};
+            grab::Keymap      keymap_;
+    };
+
+    [[nodiscard]]
+    inline std::span<const grab::spi::RouteDescriptor>
+    x11_route_descriptors() noexcept
+    {
+        static constexpr std::array pointer_constraints{
+            grab::spi::RouteConstraint{ "display", "X11 XTEST extension" },
+        };
+        static constexpr std::array keyboard_constraints{
+            grab::spi::RouteConstraint{ "display", "X11 XTEST and XKB" },
+        };
+        static constexpr std::array capture_constraints{
+            grab::spi::RouteConstraint{ "display", "mapped X11 window" },
+        };
+        static constexpr std::array descriptors{
+            grab::spi::RouteDescriptor{
+                                       "x11.pointer", grab::spi::RouteKind::Physical,
+                                       grab::spi::RouteFidelity::Exact,
+                                       grab::spi::RouteLatencyClass::Immediate,
+                                       pointer_constraints, },
+            grab::spi::RouteDescriptor{
+                                       "x11.keyboard", grab::spi::RouteKind::Physical,
+                                       grab::spi::RouteFidelity::Lossless,
+                                       grab::spi::RouteLatencyClass::Immediate,
+                                       keyboard_constraints, },
+            grab::spi::RouteDescriptor{
+                                       "x11.capture", grab::spi::RouteKind::Physical,
+                                       grab::spi::RouteFidelity::Exact,
+                                       grab::spi::RouteLatencyClass::Interactive,
+                                       capture_constraints, },
+        };
+        return descriptors;
+    }
+
+}    // namespace grab::drivers::desktop::x11

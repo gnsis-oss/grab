@@ -3,6 +3,7 @@
 #include "platform/x11/xcb_connection.hpp"
 #include "spi/runtime.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -19,6 +20,9 @@ namespace grab::drivers::desktop::x11
 {
 
     class X11TreeSource;
+    class X11InputSeat;
+    class X11KeyboardRoute;
+    class X11PointerRoute;
 
     class X11Runtime final : public grab::spi::Runtime
     {
@@ -63,12 +67,23 @@ namespace grab::drivers::desktop::x11
             std::span<const grab::spi::RouteDescriptor>
             routes() const override;
 
+            [[nodiscard]]
+            grab::spi::ActionRoute*
+            action_route( std::size_t index ) override;
+
+            [[nodiscard]]
+            grab::spi::InputSeat*
+            input_seat() override;
+
         private:
 
             static constexpr std::uint32_t     initialGeneration = 1U;
 
             grab::platform::x11::XcbConnection connection_;
             std::unique_ptr<X11TreeSource>     tree_source_;
+            std::unique_ptr<X11InputSeat>      input_seat_;
+            std::unique_ptr<X11PointerRoute>   pointer_route_;
+            std::unique_ptr<X11KeyboardRoute>  keyboard_route_;
             std::uint32_t                      generation_{ initialGeneration };
             bool                               has_started_{};
     };
