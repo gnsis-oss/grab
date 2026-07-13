@@ -173,6 +173,19 @@ target_include_directories(grab_platform_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/in
 target_include_directories(grab_platform_x11 PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 
+add_library(grab_driver_x11 STATIC
+    src/drivers/desktop/x11/x11_runtime.cpp
+)
+target_link_libraries(grab_driver_x11
+    PUBLIC
+        grab_kernel
+        grab_platform_x11
+    PRIVATE
+        grab_vendor_l0
+)
+target_include_directories(grab_driver_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_driver_x11 PUBLIC cxx_std_23)
+
 add_library(grab_input_x11 STATIC
     src/platform/x11/xkb_keymap.cpp
 )

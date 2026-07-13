@@ -85,6 +85,18 @@ target_include_directories(grab_kernel_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/tests)
 gtest_discover_tests(grab_kernel_tests)
 
+add_executable(grab_driver_x11_tests
+    drivers/x11/test_x11_runtime.cpp
+)
+target_link_libraries(grab_driver_x11_tests PRIVATE
+    grab_driver_x11
+    GTest::gtest_main
+)
+target_include_directories(grab_driver_x11_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_driver_x11_tests DISCOVERY_MODE PRE_TEST)
+
 # A7: self-provision the Xvfb displays the X-backed suites use so `ctest` is
 # self-contained (no manually-started display). Opt-out with -DGRAB_TEST_PROVISION_XVFB=OFF.
 option(GRAB_TEST_PROVISION_XVFB
