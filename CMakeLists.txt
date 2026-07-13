@@ -66,6 +66,8 @@ target_compile_definitions(grab_core PUBLIC
     GRAB_VERSION_PATCH=${grab_VERSION_PATCH})
 
 add_library(grab_kernel STATIC
+    src/kernel/action/transaction.cpp
+    src/kernel/action/wait_engine.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp
     src/kernel/query/evaluator.cpp

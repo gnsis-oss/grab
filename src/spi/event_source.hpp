@@ -1,7 +1,9 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "grab/context.hpp"
 #include "grab/result.hpp"
 
+#include <chrono>
 #include <string>
 
 namespace grab::spi
@@ -35,6 +37,14 @@ namespace grab::spi
             [[nodiscard]]
             virtual Result<void>
             disable( const EventSpec& spec ) = 0;
+
+            // Blocks until a relevant event arrives or maximum_wait elapses.
+            // Implementations must also honor the context deadline/cancellation.
+            [[nodiscard]]
+            virtual Result<void>
+            wait_for_event( const EventSpec&         spec,
+                            const OperationContext&  context,
+                            std::chrono::nanoseconds maximum_wait ) = 0;
     };
 
 }    // namespace grab::spi

@@ -4,6 +4,7 @@
 #include "grab/result.hpp"
 #include "spi/route.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -77,6 +78,20 @@ namespace grab::spi
             [[nodiscard]]
             virtual std::span<const RouteDescriptor>
             routes() const = 0;
+
+            [[nodiscard]]
+            virtual ActionRoute*
+            action_route( [[maybe_unused]] std::size_t index )
+            {
+                return nullptr;
+            }
+
+            [[nodiscard]]
+            virtual InputSeat*
+            input_seat()
+            {
+                return nullptr;
+            }
     };
 
 }    // namespace grab::spi

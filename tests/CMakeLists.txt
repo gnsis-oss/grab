@@ -71,6 +71,8 @@ target_compile_definitions(grab_core_tests PRIVATE GRAB_CODEC_CORPUS_DIR="${CMAK
 include(GoogleTest)
 
 add_executable(grab_kernel_tests
+    kernel/action/test_transaction.cpp
+    kernel/action/test_wait_engine.cpp
     kernel/test_ui.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp

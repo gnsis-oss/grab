@@ -1,15 +1,20 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "grab/enum_table.hpp"
+#include "grab/ids.hpp"
+#include "grab/space.hpp"
 
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace grab
 {
+
+    enum class ErrorCode : std::uint16_t;
 
     enum class RetryClass : std::uint8_t
     {
@@ -34,11 +39,55 @@ namespace grab
         Verified,
     };
 
+    enum class NeutralizationOutcome : std::uint8_t
+    {
+        NotAttempted,
+        NothingHeld,
+        Released,
+        Failed,
+    };
+
     struct DiagnosticEntry
     {
             std::chrono::steady_clock::time_point
                         at{};    // NOLINT(readability-redundant-member-init)
             std::string message;
+    };
+
+    struct RouteAttempt
+    {
+            std::string route;
+            bool        selected{};
+            // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
+            ErrorCode   rejection{};
+            std::string detail;
+    };
+
+    struct BarrierOutcome
+    {
+            std::string barrier;
+            bool        satisfied{};
+            bool        timed_out{};
+    };
+
+    struct Receipt
+    {
+            OperationId                  operation{};
+            std::string                  locator;
+            std::uint64_t                snapshot_revision{};
+            CommitStatus                 commit{ CommitStatus::FailedBeforeCommit };
+            std::vector<RouteAttempt>    routes;
+            std::vector<BarrierOutcome>  barriers;
+            std::vector<TransformRecord> transforms;
+            std::vector<FrameRef>        frames;
+            bool                         forced{};
+            bool                         fallback_used{};
+            NeutralizationOutcome        neutralization{
+                NeutralizationOutcome::NotAttempted,
+            };
+            RetryClass                   retry_class{ RetryClass::Never };
+            std::uint32_t                resolve_retries{};
+            std::vector<DiagnosticEntry> log;
     };
 
     namespace detail
