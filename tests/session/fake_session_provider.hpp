@@ -4,7 +4,7 @@
 #include "grab/capability.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/provider.hpp"
 
 #include <array>
@@ -41,14 +41,14 @@ namespace grab::test
             [[nodiscard]]
             grab::Availability
             probe( const grab::core::Environment& /*env*/,
-                   grab::SessionMode mode ) const override
+                   grab::WorkspaceMode mode ) const override
             {
                 return mode_availability.at( mode_index( mode ) );
             }
 
             [[nodiscard]]
             grab::Result<grab::session::SessionRuntime>
-            create( const grab::SessionDesc& desc ) const override
+            create( const grab::WorkspaceDesc& desc ) const override
             {
                 ++create_call_count;
                 if( create_failure.has_value() )
@@ -87,8 +87,8 @@ namespace grab::test
             }
 
             void
-            set_availability( grab::SessionMode  mode,
-                              grab::Availability new_availability )
+            set_availability( grab::WorkspaceMode mode,
+                              grab::Availability  new_availability )
             {
                 mode_availability.at( mode_index( mode ) ) =
                     std::move( new_availability );
@@ -114,11 +114,11 @@ namespace grab::test
             static constexpr grab::Pid   no_supervisor_pid{};
             static constexpr const char* endpoint_prefix = ":fake-";
             static constexpr std::size_t mode_count =
-                static_cast<std::size_t>( grab::SessionMode::Count );
+                static_cast<std::size_t>( grab::WorkspaceMode::Count );
 
             [[nodiscard]]
             static constexpr std::size_t
-            mode_index( grab::SessionMode mode ) noexcept
+            mode_index( grab::WorkspaceMode mode ) noexcept
             {
                 return static_cast<std::size_t>( mode );
             }

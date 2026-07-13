@@ -1,6 +1,6 @@
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/record.hpp"
 
 // clang-format off
@@ -31,7 +31,7 @@ namespace
     grab::session::SessionRecord
     sample_record()
     {
-        constexpr grab::SessionGeometry geometry{
+        constexpr grab::WorkspaceGeometry geometry{
             .width  = width,
             .height = height,
         };
@@ -41,9 +41,9 @@ namespace
             .provider          = "fake",
             .endpoint          = ":wl-7",
             .control_socket    = "/run/grab/ai.sock",
-            .mode              = grab::SessionMode::Offscreen,
+            .mode              = grab::WorkspaceMode::Offscreen,
             .geometry          = geometry,
-            .state             = grab::SessionState::Ready,
+            .state             = grab::WorkspaceState::Ready,
             .supervisor_pid    = grab::Pid{ pid },
             .created_monotonic = created,
         };

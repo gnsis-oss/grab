@@ -1,7 +1,7 @@
 #include "core/environment.hpp"
 #include "grab/capability.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/provider.hpp"
 #include "session/selection.hpp"
 
@@ -74,7 +74,7 @@ namespace grab::session
 
         [[nodiscard]]
         std::string
-        no_provider_message( SessionMode                mode,
+        no_provider_message( WorkspaceMode              mode,
                              std::span<const Candidate> candidates )
         {
             std::string message  = "no session provider for mode ";
@@ -100,7 +100,7 @@ namespace grab::session
         std::vector<Candidate>
         probe_providers( std::span<const SessionProvider* const> providers,
                          const core::Environment&                env,
-                         SessionMode                             mode )
+                         WorkspaceMode                           mode )
         {
             std::vector<Candidate> candidates;
             candidates.reserve( providers.size() );
@@ -139,7 +139,7 @@ namespace grab::session
     grab::Result<const SessionProvider*>
     select_session_provider( std::span<const SessionProvider* const> providers,
                              const grab::core::Environment&          env,
-                             grab::SessionMode                       mode )
+                             grab::WorkspaceMode                     mode )
     {
         const std::vector<Candidate> candidates =
             probe_providers( providers, env, mode );
@@ -162,15 +162,16 @@ namespace grab::session
     session_availability_report( std::span<const SessionProvider* const> providers,
                                  const grab::core::Environment&          env )
     {
-        constexpr auto modes = std::to_array<SessionMode>( {
-            SessionMode::Shared,
-            SessionMode::Offscreen,
+        constexpr auto modes = std::to_array<WorkspaceMode>( {
+            WorkspaceMode::Shared,
+            WorkspaceMode::Offscreen,
         } );
-        static_assert( modes.size() == static_cast<std::size_t>( SessionMode::Count ) );
+        static_assert( modes.size() ==
+                       static_cast<std::size_t>( WorkspaceMode::Count ) );
 
         std::vector<SessionModeReport> report;
         report.reserve( modes.size() );
-        for( const SessionMode mode : modes )
+        for( const WorkspaceMode mode : modes )
         {
             const std::vector<Candidate> candidates =
                 probe_providers( providers, env, mode );

@@ -2,7 +2,7 @@
 
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 
 #include <cstdint>
 #include <string>
@@ -13,15 +13,15 @@ namespace grab::session
 
     struct SessionRecord
     {
-            std::string     name;
-            std::string     provider;
-            std::string     endpoint;    // display / wayland socket
-            std::string     control_socket;
-            SessionMode     mode = SessionMode::Offscreen;
-            SessionGeometry geometry;
-            SessionState    state = SessionState::Starting;
-            grab::Pid       supervisor_pid;
-            std::uint64_t   created_monotonic = 0U;
+            std::string       name;
+            std::string       provider;
+            std::string       endpoint;    // display / wayland socket
+            std::string       control_socket;
+            WorkspaceMode     mode = WorkspaceMode::Offscreen;
+            WorkspaceGeometry geometry;
+            WorkspaceState    state = WorkspaceState::Starting;
+            grab::Pid         supervisor_pid;
+            std::uint64_t     created_monotonic = 0U;
     };
 
     [[nodiscard]]

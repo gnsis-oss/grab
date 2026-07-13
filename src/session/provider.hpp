@@ -4,7 +4,7 @@
 #include "core/provider.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 
 #include <string>
 
@@ -38,11 +38,11 @@ namespace grab::session
             [[nodiscard]]
             virtual grab::Availability
             probe( const grab::core::Environment& env,
-                   grab::SessionMode              mode ) const = 0;
+                   grab::WorkspaceMode            mode ) const = 0;
 
             [[nodiscard]]
             virtual grab::Result<SessionRuntime>
-            create( const SessionDesc& desc ) const = 0;
+            create( const WorkspaceDesc& desc ) const = 0;
 
             [[nodiscard]]
             virtual grab::Result<void>

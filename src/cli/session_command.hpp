@@ -1,7 +1,7 @@
 #pragma once
 
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 
 #include <span>
 #include <string_view>
@@ -10,7 +10,7 @@ namespace grab::cli
 {
 
     [[nodiscard]]
-    grab::Result<grab::SessionDesc>
+    grab::Result<grab::WorkspaceDesc>
     parse_session_start_args( std::span<const std::string_view> args );
 
     [[nodiscard]]

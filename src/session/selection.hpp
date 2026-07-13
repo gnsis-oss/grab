@@ -3,7 +3,7 @@
 #include "core/environment.hpp"
 #include "grab/capability.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/provider.hpp"
 
 #include <span>
@@ -17,11 +17,11 @@ namespace grab::session
     grab::Result<const SessionProvider*>
     select_session_provider( std::span<const SessionProvider* const> providers,
                              const grab::core::Environment&          env,
-                             grab::SessionMode                       mode );
+                             grab::WorkspaceMode                     mode );
 
     struct SessionModeReport
     {
-            grab::SessionMode       mode = grab::SessionMode::Offscreen;
+            grab::WorkspaceMode     mode = grab::WorkspaceMode::Offscreen;
             std::string             provider;
             grab::AvailabilityState state = grab::AvailabilityState::Unavailable;
             std::string             reason;

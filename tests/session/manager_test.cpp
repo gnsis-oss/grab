@@ -1,5 +1,5 @@
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/fake_session_provider.hpp"
 #include "session/manager.hpp"
 #include "session/registry.hpp"
@@ -14,16 +14,16 @@
 namespace
 {
 
-    constexpr auto                  root_prefix            = "grab-mgr-";
-    constexpr auto                  session_name           = "ai";
-    constexpr auto                  ghost_name             = "ghost";
-    constexpr auto                  provider_failure       = "boom";
-    constexpr auto                  start_root_name        = "start";
-    constexpr auto                  rollback_root_name     = "rollback";
-    constexpr auto                  stop_root_name         = "stop";
-    constexpr auto                  unknown_root_name      = "unknown";
-    constexpr auto                  expected_destroy_calls = 1U;
-    constexpr grab::SessionGeometry default_geometry{};
+    constexpr auto                    root_prefix            = "grab-mgr-";
+    constexpr auto                    session_name           = "ai";
+    constexpr auto                    ghost_name             = "ghost";
+    constexpr auto                    provider_failure       = "boom";
+    constexpr auto                    start_root_name        = "start";
+    constexpr auto                    rollback_root_name     = "rollback";
+    constexpr auto                    stop_root_name         = "stop";
+    constexpr auto                    unknown_root_name      = "unknown";
+    constexpr auto                    expected_destroy_calls = 1U;
+    constexpr grab::WorkspaceGeometry default_geometry{};
 
     [[nodiscard]]
     std::filesystem::path
@@ -36,12 +36,12 @@ namespace
     }
 
     [[nodiscard]]
-    grab::SessionDesc
+    grab::WorkspaceDesc
     desc()
     {
-        return grab::SessionDesc{
+        return grab::WorkspaceDesc{
             .name        = session_name,
-            .mode        = grab::SessionMode::Offscreen,
+            .mode        = grab::WorkspaceMode::Offscreen,
             .geometry    = default_geometry,
             .app_command = {},
         };
@@ -58,7 +58,7 @@ TEST( SessionManager,
 
     const auto                            record = manager.start( desc() );
     ASSERT_TRUE( record.has_value() ) << record.error().message;
-    EXPECT_EQ( record->state, grab::SessionState::Ready );
+    EXPECT_EQ( record->state, grab::WorkspaceState::Ready );
     EXPECT_FALSE( record->endpoint.empty() );
 }
 

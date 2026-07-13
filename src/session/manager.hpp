@@ -1,7 +1,7 @@
 #pragma once
 
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/provider.hpp"
 #include "session/record.hpp"
 #include "session/registry.hpp"
@@ -21,7 +21,7 @@ namespace grab::session
 
             [[nodiscard]]
             grab::Result<SessionRecord>
-            start( const SessionDesc& desc );
+            start( const WorkspaceDesc& desc );
 
             [[nodiscard]]
             grab::Result<void>

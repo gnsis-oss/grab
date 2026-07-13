@@ -3,7 +3,7 @@
 #include "grab/capability.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "platform/x11/xi_seat.hpp"
 #include "session/provider.hpp"
@@ -54,7 +54,7 @@ namespace grab::session
 
     grab::Availability
     X11SeatSessionProvider::probe( const grab::core::Environment& env,
-                                   grab::SessionMode              mode ) const
+                                   grab::WorkspaceMode            mode ) const
     {
         if( env.session != grab::core::SessionType::X11 )
         {
@@ -64,7 +64,7 @@ namespace grab::session
                 .quality = 0,
             };
         }
-        if( mode == grab::SessionMode::Offscreen )
+        if( mode == grab::WorkspaceMode::Offscreen )
         {
             return grab::Availability{
                 .state   = grab::AvailabilityState::Unavailable,
@@ -81,7 +81,7 @@ namespace grab::session
     }
 
     grab::Result<SessionRuntime>
-    X11SeatSessionProvider::create( const SessionDesc& desc ) const
+    X11SeatSessionProvider::create( const WorkspaceDesc& desc ) const
     {
         auto connection = grab::platform::x11::XcbConnection::open( "" );
         if( !connection.has_value() )

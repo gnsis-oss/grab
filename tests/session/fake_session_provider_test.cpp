@@ -1,5 +1,5 @@
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/fake_session_provider.hpp"
 
 // clang-format off
@@ -9,18 +9,18 @@
 namespace
 {
 
-    constexpr auto                  session_name          = "ai";
-    constexpr auto                  failure_message       = "boom";
-    constexpr auto                  expected_create_calls = 1U;
-    constexpr grab::SessionGeometry default_geometry{};
+    constexpr auto                    session_name          = "ai";
+    constexpr auto                    failure_message       = "boom";
+    constexpr auto                    expected_create_calls = 1U;
+    constexpr grab::WorkspaceGeometry default_geometry{};
 
     [[nodiscard]]
-    grab::SessionDesc
+    grab::WorkspaceDesc
     desc()
     {
-        return grab::SessionDesc{
+        return grab::WorkspaceDesc{
             .name        = session_name,
-            .mode        = grab::SessionMode::Offscreen,
+            .mode        = grab::WorkspaceMode::Offscreen,
             .geometry    = default_geometry,
             .app_command = {},
         };

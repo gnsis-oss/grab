@@ -95,6 +95,7 @@ add_executable(grab_session_tests
     session/record_test.cpp
     session/selection_test.cpp
     session/state_machine_test.cpp
+    session/test_workspace_alias.cpp
     session/types_test.cpp
 )
 target_link_libraries(grab_session_tests PRIVATE grab_session GTest::gtest_main)

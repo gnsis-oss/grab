@@ -1,4 +1,4 @@
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/state_machine.hpp"
 
 // clang-format off
@@ -8,7 +8,7 @@
 namespace
 {
 
-    using grab::SessionState;
+    using grab::WorkspaceState;
     using grab::session::is_valid_transition;
 
 }    // namespace
@@ -16,23 +16,30 @@ namespace
 TEST( SessionStateMachine,
       AllowsForwardProgress )
 {
-    EXPECT_TRUE( is_valid_transition( SessionState::Starting, SessionState::Ready ) );
-    EXPECT_TRUE( is_valid_transition( SessionState::Ready, SessionState::Draining ) );
-    EXPECT_TRUE( is_valid_transition( SessionState::Draining, SessionState::Stopped ) );
+    EXPECT_TRUE( is_valid_transition( WorkspaceState::Starting,
+                                      WorkspaceState::Ready ) );
+    EXPECT_TRUE( is_valid_transition( WorkspaceState::Ready,
+                                      WorkspaceState::Draining ) );
+    EXPECT_TRUE( is_valid_transition( WorkspaceState::Draining,
+                                      WorkspaceState::Stopped ) );
 }
 
 TEST( SessionStateMachine,
       AllowsFailureFromAnyLiveState )
 {
-    EXPECT_TRUE( is_valid_transition( SessionState::Starting, SessionState::Failed ) );
-    EXPECT_TRUE( is_valid_transition( SessionState::Ready, SessionState::Failed ) );
-    EXPECT_TRUE( is_valid_transition( SessionState::Draining, SessionState::Failed ) );
+    EXPECT_TRUE( is_valid_transition( WorkspaceState::Starting,
+                                      WorkspaceState::Failed ) );
+    EXPECT_TRUE( is_valid_transition( WorkspaceState::Ready, WorkspaceState::Failed ) );
+    EXPECT_TRUE( is_valid_transition( WorkspaceState::Draining,
+                                      WorkspaceState::Failed ) );
 }
 
 TEST( SessionStateMachine,
       RejectsIllegalTransitions )
 {
-    EXPECT_FALSE( is_valid_transition( SessionState::Stopped, SessionState::Ready ) );
-    EXPECT_FALSE( is_valid_transition( SessionState::Ready, SessionState::Starting ) );
-    EXPECT_FALSE( is_valid_transition( SessionState::Ready, SessionState::Ready ) );
+    EXPECT_FALSE( is_valid_transition( WorkspaceState::Stopped,
+                                       WorkspaceState::Ready ) );
+    EXPECT_FALSE( is_valid_transition( WorkspaceState::Ready,
+                                       WorkspaceState::Starting ) );
+    EXPECT_FALSE( is_valid_transition( WorkspaceState::Ready, WorkspaceState::Ready ) );
 }

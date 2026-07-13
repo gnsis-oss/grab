@@ -1,6 +1,6 @@
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/record.hpp"
 
 #include <cstdint>
@@ -223,7 +223,7 @@ namespace grab::session
             return fail_record_field( createdMonotonicField );
         }
 
-        const SessionGeometry geometry{
+        const WorkspaceGeometry geometry{
             .width  = static_cast<std::uint16_t>( *width ),
             .height = static_cast<std::uint16_t>( *height ),
         };

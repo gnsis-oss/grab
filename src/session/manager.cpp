@@ -1,7 +1,7 @@
 #include "core/log.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/manager.hpp"
 #include "session/provider.hpp"
 #include "session/record.hpp"
@@ -20,7 +20,7 @@ namespace grab::session
 
         [[nodiscard]]
         SessionRecord
-        starting_record( const SessionDesc&     desc,
+        starting_record( const WorkspaceDesc&   desc,
                          const SessionProvider& provider )
         {
             return SessionRecord{
@@ -30,7 +30,7 @@ namespace grab::session
                 .control_socket    = {},
                 .mode              = desc.mode,
                 .geometry          = desc.geometry,
-                .state             = SessionState::Starting,
+                .state             = WorkspaceState::Starting,
                 .supervisor_pid    = grab::Pid{},
                 .created_monotonic = 0U,
             };
@@ -49,7 +49,7 @@ namespace grab::session
 
         void
         log_transition( std::string_view name,
-                        SessionState     state )
+                        WorkspaceState   state )
         {
             grab::log::nominal(
                 [&]( grab::log::Event& event )
@@ -96,8 +96,8 @@ namespace grab::session
 
         [[nodiscard]]
         grab::Result<void>
-        ensure_transition( SessionState from,
-                           SessionState to )
+        ensure_transition( WorkspaceState from,
+                           WorkspaceState to )
         {
             if( is_valid_transition( from, to ) )
             {
@@ -120,7 +120,7 @@ namespace grab::session
     }
 
     grab::Result<SessionRecord>
-    SessionManager::start( const SessionDesc& desc )
+    SessionManager::start( const WorkspaceDesc& desc )
     {
         auto record = starting_record( desc, provider );
         log_transition( record.name, record.state );
@@ -139,7 +139,7 @@ namespace grab::session
             return std::unexpected( runtime.error() );
         }
 
-        auto transition = ensure_transition( record.state, SessionState::Ready );
+        auto transition = ensure_transition( record.state, WorkspaceState::Ready );
         if( !transition.has_value() )
         {
             remove_after_failed_start( registry, record.name );
@@ -149,7 +149,7 @@ namespace grab::session
         record.endpoint       = runtime->endpoint;
         record.control_socket = runtime->control_socket;
         record.supervisor_pid = runtime->supervisor_pid;
-        record.state          = SessionState::Ready;
+        record.state          = WorkspaceState::Ready;
         log_transition( record.name, record.state );
 
         const auto written = registry.write( record );
@@ -171,13 +171,13 @@ namespace grab::session
             return std::unexpected( record.error() );
         }
 
-        auto transition = ensure_transition( record->state, SessionState::Draining );
+        auto transition = ensure_transition( record->state, WorkspaceState::Draining );
         if( !transition.has_value() )
         {
             return std::unexpected( transition.error() );
         }
 
-        record->state = SessionState::Draining;
+        record->state = WorkspaceState::Draining;
         log_transition( record->name, record->state );
         const auto written = registry.write( *record );
         if( !written.has_value() )
@@ -192,13 +192,13 @@ namespace grab::session
             return std::unexpected( destroyed.error() );
         }
 
-        transition = ensure_transition( record->state, SessionState::Stopped );
+        transition = ensure_transition( record->state, WorkspaceState::Stopped );
         if( !transition.has_value() )
         {
             return std::unexpected( transition.error() );
         }
 
-        log_transition( record->name, SessionState::Stopped );
+        log_transition( record->name, WorkspaceState::Stopped );
         return registry.remove( record->name );
     }
 

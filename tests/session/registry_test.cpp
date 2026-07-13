@@ -1,5 +1,5 @@
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/record.hpp"
 #include "session/registry.hpp"
 
@@ -20,7 +20,7 @@ namespace
         grab::session::SessionRecord r;
         r.name     = std::move( name );
         r.provider = "fake";
-        r.state    = grab::SessionState::Starting;
+        r.state    = grab::WorkspaceState::Starting;
         return r;
     }
 

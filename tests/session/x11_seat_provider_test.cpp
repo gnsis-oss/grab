@@ -1,6 +1,6 @@
 #include "core/environment.hpp"
 #include "grab/capability.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/x11_seat_provider.hpp"
 
 // clang-format off
@@ -24,7 +24,7 @@ TEST( X11SeatSessionProvider,
       SharedAvailableOnX11 )
 {
     const grab::session::X11SeatSessionProvider provider;
-    const auto av = provider.probe( x11_env(), grab::SessionMode::Shared );
+    const auto av = provider.probe( x11_env(), grab::WorkspaceMode::Shared );
     EXPECT_EQ( av.state, grab::AvailabilityState::Available );
 }
 
@@ -32,7 +32,7 @@ TEST( X11SeatSessionProvider,
       OffscreenUnavailableOnX11 )
 {
     const grab::session::X11SeatSessionProvider provider;
-    const auto av = provider.probe( x11_env(), grab::SessionMode::Offscreen );
+    const auto av = provider.probe( x11_env(), grab::WorkspaceMode::Offscreen );
     EXPECT_EQ( av.state, grab::AvailabilityState::Unavailable );
     EXPECT_FALSE( av.reason.empty() );
 }
@@ -42,6 +42,6 @@ TEST( X11SeatSessionProvider,
 {
     const grab::core::Environment               non_x11;
     const grab::session::X11SeatSessionProvider provider;
-    const auto av = provider.probe( non_x11, grab::SessionMode::Shared );
+    const auto av = provider.probe( non_x11, grab::WorkspaceMode::Shared );
     EXPECT_EQ( av.state, grab::AvailabilityState::Unavailable );
 }

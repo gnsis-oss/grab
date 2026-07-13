@@ -3,7 +3,7 @@
 #include "core/environment.hpp"
 #include "core/provider.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/provider.hpp"
 
 #include <memory>
@@ -37,11 +37,11 @@ namespace grab::session
             [[nodiscard]]
             grab::Availability
             probe( const grab::core::Environment& env,
-                   grab::SessionMode              mode ) const override;
+                   grab::WorkspaceMode            mode ) const override;
 
             [[nodiscard]]
             grab::Result<SessionRuntime>
-            create( const SessionDesc& desc ) const override;
+            create( const WorkspaceDesc& desc ) const override;
 
             [[nodiscard]]
             grab::Result<void>

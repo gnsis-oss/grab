@@ -4,7 +4,7 @@
 #include "core/prober.hpp"
 #include "grab/capability.hpp"
 #include "grab/result.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/builtin_session_providers.hpp"
 #include "session/manager.hpp"
 #include "session/record.hpp"
@@ -45,7 +45,7 @@ namespace grab::cli
         }
 
         [[nodiscard]]
-        grab::Result<SessionGeometry>
+        grab::Result<WorkspaceGeometry>
         parse_session_geometry( std::string_view input )
         {
             const std::size_t dimension = input.find( detail::dimension_marker );
@@ -66,7 +66,7 @@ namespace grab::cli
                 return grab::fail( height.error().code, height.error().message );
             }
 
-            return SessionGeometry{
+            return WorkspaceGeometry{
                 .width  = *width,
                 .height = *height,
             };
@@ -285,7 +285,7 @@ namespace grab::cli
 
     }    // namespace
 
-    grab::Result<grab::SessionDesc>
+    grab::Result<grab::WorkspaceDesc>
     parse_session_start_args( std::span<const std::string_view> args )
     {
         if( args.size() <= name_position || args.front() != start_command )
@@ -300,9 +300,9 @@ namespace grab::cli
                                "session name is required" );
         }
 
-        SessionDesc desc;
+        WorkspaceDesc desc;
         desc.name    = std::string{ name };
-        desc.mode    = SessionMode::Offscreen;
+        desc.mode    = WorkspaceMode::Offscreen;
 
         auto current = std::next( args.begin(),
                                   static_cast<std::ptrdiff_t>( first_option_position ) );

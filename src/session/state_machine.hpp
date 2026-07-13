@@ -1,13 +1,13 @@
 #pragma once
 
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 
 namespace grab::session
 {
 
     [[nodiscard]]
     bool
-    is_valid_transition( SessionState from,
-                         SessionState to ) noexcept;
+    is_valid_transition( WorkspaceState from,
+                         WorkspaceState to ) noexcept;
 
 }    // namespace grab::session

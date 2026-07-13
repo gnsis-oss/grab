@@ -1,5 +1,5 @@
 #include "core/environment.hpp"
-#include "grab/session.hpp"
+#include "grab/workspace.hpp"
 #include "session/builtin_session_providers.hpp"
 #include "session/selection.hpp"
 
@@ -19,12 +19,12 @@ TEST( BuiltinSessionProviders,
     const auto offscreen =
         grab::session::select_session_provider( providers,
                                                 env,
-                                                grab::SessionMode::Offscreen );
+                                                grab::WorkspaceMode::Offscreen );
     EXPECT_FALSE( offscreen.has_value() );    // spec section 9: no X11 offscreen
 
     const auto shared =
         grab::session::select_session_provider( providers,
                                                 env,
-                                                grab::SessionMode::Shared );
+                                                grab::WorkspaceMode::Shared );
     EXPECT_TRUE( shared.has_value() );
 }
