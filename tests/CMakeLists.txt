@@ -75,6 +75,7 @@ add_executable(grab_kernel_tests
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp
     kernel/test_fake_runtime.cpp
+    query/test_query.cpp
 )
 target_link_libraries(grab_kernel_tests PRIVATE grab_kernel GTest::gtest_main)
 target_include_directories(grab_kernel_tests PRIVATE

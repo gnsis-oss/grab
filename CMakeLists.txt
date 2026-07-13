@@ -68,6 +68,9 @@ target_compile_definitions(grab_core PUBLIC
 add_library(grab_kernel STATIC
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp
+    src/kernel/query/evaluator.cpp
+    src/kernel/query/locator.cpp
+    src/kernel/query/snapshot_tree_nav.cpp
 )
 target_link_libraries(grab_kernel PUBLIC grab_core PRIVATE grab_vendor_l0)
 target_include_directories(grab_kernel PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)

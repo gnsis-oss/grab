@@ -25,6 +25,14 @@ namespace grab
                          const PropertyId& ) = default;
     };
 
+    namespace property
+    {
+
+        inline constexpr PropertyId accessible_name{ 1U };
+        inline constexpr PropertyId text{ 2U };
+
+    }    // namespace property
+
     struct NodeId
     {
             std::uint64_t value{};
