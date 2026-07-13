@@ -50,3 +50,8 @@ ctest --test-dir build
 
 Requires X11. Toolchain: C++23, Clang, CMake + Ninja. Process ownership via
 `grab::OwnedProcess` requires Linux 5.4 or newer and glibc 2.36 or newer.
+
+Architecture: the canonical node/surface model, contracts, and phased adoption
+are specified in
+[`docs/superpowers/specs/2026-07-13-canonical-architecture.md`](docs/superpowers/specs/2026-07-13-canonical-architecture.md)
+(implementation plan alongside it in `docs/superpowers/plans/`).
