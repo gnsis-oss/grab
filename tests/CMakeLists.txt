@@ -21,6 +21,7 @@ add_executable(grab_core_tests
     core/test_resolver.cpp
     core/test_result.cpp
     core/test_session.cpp
+    core/test_trace_enums.cpp
     core/test_vendor_l0.cpp
     core/test_version.cpp
     codec/test_image.cpp
