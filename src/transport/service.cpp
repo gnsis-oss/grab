@@ -215,20 +215,15 @@ namespace grab::transport
             return internal_error( "missing list response" );
         }
 
-        for( const auto& row : grab::transport::protoKindRows )
+        for( const auto& descriptor : grab::event_type_descriptors( probe_ ) )
         {
-            if( row.kind == grab::EventKind::Unspecified )
-            {
-                continue;
-            }
-
             auto* type = response->add_types();
-            type->set_kind( row.proto_kind );
+            type->set_kind( grab::transport::to_wire_kind( descriptor.kind ) );
             type->set_category(
-                grab::transport::to_wire_category( grab::category_of( row.kind ) )
+                grab::transport::to_wire_category( descriptor.category )
             );
-            type->set_name( std::string{ grab::wire_name( row.kind ) } );
-            type->set_active( probe_ != nullptr && probe_->is_active( row.kind ) );
+            type->set_name( descriptor.name );
+            type->set_active( descriptor.active );
         }
 
         return grpc::Status::OK;

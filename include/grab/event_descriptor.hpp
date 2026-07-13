@@ -1,11 +1,14 @@
 #pragma once
 
+#include "grab/active_kind_probe.hpp"
 #include "grab/enum_table.hpp"
 #include "grab/event.hpp"
 
 #include <array>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace grab
 {
@@ -31,6 +34,14 @@ namespace grab
             std::string_view wire_name;
             ReplayPolicy     replay_policy{ ReplayPolicy::None };
             CoalescingClass  coalescing_class{ CoalescingClass::Coalesce };
+    };
+
+    struct EventTypeDescriptor
+    {
+            EventKind     kind     = EventKind::Unspecified;
+            EventCategory category = EventCategory::Unspecified;
+            std::string   name;
+            bool          active = false;
     };
 
     namespace detail
@@ -259,6 +270,31 @@ namespace grab
     category_name( EventCategory category ) noexcept
     {
         return detail::categoryNames.text_of( category, unspecifiedWireName );
+    }
+
+    [[nodiscard]]
+    inline std::vector<EventTypeDescriptor>
+    event_type_descriptors( const ActiveKindProbe* probe = nullptr )
+    {
+        std::vector<EventTypeDescriptor> descriptors;
+        descriptors.reserve( detail::eventDescriptors.size() - 1U );
+
+        for( const auto& descriptor : detail::eventDescriptors )
+        {
+            if( descriptor.kind == EventKind::Unspecified )
+            {
+                continue;
+            }
+
+            descriptors.push_back( EventTypeDescriptor{
+                .kind     = descriptor.kind,
+                .category = descriptor.category,
+                .name     = std::string{ descriptor.wire_name },
+                .active   = probe != nullptr && probe->is_active( descriptor.kind ),
+            } );
+        }
+
+        return descriptors;
     }
 
 }    // namespace grab

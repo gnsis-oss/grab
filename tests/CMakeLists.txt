@@ -71,6 +71,15 @@ target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMA
 target_compile_definitions(grab_core_tests PRIVATE GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs")
 include(GoogleTest)
 
+add_executable(grab_client_tests
+    client/test_client.cpp
+)
+target_link_libraries(grab_client_tests PRIVATE grab_client GTest::gtest_main)
+target_include_directories(grab_client_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_client_tests DISCOVERY_MODE PRE_TEST)
+
 add_executable(grab_kernel_tests
     kernel/action/test_transaction.cpp
     kernel/action/test_wait_engine.cpp

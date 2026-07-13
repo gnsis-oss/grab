@@ -226,6 +226,14 @@ target_link_libraries(grab_transport PUBLIC grab_core grab_proto "${GRAB_GRPCXX_
 target_include_directories(grab_transport PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_transport PUBLIC cxx_std_23)
 
+add_library(grab_client STATIC
+    src/client/client.cpp
+    src/client/loopback_transport.cpp
+)
+target_link_libraries(grab_client PUBLIC grab_core)
+target_include_directories(grab_client PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_client PUBLIC cxx_std_23)
+
 add_library(grab_storage STATIC
     src/storage/jsonl_sink.cpp
 )
