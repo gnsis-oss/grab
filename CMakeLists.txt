@@ -45,6 +45,7 @@ add_library(grab_core STATIC
     src/core/id_factory.cpp
     src/core/posix_open.c
     src/core/permission.cpp
+    src/core/process_ref.cpp
     src/core/prober.cpp
     src/core/reactor.cpp
     src/core/registry.cpp

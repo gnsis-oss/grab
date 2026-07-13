@@ -48,4 +48,5 @@ cmake --build build -j"$(nproc)"
 ctest --test-dir build
 ```
 
-Requires X11. Toolchain: C++23, Clang, CMake + Ninja.
+Requires X11. Toolchain: C++23, Clang, CMake + Ninja. Process ownership via
+`grab::OwnedProcess` requires Linux 5.4 or newer and glibc 2.36 or newer.
