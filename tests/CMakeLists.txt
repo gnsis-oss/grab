@@ -70,6 +70,18 @@ target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMA
 target_compile_definitions(grab_core_tests PRIVATE GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs")
 include(GoogleTest)
 
+add_executable(grab_kernel_tests
+    kernel/test_ui.cpp
+    kernel/test_tree_store.cpp
+    kernel/test_target_registry.cpp
+    kernel/test_fake_runtime.cpp
+)
+target_link_libraries(grab_kernel_tests PRIVATE grab_kernel GTest::gtest_main)
+target_include_directories(grab_kernel_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_kernel_tests)
+
 # A7: self-provision the Xvfb displays the X-backed suites use so `ctest` is
 # self-contained (no manually-started display). Opt-out with -DGRAB_TEST_PROVISION_XVFB=OFF.
 option(GRAB_TEST_PROVISION_XVFB

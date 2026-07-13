@@ -65,6 +65,14 @@ target_compile_definitions(grab_core PUBLIC
     GRAB_VERSION_MINOR=${grab_VERSION_MINOR}
     GRAB_VERSION_PATCH=${grab_VERSION_PATCH})
 
+add_library(grab_kernel STATIC
+    src/kernel/graph/tree_store.cpp
+    src/kernel/graph/target_registry.cpp
+)
+target_link_libraries(grab_kernel PUBLIC grab_core PRIVATE grab_vendor_l0)
+target_include_directories(grab_kernel PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_kernel PUBLIC cxx_std_23)
+
 add_library(grab_codec STATIC
     src/codec/png.cpp
 )
