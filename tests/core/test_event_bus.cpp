@@ -1,6 +1,7 @@
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/result.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -13,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 // clang-format on
 
 namespace
@@ -21,6 +23,7 @@ namespace
     constexpr auto             keyDownKind           = grab::EventKind::KeyDown;
     constexpr auto             keyUpKind             = grab::EventKind::KeyUp;
     constexpr auto             mouseMoveKind         = grab::EventKind::MouseMove;
+    constexpr auto             stateSnapshotKind     = grab::EventKind::StateSnapshot;
     constexpr auto             inputCategory         = grab::EventCategory::Input;
     constexpr double           timestamp             = 10.5;
     constexpr std::uint64_t    unsetSequence         = 0U;
@@ -43,6 +46,9 @@ namespace
     constexpr std::string_view firstMoveAxis         = "first";
     constexpr std::string_view secondMoveAxis        = "second";
     constexpr std::string_view lastMoveAxis          = "last";
+    constexpr std::string_view firstSnapshotJson     = R"({"state":"first"})";
+    constexpr std::string_view secondSnapshotJson    = R"({"state":"second"})";
+    constexpr std::string_view liveSnapshotJson      = R"({"state":"live"})";
     constexpr auto             publishTimeout        = std::chrono::seconds{ 2 };
     constexpr auto             notifyTimeout         = std::chrono::seconds{ 2 };
 
@@ -79,6 +85,21 @@ namespace
         };
     }
 
+    [[nodiscard]]
+    grab::Event
+    make_state_snapshot_event( std::string_view json )
+    {
+        return grab::Event{
+            .timestamp = timestamp,
+            .sequence  = unsetSequence,
+            .kind      = stateSnapshotKind,
+            .category  = grab::category_of( stateSnapshotKind ),
+            .payload   = grab::Payload{ grab::StateSnapshot{
+                .json = std::string{ json },
+            } },
+        };
+    }
+
     void
     expect_mouse_move( const std::optional<grab::Event>& event,
                        std::string_view                  axis,
@@ -89,6 +110,55 @@ namespace
         ASSERT_NE( payload, nullptr );
         EXPECT_EQ( payload->axis, axis );
         EXPECT_DOUBLE_EQ( payload->delta, delta );
+    }
+
+    void
+    expect_state_snapshot( const std::optional<grab::Event>& event,
+                           std::string_view                  json,
+                           std::uint64_t                     sequence )
+    {
+        ASSERT_TRUE( event.has_value() );
+        EXPECT_EQ( event->sequence, sequence );
+        EXPECT_EQ( event->kind, stateSnapshotKind );
+        const auto* payload = std::get_if<grab::StateSnapshot>( &event->payload );
+        ASSERT_NE( payload, nullptr );
+        EXPECT_EQ( payload->json, json );
+    }
+
+    void
+    expect_event_item( const std::optional<grab::SubscriptionEvent>& item,
+                       grab::EventKind                               kind,
+                       std::uint64_t                                 sequence )
+    {
+        ASSERT_TRUE( item.has_value() );
+        const auto* event = std::get_if<grab::Event>( &*item );
+        ASSERT_NE( event, nullptr );
+        EXPECT_EQ( event->kind, kind );
+        EXPECT_EQ( event->sequence, sequence );
+    }
+
+    void
+    expect_queue_gap( const std::optional<grab::SubscriptionEvent>& item,
+                      std::uint64_t last_delivered_sequence )
+    {
+        ASSERT_TRUE( item.has_value() );
+        const auto* gap = std::get_if<grab::QueueGapMarker>( &*item );
+        ASSERT_NE( gap, nullptr );
+        EXPECT_EQ( gap->code, grab::ErrorCode::QueueGap );
+        EXPECT_EQ( gap->last_delivered_sequence, last_delivered_sequence );
+    }
+
+    void
+    expect_demand_transition( const std::vector<grab::EventKind>& kinds,
+                              const std::vector<bool>&            states,
+                              std::size_t                         expected_count,
+                              bool                                expected_state )
+    {
+        ASSERT_EQ( kinds.size(), expected_count );
+        ASSERT_EQ( states.size(), expected_count );
+        ASSERT_FALSE( kinds.empty() );
+        EXPECT_EQ( kinds.back(), keyDownKind );
+        EXPECT_EQ( states.back(), expected_state );
     }
 
 }    // namespace
@@ -161,6 +231,47 @@ TEST( EventBus,
 }
 
 TEST( EventBus,
+      SubscribeAssignsStableNonNilSubscriptionId )
+{
+    grab::EventBus bus;
+    auto           subscription = bus.subscribe( grab::EventFilter{} );
+    const auto     id           = subscription.id();
+
+    EXPECT_FALSE( id.value.is_nil() );
+    EXPECT_EQ( subscription.id(), id );
+}
+
+TEST( EventBus,
+      CurrentSetReplayPrecedesLivePublish )
+{
+    static_assert( grab::replay_policy_of( stateSnapshotKind ) ==
+                   grab::ReplayPolicy::CurrentSet );
+
+    grab::EventBus bus;
+    bus.register_snapshot_provider(
+        stateSnapshotKind,
+        []
+        {
+            return std::vector<grab::Event>{
+                make_state_snapshot_event( firstSnapshotJson ),
+                make_state_snapshot_event( secondSnapshotJson ),
+            };
+        }
+    );
+
+    auto subscription = bus.subscribe( grab::EventFilter{
+        .kinds      = { stateSnapshotKind },
+        .categories = {},
+    } );
+    bus.publish( make_state_snapshot_event( liveSnapshotJson ) );
+
+    expect_state_snapshot( subscription.try_pop(), firstSnapshotJson, firstSequence );
+    expect_state_snapshot( subscription.try_pop(), secondSnapshotJson, secondSequence );
+    expect_state_snapshot( subscription.try_pop(), liveSnapshotJson, thirdSequence );
+    EXPECT_FALSE( subscription.try_pop().has_value() );
+}
+
+TEST( EventBus,
       MotionCoalescesUnderPressure )
 {
     grab::EventBus bus;
@@ -211,11 +322,19 @@ TEST( EventBus,
     bus.publish( make_mouse_move_event( secondMoveAxis, secondMoveDelta ) );
     bus.publish( make_mouse_move_event( lastMoveAxis, lastMoveDelta ) );
 
-    expect_mouse_move( subscription.try_pop(), firstMoveAxis, firstMoveDelta );
-    expect_mouse_move( subscription.try_pop(), secondMoveAxis, secondMoveDelta );
-    EXPECT_FALSE( subscription.try_pop().has_value() );
+    const auto first = subscription.try_pop();
+    ASSERT_TRUE( first.has_value() );
+    expect_mouse_move( first, firstMoveAxis, firstMoveDelta );
+    EXPECT_EQ( first->sequence, firstSequence );
+
+    // P1.6b replaces the newest queued event with an explicit resync gap.
+    expect_queue_gap( subscription.try_pop_item(), unsetSequence );
+
+    EXPECT_FALSE( subscription.try_pop_item().has_value() );
     EXPECT_EQ( subscription.overflow_count(), oneOverflow );
+    EXPECT_EQ( subscription.dropped_count(), oneOverflow );
     EXPECT_TRUE( subscription.lagging() );
+    EXPECT_TRUE( subscription.needs_resync() );
 }
 
 TEST( EventBus,
@@ -245,11 +364,48 @@ TEST( EventBus,
     publish_future.get();
 
     EXPECT_EQ( subscription.overflow_count(), expectedOverflowCount );
+    EXPECT_EQ( subscription.dropped_count(), expectedOverflowCount );
     EXPECT_TRUE( subscription.lagging() );
+    EXPECT_TRUE( subscription.needs_resync() );
 
-    EXPECT_TRUE( subscription.try_pop().has_value() );
-    EXPECT_TRUE( subscription.try_pop().has_value() );
-    EXPECT_FALSE( subscription.try_pop().has_value() );
+    expect_event_item( subscription.try_pop_item(), keyDownKind, firstSequence );
+
+    // P1.6b keeps edge drop accounting but exposes loss as a resync gap.
+    expect_queue_gap( subscription.try_pop_item(), unsetSequence );
+
+    EXPECT_FALSE( subscription.try_pop_item().has_value() );
+}
+
+TEST( EventBus,
+      NeverDropOverflowRequiresResyncAndReportsLastDeliveredSequence )
+{
+    grab::EventBus bus;
+    auto           subscription = bus.subscribe(
+        grab::EventFilter{
+            .kinds      = { mouseMoveKind },
+            .categories = {},
+        },
+        grab::QueueOptions{
+            .capacity = 1U,
+            .overflow = grab::QueueOverflowPolicy::NeverDrop,
+        }
+    );
+
+    bus.publish( make_mouse_move_event( firstMoveAxis, firstMoveDelta ) );
+    const auto delivered = subscription.try_pop();
+    ASSERT_TRUE( delivered.has_value() );
+    EXPECT_EQ( delivered->sequence, firstSequence );
+
+    bus.publish( make_mouse_move_event( secondMoveAxis, secondMoveDelta ) );
+    bus.publish( make_mouse_move_event( lastMoveAxis, lastMoveDelta ) );
+
+    EXPECT_EQ( subscription.overflow_count(), oneOverflow );
+    EXPECT_EQ( subscription.dropped_count(), oneOverflow );
+    EXPECT_TRUE( subscription.lagging() );
+    EXPECT_TRUE( subscription.needs_resync() );
+
+    expect_queue_gap( subscription.try_pop_item(), firstSequence );
+    EXPECT_FALSE( subscription.try_pop_item().has_value() );
 }
 
 TEST( EventBus,
@@ -299,4 +455,44 @@ TEST( EventBus,
     EXPECT_EQ( delivered->sequence, firstSequence );
     EXPECT_EQ( destroyed_notifications.load( std::memory_order_relaxed ),
                noNotifications );
+}
+
+TEST( EventBus,
+      DemandCallbackFiresOnlyAtFirstAndLastSubscriber )
+{
+    grab::EventBus               bus;
+    std::vector<grab::EventKind> transition_kinds;
+    std::vector<bool>            transition_states;
+    bus.set_demand_callback(
+        [&]( grab::EventKind kind, bool enabled )
+        {
+            transition_kinds.push_back( kind );
+            transition_states.push_back( enabled );
+        }
+    );
+
+    EXPECT_EQ( bus.subscription_refcount( keyDownKind ), 0U );
+    {
+        auto first = bus.subscribe( grab::EventFilter{
+            .kinds      = { keyDownKind },
+            .categories = {},
+        } );
+        EXPECT_EQ( bus.subscription_refcount( keyDownKind ), 1U );
+        expect_demand_transition( transition_kinds, transition_states, 1U, true );
+
+        {
+            auto second = bus.subscribe( grab::EventFilter{
+                .kinds      = { keyDownKind },
+                .categories = {},
+            } );
+            EXPECT_EQ( bus.subscription_refcount( keyDownKind ), 2U );
+            EXPECT_EQ( transition_states.size(), 1U );
+        }
+
+        EXPECT_EQ( bus.subscription_refcount( keyDownKind ), 1U );
+        EXPECT_EQ( transition_states.size(), 1U );
+    }
+
+    EXPECT_EQ( bus.subscription_refcount( keyDownKind ), 0U );
+    expect_demand_transition( transition_kinds, transition_states, 2U, false );
 }

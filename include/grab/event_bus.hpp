@@ -1,12 +1,16 @@
 #pragma once
 
 #include "grab/event.hpp"
+#include "grab/ids.hpp"
+#include "grab/result.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <variant>
+#include <vector>
 
 namespace grab::detail
 {
@@ -35,6 +39,20 @@ namespace grab
             QueueOverflowPolicy overflow = defaultOverflow;
     };
 
+    struct SubscriptionScope
+    {
+            std::vector<EventKind> kinds;
+            EventFilter            filter;
+    };
+
+    struct QueueGapMarker
+    {
+            ErrorCode     code                    = ErrorCode::QueueGap;
+            std::uint64_t last_delivered_sequence = 0U;
+    };
+
+    using SubscriptionEvent = std::variant<Event, QueueGapMarker>;
+
     class EventBus;
 
     class Subscription
@@ -56,12 +74,32 @@ namespace grab
             try_pop();
 
             [[nodiscard]]
+            std::optional<SubscriptionEvent>
+            try_pop_item();
+
+            [[nodiscard]]
+            SubscriptionId
+            id() const noexcept;
+
+            [[nodiscard]]
+            SubscriptionScope
+            scope() const;
+
+            [[nodiscard]]
             std::uint64_t
             overflow_count() const noexcept;
 
             [[nodiscard]]
             bool
             lagging() const noexcept;
+
+            [[nodiscard]]
+            bool
+            needs_resync() const noexcept;
+
+            [[nodiscard]]
+            std::uint64_t
+            dropped_count() const noexcept;
 
             void
             set_notify( std::function<void()> on_data );
@@ -83,6 +121,9 @@ namespace grab
     class EventBus
     {
         public:
+
+            using SnapshotProvider = std::function<std::vector<Event>()>;
+            using DemandCallback   = std::function<void( EventKind, bool )>;
 
             static constexpr std::size_t defaultQueueDepth =
                 QueueOptions::defaultCapacity;
@@ -107,8 +148,27 @@ namespace grab
 
             [[nodiscard]]
             Subscription
+            subscribe( SubscriptionScope scope,
+                       QueueOptions      options = {} );
+
+            [[nodiscard]]
+            Subscription
             subscribe( EventFilter filter,
                        std::size_t max_queue );
+
+            void
+            register_snapshot_provider( EventKind        kind,
+                                        SnapshotProvider provider );
+
+            void
+            unregister_snapshot_provider( EventKind kind );
+
+            void
+            set_demand_callback( DemandCallback callback );
+
+            [[nodiscard]]
+            std::size_t
+            subscription_refcount( EventKind kind ) const noexcept;
 
         private:
 
