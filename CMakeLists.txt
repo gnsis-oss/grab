@@ -194,6 +194,21 @@ target_link_libraries(grab_driver_x11
 target_include_directories(grab_driver_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_x11 PUBLIC cxx_std_23)
 
+add_library(grab_driver_atspi STATIC
+    src/drivers/semantic/atspi/atspi_runtime.cpp
+    src/drivers/semantic/atspi/atspi_tree_source.cpp
+)
+target_link_libraries(grab_driver_atspi
+    PUBLIC
+        grab_kernel
+        grab_event
+    PRIVATE
+        grab_vendor_l0
+        PkgConfig::GRAB_DBUS_1
+)
+target_include_directories(grab_driver_atspi PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_driver_atspi PUBLIC cxx_std_23)
+
 add_library(grab_input_x11 STATIC
     src/platform/x11/xkb_keymap.cpp
 )

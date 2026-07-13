@@ -37,8 +37,15 @@ namespace grab
         inline constexpr RoleId        image{ 12U };
         inline constexpr RoleId        list{ 13U };
         inline constexpr RoleId        table{ 14U };
+        inline constexpr RoleId        button{ 15U };
+        inline constexpr RoleId        checkbox{ 16U };
+        inline constexpr RoleId        radio_button{ 17U };
+        inline constexpr RoleId        slider{ 18U };
+        inline constexpr RoleId        entry{ 19U };
+        inline constexpr RoleId        link{ 20U };
+        inline constexpr RoleId        menu_item{ 21U };
 
-        inline constexpr std::size_t   coreCount = 15U;
+        inline constexpr std::size_t   coreCount = 22U;
 
         // Values at or above this boundary are reserved for namespaced
         // extensions and never overlap grab's closed core role table.
@@ -66,6 +73,13 @@ namespace grab
                 enum_entry( role::image, "image" ),
                 enum_entry( role::list, "list" ),
                 enum_entry( role::table, "table" ),
+                enum_entry( role::button, "button" ),
+                enum_entry( role::checkbox, "checkbox" ),
+                enum_entry( role::radio_button, "radio_button" ),
+                enum_entry( role::slider, "slider" ),
+                enum_entry( role::entry, "entry" ),
+                enum_entry( role::link, "link" ),
+                enum_entry( role::menu_item, "menu_item" ),
             } ),
         };
         static_assert( enum_table_has_count( roleNames,

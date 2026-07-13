@@ -45,6 +45,60 @@ namespace grab
                          const NodeId& ) = default;
     };
 
+    // Object-scoped semantic behavior advertised by a runtime. These bits
+    // describe this node, not a backend-wide capability.
+    enum class Facet : std::uint32_t    // NOLINT(performance-enum-size)
+    {
+        Invokable = 1U << 0U,
+        Text      = 1U << 1U,
+        Value     = 1U << 2U,
+        Selection = 1U << 3U,
+    };
+
+    struct FacetMask
+    {
+            [[nodiscard]]
+            constexpr std::uint32_t
+            operator()( Facet facet ) const noexcept
+            {
+                return static_cast<std::uint32_t>( facet );
+            }
+    };
+
+    inline constexpr FacetMask facet_mask{};
+
+    [[nodiscard]]
+    constexpr std::uint32_t
+    operator|( Facet left,
+               Facet right ) noexcept
+    {
+        return facet_mask( left ) | facet_mask( right );
+    }
+
+    [[nodiscard]]
+    constexpr std::uint32_t
+    operator|( std::uint32_t facets,
+               Facet         facet ) noexcept
+    {
+        return facets | facet_mask( facet );
+    }
+
+    constexpr std::uint32_t&
+    operator|=( std::uint32_t& facets,
+                Facet          facet ) noexcept
+    {
+        facets = facets | facet;
+        return facets;
+    }
+
+    [[nodiscard]]
+    constexpr bool
+    has_facet( std::uint32_t facets,
+               Facet         facet ) noexcept
+    {
+        return ( facets & facet_mask( facet ) ) != 0U;
+    }
+
     // The uint32_t representation is the stable public bitmask contract.
     enum class NodeState : std::uint32_t    // NOLINT(performance-enum-size)
     {
@@ -155,10 +209,28 @@ namespace grab
                           std::uint32_t           node_states,
                           std::vector<UiProperty> properties,
                           UiProvenance            node_provenance ) :
+                UiNodeRecord( node_id,
+                              node_generation,
+                              node_role,
+                              node_states,
+                              0U,
+                              std::move( properties ),
+                              node_provenance )
+            {
+            }
+
+            UiNodeRecord( NodeId                  node_id,
+                          NodeGeneration          node_generation,
+                          RoleId                  node_role,
+                          std::uint32_t           node_states,
+                          std::uint32_t           node_facets,
+                          std::vector<UiProperty> properties,
+                          UiProvenance            node_provenance ) :
                 id( node_id ),
                 generation( node_generation ),
                 role( node_role ),
                 states( node_states ),
+                facets( node_facets ),
                 provenance_( node_provenance )
             {
                 property_ids_.reserve( properties.size() );
@@ -205,6 +277,7 @@ namespace grab
             NodeGeneration generation{};
             RoleId         role{};
             std::uint32_t  states{};
+            std::uint32_t  facets{};
             // NOLINTEND(misc-non-private-member-variables-in-classes,cppcoreguidelines-non-private-member-variables-in-classes)
 
         private:

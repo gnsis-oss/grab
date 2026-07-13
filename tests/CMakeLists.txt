@@ -103,6 +103,21 @@ target_include_directories(grab_driver_x11_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/tests)
 gtest_discover_tests(grab_driver_x11_tests DISCOVERY_MODE PRE_TEST)
 
+add_executable(grab_driver_atspi_tests
+    drivers/atspi/test_atspi_mapping.cpp
+    drivers/atspi/test_atspi_alias.cpp
+    drivers/atspi/test_atspi_runtime.cpp
+)
+target_link_libraries(grab_driver_atspi_tests PRIVATE
+    grab_driver_atspi
+    grab_vendor_l0
+    GTest::gtest_main
+)
+target_include_directories(grab_driver_atspi_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_driver_atspi_tests DISCOVERY_MODE PRE_TEST)
+
 # A7: self-provision the Xvfb displays the X-backed suites use so `ctest` is
 # self-contained (no manually-started display). Opt-out with -DGRAB_TEST_PROVISION_XVFB=OFF.
 option(GRAB_TEST_PROVISION_XVFB
