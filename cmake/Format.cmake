@@ -29,6 +29,7 @@ file(GLOB_RECURSE FORMAT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.c
 )
+list(FILTER FORMAT_SOURCES EXCLUDE REGEX "/src/vendor/")
 
 if(FORMAT_SOURCES)
     add_custom_target(format ALL

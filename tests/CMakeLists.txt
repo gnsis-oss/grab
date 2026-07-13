@@ -20,6 +20,7 @@ add_executable(grab_core_tests
     core/test_resolver.cpp
     core/test_result.cpp
     core/test_session.cpp
+    core/test_vendor_l0.cpp
     core/test_version.cpp
     codec/test_image.cpp
     codec/test_png.cpp
@@ -54,7 +55,7 @@ add_executable(grab_core_tests
     transport/test_service.cpp
     event/test_browser_classifier.cpp
 )
-target_link_libraries(grab_core_tests PRIVATE grab_core grab_codec grab_screen grab_image grab_event grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
+target_link_libraries(grab_core_tests PRIVATE grab_core grab_vendor_l0 grab_codec grab_screen grab_image grab_event grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(grab_core_tests PRIVATE GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs")
 include(GoogleTest)

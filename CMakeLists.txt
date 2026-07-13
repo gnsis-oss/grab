@@ -34,6 +34,9 @@ grab_proto_library(grab_proto
     proto/eventgrab/v1/service.proto
 )
 
+add_library(grab_vendor_l0 INTERFACE)
+target_include_directories(grab_vendor_l0 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/vendor/l0)
+
 add_library(grab_core STATIC
     src/core/monitor.cpp
     src/core/doctor.cpp
@@ -47,6 +50,7 @@ add_library(grab_core STATIC
     src/core/session.cpp
 )
 target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(grab_core PRIVATE grab_vendor_l0)
 target_include_directories(grab_core PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_core PUBLIC cxx_std_23)
