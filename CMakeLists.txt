@@ -39,6 +39,7 @@ target_include_directories(grab_vendor_l0 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURC
 
 add_library(grab_core STATIC
     src/core/monitor.cpp
+    src/core/context.cpp
     src/core/doctor.cpp
     src/core/event_bus.cpp
     src/core/id_factory.cpp

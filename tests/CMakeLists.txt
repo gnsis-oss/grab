@@ -2,6 +2,7 @@ add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/cli/input_command.cpp
     cli/input_command_test.cpp
     core/test_capability.cpp
+    core/test_context.cpp
     core/test_enum_table.cpp
     core/test_log.cpp
     core/test_cli_doctor.cpp
