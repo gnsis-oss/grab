@@ -44,11 +44,31 @@ enum EventKind {
   STATE_SNAPSHOT              = 600;
 }
 
+enum EventOrigin {
+  EVENT_ORIGIN_UNKNOWN        = 0;
+  EVENT_ORIGIN_PHYSICAL       = 1;
+  EVENT_ORIGIN_INJECTED_SELF  = 2;
+  EVENT_ORIGIN_INJECTED_OTHER = 3;
+}
+
+message EventSubject {
+  uint32 runtime               = 1;
+  uint32 tree                  = 2;
+  uint32 epoch                 = 3;
+  uint64 node                  = 4;
+  uint64 revision              = 5;
+}
+
 message Event {
   EventKind kind              = 1;
   EventCategory category      = 2;
   double timestamp             = 3;  // Unix epoch seconds with fractional ms
   map<string, string> data     = 4;  // Freeform key-value metadata
+  EventOrigin origin           = 5;
+  EventSubject subject         = 6;
+  optional bytes cause         = 7;
+  optional uint64 before_revision = 8;
+  optional uint64 after_revision = 9;
 }
 
 message EventFilter {

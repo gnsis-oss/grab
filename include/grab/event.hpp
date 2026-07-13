@@ -1,9 +1,12 @@
 #pragma once
 
+#include "grab/ids.hpp"
+#include "grab/origin.hpp"
 #include "grab/pid.hpp"
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -126,6 +129,18 @@ namespace grab
                                  BrowserTab,
                                  StateSnapshot>;
 
+    // Snapshot-scoped value identity for the affected UI node; unlike WidgetRef,
+    // this is not a live handle. The subject is distinct from the event's
+    // producing device/resource source context.
+    struct EventSubject
+    {
+            RuntimeId     runtime{};
+            std::uint32_t tree{};
+            TreeEpoch     epoch{};
+            std::uint64_t node{};
+            std::uint64_t revision{};
+    };
+
     struct Event
     {
             double        timestamp = 0.0;
@@ -133,6 +148,15 @@ namespace grab
             EventKind     kind      = EventKind::Unspecified;
             EventCategory category  = EventCategory::Unspecified;
             Payload       payload;
+            EventOrigin   origin = EventOrigin::Unknown;
+            std::optional<EventSubject>
+                subject{};            // NOLINT(readability-redundant-member-init)
+            std::optional<OperationId>
+                cause{};              // NOLINT(readability-redundant-member-init)
+            std::optional<std::uint64_t>
+                before_revision{};    // NOLINT(readability-redundant-member-init)
+            std::optional<std::uint64_t>
+                after_revision{};     // NOLINT(readability-redundant-member-init)
     };
 
     struct EventFilter

@@ -1,6 +1,8 @@
 #include "eventgrab/v1/events.pb.h"
 #include "grab/event.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/ids.hpp"
+#include "grab/origin.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "storage/jsonl_sink.hpp"
@@ -36,6 +38,14 @@ namespace
     constexpr std::uint64_t    decodedSequence      = 0U;
     constexpr std::uint32_t    keyCode              = 30U;
     constexpr std::uint32_t    mouseButton          = 1U;
+    constexpr std::uint32_t    subjectRuntime       = 7U;
+    constexpr std::uint32_t    subjectTree          = 8U;
+    constexpr std::uint32_t    subjectEpoch         = 9U;
+    constexpr std::uint64_t    subjectNode          = 10U;
+    constexpr std::uint64_t    subjectRevision      = 11U;
+    constexpr std::uint64_t    beforeRevision       = 12U;
+    constexpr std::uint64_t    afterRevision        = 13U;
+    constexpr std::uint8_t     causeMarker          = 0XA5U;
     constexpr int              unknownKindNumber    = 9'999;
     constexpr int              oversizedEntryPad    = 1;
     constexpr int              singleErasedEntry    = 1;
@@ -465,6 +475,42 @@ TEST( Codec,
         ASSERT_TRUE( decoded.has_value() );
         expect_event_eq_after_wire( event, *decoded );
     }
+}
+
+TEST( Codec,
+      RoundTripsEventEnvelope )
+{
+    auto event    = make_event( grab::EventKind::KeyDown, inputCategory, input_key() );
+    event.origin  = grab::EventOrigin::InjectedSelf;
+    event.subject = grab::EventSubject{
+        .runtime  = grab::RuntimeId{ subjectRuntime },
+        .tree     = subjectTree,
+        .epoch    = grab::TreeEpoch{ subjectEpoch },
+        .node     = subjectNode,
+        .revision = subjectRevision,
+    };
+    grab::OperationId cause{};
+    cause.value.bytes.front() = causeMarker;
+    event.cause               = cause;
+    event.before_revision     = beforeRevision;
+    event.after_revision      = afterRevision;
+
+    auto wire                 = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() ) << wire.error().message;
+
+    auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
+    EXPECT_EQ( decoded->origin, event.origin );
+    ASSERT_TRUE( decoded->subject.has_value() );
+    EXPECT_EQ( decoded->subject->runtime, event.subject->runtime );
+    EXPECT_EQ( decoded->subject->tree, event.subject->tree );
+    EXPECT_EQ( decoded->subject->epoch, event.subject->epoch );
+    EXPECT_EQ( decoded->subject->node, event.subject->node );
+    EXPECT_EQ( decoded->subject->revision, event.subject->revision );
+    ASSERT_TRUE( decoded->cause.has_value() );
+    EXPECT_EQ( decoded->cause->value.bytes, event.cause->value.bytes );
+    EXPECT_EQ( decoded->before_revision, event.before_revision );
+    EXPECT_EQ( decoded->after_revision, event.after_revision );
 }
 
 TEST( Codec,

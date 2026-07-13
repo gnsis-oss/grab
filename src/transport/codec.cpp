@@ -1,11 +1,15 @@
 #include "eventgrab/v1/events.pb.h"
 #include "grab/event.hpp"
+#include "grab/ids.hpp"
+#include "grab/origin.hpp"
 #include "grab/payload_fields.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "transport/codec.hpp"
 #include "transport/proto_descriptor.hpp"
 
+#include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +31,82 @@ namespace grab::transport
         constexpr std::uint64_t    noSequence     = 0U;
         constexpr std::string_view protocolPrefix = "malformed event: ";
         using grab::PayloadField;
+
+        constexpr std::size_t uuidBytes = 16U;
+
+        [[nodiscard]]
+        std::unexpected<grab::Error>
+        protocol_error( std::string message );
+
+        [[nodiscard]]
+        eventgrab::v1::EventOrigin
+        encode_origin( grab::EventOrigin origin ) noexcept
+        {
+            switch( origin )
+            {
+                case grab::EventOrigin::Physical :
+                    return eventgrab::v1::EVENT_ORIGIN_PHYSICAL;
+                case grab::EventOrigin::InjectedSelf :
+                    return eventgrab::v1::EVENT_ORIGIN_INJECTED_SELF;
+                case grab::EventOrigin::InjectedOther :
+                    return eventgrab::v1::EVENT_ORIGIN_INJECTED_OTHER;
+                case grab::EventOrigin::Unknown :
+                    return eventgrab::v1::EVENT_ORIGIN_UNKNOWN;
+            }
+
+            return eventgrab::v1::EVENT_ORIGIN_UNKNOWN;
+        }
+
+        [[nodiscard]]
+        grab::EventOrigin
+        decode_origin( eventgrab::v1::EventOrigin origin ) noexcept
+        {
+            switch( origin )
+            {
+                case eventgrab::v1::EVENT_ORIGIN_PHYSICAL :
+                    return grab::EventOrigin::Physical;
+                case eventgrab::v1::EVENT_ORIGIN_INJECTED_SELF :
+                    return grab::EventOrigin::InjectedSelf;
+                case eventgrab::v1::EVENT_ORIGIN_INJECTED_OTHER :
+                    return grab::EventOrigin::InjectedOther;
+                default :
+                    return grab::EventOrigin::Unknown;
+            }
+        }
+
+        [[nodiscard]]
+        std::string
+        encode_operation_id( const grab::OperationId& operation )
+        {
+            std::string encoded;
+            encoded.reserve( operation.value.bytes.size() );
+            for( const auto byte : operation.value.bytes )
+            {
+                encoded.push_back( static_cast<char>( byte ) );
+            }
+            return encoded;
+        }
+
+        [[nodiscard]]
+        grab::Result<grab::OperationId>
+        decode_operation_id( std::string_view encoded )
+        {
+            if( encoded.size() != uuidBytes )
+            {
+                return protocol_error( "cause must contain a 16-byte UUID" );
+            }
+
+            std::array<std::uint8_t, uuidBytes> bytes{};
+            std::ranges::transform( encoded,
+                                    bytes.begin(),
+                                    []( char byte )
+                                    {
+                                        return static_cast<std::uint8_t>(
+                                            static_cast<unsigned char>( byte )
+                                        );
+                                    } );
+            return grab::OperationId{ .value = grab::Uuid{ .bytes = bytes } };
+        }
 
         [[nodiscard]]
         std::unexpected<grab::Error>
@@ -677,6 +757,28 @@ namespace grab::transport
         wire.set_kind( to_wire_kind( event.kind ) );
         wire.set_category( to_wire_category( event.category ) );
         wire.set_timestamp( event.timestamp );
+        wire.set_origin( encode_origin( event.origin ) );
+        if( event.subject.has_value() )
+        {
+            auto* const subject = wire.mutable_subject();
+            subject->set_runtime( event.subject->runtime.value );
+            subject->set_tree( event.subject->tree );
+            subject->set_epoch( event.subject->epoch.value );
+            subject->set_node( event.subject->node );
+            subject->set_revision( event.subject->revision );
+        }
+        if( event.cause.has_value() )
+        {
+            wire.set_cause( encode_operation_id( *event.cause ) );
+        }
+        if( event.before_revision.has_value() )
+        {
+            wire.set_before_revision( *event.before_revision );
+        }
+        if( event.after_revision.has_value() )
+        {
+            wire.set_after_revision( *event.after_revision );
+        }
 
         switch( event.kind )
         {
@@ -762,13 +864,42 @@ namespace grab::transport
             return std::unexpected( payload.error() );
         }
 
-        return grab::Event{
+        grab::Event event{
             .timestamp = wire.timestamp(),
             .sequence  = noSequence,
             .kind      = *kind,
             .category  = *category,
             .payload   = std::move( *payload ),
         };
+        event.origin = decode_origin( wire.origin() );
+        if( wire.has_subject() )
+        {
+            event.subject = grab::EventSubject{
+                .runtime  = grab::RuntimeId{ wire.subject().runtime() },
+                .tree     = wire.subject().tree(),
+                .epoch    = grab::TreeEpoch{ wire.subject().epoch() },
+                .node     = wire.subject().node(),
+                .revision = wire.subject().revision(),
+            };
+        }
+        if( wire.has_cause() )
+        {
+            auto cause = decode_operation_id( wire.cause() );
+            if( !cause.has_value() )
+            {
+                return std::unexpected( cause.error() );
+            }
+            event.cause = *cause;
+        }
+        if( wire.has_before_revision() )
+        {
+            event.before_revision = wire.before_revision();
+        }
+        if( wire.has_after_revision() )
+        {
+            event.after_revision = wire.after_revision();
+        }
+        return event;
     }
 
 }    // namespace grab::transport
