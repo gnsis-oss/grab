@@ -174,6 +174,7 @@ target_include_directories(grab_platform_x11 PRIVATE ${CMAKE_CURRENT_LIST_DIR}/s
 target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 
 add_library(grab_driver_x11 STATIC
+    src/drivers/desktop/x11/x11_input_correctness.cpp
     src/drivers/desktop/x11/x11_routes.cpp
     src/drivers/desktop/x11/x11_runtime.cpp
     src/drivers/desktop/x11/x11_tree_source.cpp

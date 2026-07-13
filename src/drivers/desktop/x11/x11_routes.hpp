@@ -1,5 +1,6 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "drivers/desktop/x11/x11_input_correctness.hpp"
 #include "grab/keymap.hpp"
 #include "input/seat.hpp"
 #include "spi/route.hpp"
@@ -16,7 +17,8 @@ namespace grab::drivers::desktop::x11
 
     class X11TreeSource;
 
-    class X11InputSeat final : public grab::spi::InputSeat
+    class X11InputSeat final : public grab::spi::InputSeat,
+                               public ModifierState
     {
         public:
 
@@ -42,6 +44,19 @@ namespace grab::drivers::desktop::x11
             flush();
 
             [[nodiscard]]
+            SeatLane::Token
+            acquire_lane();
+
+            [[nodiscard]]
+            bool
+            held( std::uint8_t keycode ) const override;
+
+            [[nodiscard]]
+            bool
+            set( std::uint8_t keycode,
+                 bool         press ) override;
+
+            [[nodiscard]]
             grab::Result<grab::NeutralizationOutcome>
             neutralize( const grab::OperationContext& context ) override;
 
@@ -50,7 +65,8 @@ namespace grab::drivers::desktop::x11
             grab::input::Seat      seat_;
             std::array<bool, 256U> held_buttons_{};
             std::array<bool, 256U> held_keys_{};
-            std::mutex             mutex_;
+            mutable std::mutex     mutex_;
+            SeatLane               lane_;
     };
 
     class X11PointerRoute final : public grab::spi::ActionRoute
@@ -91,10 +107,11 @@ namespace grab::drivers::desktop::x11
 
         private:
 
-            X11TreeSource*    source_{};
-            xcb_connection_t* connection_{};
-            X11InputSeat*     seat_{};
-            grab::Keymap      keymap_;
+            X11TreeSource*     source_{};
+            xcb_connection_t*  connection_{};
+            X11InputSeat*      seat_{};
+            grab::Keymap       keymap_;
+            ScratchKeycodePool scratch_pool_;
     };
 
     [[nodiscard]]

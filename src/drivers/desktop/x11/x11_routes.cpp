@@ -1,6 +1,7 @@
 #include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
 
+#include <cstdint>
 #include <cstdlib>
 #include <expected>
 #include <limits>
@@ -93,6 +94,151 @@ namespace grab::drivers::desktop::x11
                             .attempts   = {},
                             }
             };
+        }
+
+        [[nodiscard,
+          maybe_unused]]
+        grab::Result<std::vector<std::uint8_t>>
+        modifier_keycodes( xcb_connection_t* connection )
+        {
+            if( connection == nullptr )
+            {
+                return failure<std::vector<std::uint8_t>>(
+                    grab::ErrorCode::CapabilityUnavailable,
+                    "X11 connection is unavailable"
+                );
+            }
+
+            xcb_generic_error_t* error = nullptr;
+            auto*                reply =
+                xcb_get_modifier_mapping_reply( connection,
+                                                xcb_get_modifier_mapping( connection ),
+                                                &error );
+            if( error != nullptr || reply == nullptr )
+            {
+                std::free( error );
+                std::free( reply );
+                return failure<std::vector<std::uint8_t>>(
+                    grab::ErrorCode::ProtocolError,
+                    "Could not query the X11 modifier map"
+                );
+            }
+
+            std::array<bool, 256U>    seen{};
+            std::vector<std::uint8_t> result;
+            const auto  count    = xcb_get_modifier_mapping_keycodes_length( reply );
+            const auto* keycodes = xcb_get_modifier_mapping_keycodes( reply );
+            result.reserve( static_cast<std::size_t>( count ) );
+            for( int index = 0; index < count; ++index )
+            {
+                const auto keycode = keycodes[index];
+                if( keycode != 0U && !seen[keycode] )
+                {
+                    seen[keycode] = true;
+                    result.push_back( keycode );
+                }
+            }
+            std::free( reply );
+            return result;
+        }
+
+        [[nodiscard,
+          maybe_unused]]
+        grab::Result<std::vector<char32_t>>
+        decode_utf8( std::string_view text )
+        {
+            std::vector<char32_t> result;
+            result.reserve( text.size() );
+
+            for( std::size_t offset = 0U; offset < text.size(); )
+            {
+                const auto    lead      = static_cast<std::uint8_t>( text[offset] );
+                std::size_t   length    = 0U;
+                std::uint32_t codepoint = 0U;
+                std::uint32_t minimum   = 0U;
+
+                if( lead <= 0X7FU )
+                {
+                    length    = 1U;
+                    codepoint = lead;
+                }
+                else if( lead >= 0XC2U && lead <= 0XDFU )
+                {
+                    length    = 2U;
+                    codepoint = lead & 0X1FU;
+                    minimum   = 0X80U;
+                }
+                else if( lead >= 0XE0U && lead <= 0XEFU )
+                {
+                    length    = 3U;
+                    codepoint = lead & 0X0FU;
+                    minimum   = 0X8'00U;
+                }
+                else if( lead >= 0XF0U && lead <= 0XF4U )
+                {
+                    length    = 4U;
+                    codepoint = lead & 0X07U;
+                    minimum   = 0X1'00'00U;
+                }
+                else
+                {
+                    return failure<std::vector<char32_t>>(
+                        grab::ErrorCode::InvalidArgument,
+                        "Text contains invalid UTF-8"
+                    );
+                }
+
+                if( offset + length > text.size() )
+                {
+                    return failure<std::vector<char32_t>>(
+                        grab::ErrorCode::InvalidArgument,
+                        "Text contains truncated UTF-8"
+                    );
+                }
+                for( std::size_t index = 1U; index < length; ++index )
+                {
+                    const auto continuation =
+                        static_cast<std::uint8_t>( text[offset + index] );
+                    if( ( continuation & 0XC0U ) != 0X80U )
+                    {
+                        return failure<std::vector<char32_t>>(
+                            grab::ErrorCode::InvalidArgument,
+                            "Text contains invalid UTF-8"
+                        );
+                    }
+                    codepoint = ( codepoint << 6U ) | ( continuation & 0X3FU );
+                }
+
+                if( codepoint <
+                    minimum ||
+                    codepoint >
+                    0X10'FF'FFU ||
+                    ( codepoint >= 0XD8'00U && codepoint <= 0XDF'FFU ) )
+                {
+                    return failure<std::vector<char32_t>>(
+                        grab::ErrorCode::InvalidArgument,
+                        "Text contains an invalid Unicode scalar value"
+                    );
+                }
+
+                result.push_back( static_cast<char32_t>( codepoint ) );
+                offset += length;
+            }
+            return result;
+        }
+
+        [[nodiscard,
+          maybe_unused]]
+        constexpr std::uint32_t
+        unicode_keysym( char32_t codepoint ) noexcept
+        {
+            const auto value = static_cast<std::uint32_t>( codepoint );
+            if( ( value >= 0X20U && value <= 0X7EU ) ||
+                ( value >= 0XA0U && value <= 0XFFU ) )
+            {
+                return value;
+            }
+            return 0X01'00'00'00U | value;
         }
 
         template<typename ResultType>
@@ -426,9 +572,30 @@ namespace grab::drivers::desktop::x11
         return seat_.flush();
     }
 
+    SeatLane::Token
+    X11InputSeat::acquire_lane()
+    {
+        return lane_.acquire();
+    }
+
+    bool
+    X11InputSeat::held( std::uint8_t keycode ) const
+    {
+        const std::scoped_lock lock( mutex_ );
+        return held_keys_[keycode];
+    }
+
+    bool
+    X11InputSeat::set( std::uint8_t keycode,
+                       bool         press )
+    {
+        return key( keycode, press ).has_value();
+    }
+
     grab::Result<grab::NeutralizationOutcome>
     X11InputSeat::neutralize( const grab::OperationContext& )
     {
+        const auto             lane = lane_.acquire();
         const std::scoped_lock lock( mutex_ );
         bool                   held   = false;
         bool                   failed = false;
@@ -524,7 +691,8 @@ namespace grab::drivers::desktop::x11
         source_( &source ),
         connection_( connection ),
         seat_( &seat ),
-        keymap_( std::move( keymap ) )
+        keymap_( std::move( keymap ) ),
+        scratch_pool_( connection )
     {
     }
 
