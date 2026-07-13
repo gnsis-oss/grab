@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -26,8 +27,10 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <stdlib.h>
 #include <system_error>
 #include <thread>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 // clang-format on
@@ -40,6 +43,11 @@ namespace
     constexpr std::string_view nameSeparator           = "-";
     constexpr std::string_view unknownTestName         = "unknown";
     constexpr std::string_view socketFileName          = "daemon.sock";
+    constexpr std::string_view defaultSocketFileName   = "grab.sock";
+    constexpr std::string_view runtimeDirectoryEnv     = "XDG_RUNTIME_DIR";
+    constexpr std::string_view relativeRuntimeDir      = "relative-runtime";
+    constexpr std::string_view fallbackSocketPrefix    = "unix:/tmp/grab-";
+    constexpr std::string_view socketExtension         = ".sock";
     constexpr std::string_view storeDirName            = "store";
     constexpr std::string_view jsonlExtension          = ".jsonl";
     constexpr std::string_view persistedTypeNeedle     = R"("type":"input.key_down")";
@@ -64,6 +72,8 @@ namespace
     constexpr std::string_view secondSourceName        = "second";
     constexpr std::string_view failingSourceName       = "failing";
     constexpr std::string_view sourceFailureMessage    = "source failed";
+    constexpr std::size_t      invalidQueueDepth       = 0U;
+    constexpr int              overwriteEnvironment    = 1;
 
     [[nodiscard]]
     std::string
@@ -122,6 +132,13 @@ namespace
             }
 
             [[nodiscard]]
+            const std::filesystem::path&
+            root() const noexcept
+            {
+                return root_;
+            }
+
+            [[nodiscard]]
             const std::string&
             endpoint() const noexcept
             {
@@ -134,6 +151,69 @@ namespace
             std::filesystem::path store_;
             std::filesystem::path socket_;
             std::string           endpoint_;
+    };
+
+    class ScopedEnvironment
+    {
+        public:
+
+            ScopedEnvironment( std::string_view                name,
+                               std::optional<std::string_view> value ) :
+                name_( name )
+            {
+                // Tests run in isolated CTest processes before daemon threads start.
+                // NOLINTNEXTLINE(concurrency-mt-unsafe)
+                const char* const previous = std::getenv( name_.c_str() );
+                if( previous != nullptr )
+                {
+                    previous_ = previous;
+                }
+
+                if( value.has_value() )
+                {
+                    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+                    static_cast<void>( setenv( name_.c_str(),
+                                               std::string{ *value }.c_str(),
+                                               overwriteEnvironment ) );
+                }
+                else
+                {
+                    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+                    static_cast<void>( unsetenv( name_.c_str() ) );
+                }
+            }
+
+            ~ScopedEnvironment()
+            {
+                if( previous_.has_value() )
+                {
+                    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+                    static_cast<void>(
+                        setenv(
+                            name_.c_str(),
+                            previous_->c_str(),
+                            overwriteEnvironment
+                        )    // NOLINT(concurrency-mt-unsafe)
+                    );
+                }
+                else
+                {
+                    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+                    static_cast<void>( unsetenv( name_.c_str() ) );
+                }
+            }
+
+            ScopedEnvironment( const ScopedEnvironment& ) = delete;
+            ScopedEnvironment&
+            operator=( const ScopedEnvironment& )    = delete;
+            ScopedEnvironment( ScopedEnvironment&& ) = delete;
+            ScopedEnvironment&
+            operator=( ScopedEnvironment&& ) = delete;
+
+        private:
+
+            std::string                name_;
+            std::optional<std::string> previous_;
     };
 
     struct StreamReadResult
@@ -524,6 +604,56 @@ namespace
     }
 
 }    // namespace
+
+TEST( DaemonOptions,
+      DefaultEndpointUsesAbsoluteRuntimeDirectory )
+{
+    const TempDaemonDir     temp;
+    const ScopedEnvironment environment{ runtimeDirectoryEnv, temp.root().string() };
+    const std::string       expected = std::string{ unixEndpointPrefix } +
+                                       ( temp.root() / defaultSocketFileName ).string();
+
+    EXPECT_EQ( grab::service::default_daemon_endpoint(), expected );
+}
+
+TEST( DaemonOptions,
+      DefaultEndpointFallsBackForRelativeRuntimeDirectory )
+{
+    const ScopedEnvironment environment{ runtimeDirectoryEnv, relativeRuntimeDir };
+    const std::string       expected =
+        std::string{ fallbackSocketPrefix } +
+        std::to_string( static_cast<std::uint64_t>( getuid() ) ) +
+        std::string{ socketExtension };
+
+    EXPECT_EQ( grab::service::default_daemon_endpoint(), expected );
+}
+
+TEST( DaemonOptions,
+      DefaultEndpointFallsBackWhenRuntimeDirectoryIsUnset )
+{
+    const ScopedEnvironment environment{ runtimeDirectoryEnv, std::nullopt };
+    const std::string       expected =
+        std::string{ fallbackSocketPrefix } +
+        std::to_string( static_cast<std::uint64_t>( getuid() ) ) +
+        std::string{ socketExtension };
+
+    EXPECT_EQ( grab::service::default_daemon_endpoint(), expected );
+}
+
+TEST( DaemonOptions,
+      RejectsZeroStorageQueueDepth )
+{
+    const TempDaemonDir temp;
+    auto result = grab::service::Daemon::start( grab::service::DaemonOptions{
+        .endpoint            = temp.endpoint(),
+        .store_dir           = temp.store_dir(),
+        .storage_queue_depth = invalidQueueDepth,
+        .source_factory      = {},
+    } );
+
+    ASSERT_FALSE( result.has_value() );
+    EXPECT_EQ( result.error().code, grab::ErrorCode::InvalidArgument );
+}
 
 TEST( Daemon,
       PushedEventIsBroadcastAndPersisted )

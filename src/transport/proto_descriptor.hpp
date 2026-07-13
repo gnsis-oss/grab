@@ -17,54 +17,52 @@ namespace grab::transport
             eventgrab::v1::EventKind proto_kind;
     };
 
-    inline constexpr std::array<ProtoKindRow, 22> protoKindRows{
-        {
-         { .kind       = grab::EventKind::Unspecified,
-              .proto_kind = eventgrab::v1::EVENT_KIND_UNSPECIFIED },
-         { .kind       = grab::EventKind::KeyDown,
-              .proto_kind = eventgrab::v1::INPUT_KEY_DOWN },
-         { .kind       = grab::EventKind::KeyUp,
-              .proto_kind = eventgrab::v1::INPUT_KEY_UP },
-         { .kind       = grab::EventKind::KeyCombo,
-              .proto_kind = eventgrab::v1::INPUT_KEY_COMBO },
-         { .kind       = grab::EventKind::MouseClick,
-              .proto_kind = eventgrab::v1::INPUT_MOUSE_CLICK },
-         { .kind       = grab::EventKind::MouseMove,
-              .proto_kind = eventgrab::v1::INPUT_MOUSE_MOVE },
-         { .kind       = grab::EventKind::IdleStart,
-              .proto_kind = eventgrab::v1::INPUT_IDLE_START },
-         { .kind       = grab::EventKind::IdleEnd,
-              .proto_kind = eventgrab::v1::INPUT_IDLE_END },
-         { .kind       = grab::EventKind::WindowFocusChanged,
-              .proto_kind = eventgrab::v1::WINDOW_FOCUS_CHANGED },
-         { .kind       = grab::EventKind::WindowTitleChanged,
-              .proto_kind = eventgrab::v1::WINDOW_TITLE_CHANGED },
-         { .kind       = grab::EventKind::WindowCreated,
-              .proto_kind = eventgrab::v1::WINDOW_CREATED },
-         { .kind       = grab::EventKind::WindowClosed,
-              .proto_kind = eventgrab::v1::WINDOW_CLOSED },
-         { .kind       = grab::EventKind::A11yButtonClicked,
-              .proto_kind = eventgrab::v1::A11Y_BUTTON_CLICKED },
-         { .kind       = grab::EventKind::A11yMenuOpened,
-              .proto_kind = eventgrab::v1::A11Y_MENU_OPENED },
-         { .kind       = grab::EventKind::A11yMenuClosed,
-              .proto_kind = eventgrab::v1::A11Y_MENU_CLOSED },
-         { .kind       = grab::EventKind::A11yFocusChanged,
-              .proto_kind = eventgrab::v1::A11Y_FOCUS_CHANGED },
-         { .kind       = grab::EventKind::A11yTextChanged,
-              .proto_kind = eventgrab::v1::A11Y_TEXT_CHANGED },
-         { .kind       = grab::EventKind::A11yStateChanged,
-              .proto_kind = eventgrab::v1::A11Y_STATE_CHANGED },
-         { .kind       = grab::EventKind::AppTabChanged,
-              .proto_kind = eventgrab::v1::APP_TAB_CHANGED },
-         { .kind       = grab::EventKind::AppContextUpdate,
-              .proto_kind = eventgrab::v1::APP_CONTEXT_UPDATE },
-         { .kind       = grab::EventKind::BrowserTabSwitched,
-              .proto_kind = eventgrab::v1::BROWSER_TAB_SWITCHED },
-         { .kind       = grab::EventKind::StateSnapshot,
-              .proto_kind = eventgrab::v1::STATE_SNAPSHOT },
-         }
-    };
+    [[nodiscard]]
+    constexpr ProtoKindRow
+    proto_kind_row( grab::EventKind          kind,
+                    eventgrab::v1::EventKind proto_kind ) noexcept
+    {
+        return ProtoKindRow{
+            .kind       = kind,
+            .proto_kind = proto_kind,
+        };
+    }
+
+    inline constexpr auto protoKindRows = std::to_array<ProtoKindRow>( {
+        proto_kind_row( grab::EventKind::Unspecified,
+                        eventgrab::v1::EVENT_KIND_UNSPECIFIED ),
+        proto_kind_row( grab::EventKind::KeyDown, eventgrab::v1::INPUT_KEY_DOWN ),
+        proto_kind_row( grab::EventKind::KeyUp, eventgrab::v1::INPUT_KEY_UP ),
+        proto_kind_row( grab::EventKind::KeyCombo, eventgrab::v1::INPUT_KEY_COMBO ),
+        proto_kind_row( grab::EventKind::MouseClick, eventgrab::v1::INPUT_MOUSE_CLICK ),
+        proto_kind_row( grab::EventKind::MouseMove, eventgrab::v1::INPUT_MOUSE_MOVE ),
+        proto_kind_row( grab::EventKind::IdleStart, eventgrab::v1::INPUT_IDLE_START ),
+        proto_kind_row( grab::EventKind::IdleEnd, eventgrab::v1::INPUT_IDLE_END ),
+        proto_kind_row( grab::EventKind::WindowFocusChanged,
+                        eventgrab::v1::WINDOW_FOCUS_CHANGED ),
+        proto_kind_row( grab::EventKind::WindowTitleChanged,
+                        eventgrab::v1::WINDOW_TITLE_CHANGED ),
+        proto_kind_row( grab::EventKind::WindowCreated, eventgrab::v1::WINDOW_CREATED ),
+        proto_kind_row( grab::EventKind::WindowClosed, eventgrab::v1::WINDOW_CLOSED ),
+        proto_kind_row( grab::EventKind::A11yButtonClicked,
+                        eventgrab::v1::A11Y_BUTTON_CLICKED ),
+        proto_kind_row( grab::EventKind::A11yMenuOpened,
+                        eventgrab::v1::A11Y_MENU_OPENED ),
+        proto_kind_row( grab::EventKind::A11yMenuClosed,
+                        eventgrab::v1::A11Y_MENU_CLOSED ),
+        proto_kind_row( grab::EventKind::A11yFocusChanged,
+                        eventgrab::v1::A11Y_FOCUS_CHANGED ),
+        proto_kind_row( grab::EventKind::A11yTextChanged,
+                        eventgrab::v1::A11Y_TEXT_CHANGED ),
+        proto_kind_row( grab::EventKind::A11yStateChanged,
+                        eventgrab::v1::A11Y_STATE_CHANGED ),
+        proto_kind_row( grab::EventKind::AppTabChanged, eventgrab::v1::APP_TAB_CHANGED ),
+        proto_kind_row( grab::EventKind::AppContextUpdate,
+                        eventgrab::v1::APP_CONTEXT_UPDATE ),
+        proto_kind_row( grab::EventKind::BrowserTabSwitched,
+                        eventgrab::v1::BROWSER_TAB_SWITCHED ),
+        proto_kind_row( grab::EventKind::StateSnapshot, eventgrab::v1::STATE_SNAPSHOT ),
+    } );
 
     struct ProtoCategoryRow
     {
@@ -72,24 +70,33 @@ namespace grab::transport
             eventgrab::v1::EventCategory proto_category;
     };
 
-    inline constexpr std::array<ProtoCategoryRow, 7> protoCategoryRows{
-        {
-         { .category       = grab::EventCategory::Unspecified,
-              .proto_category = eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED },
-         { .category       = grab::EventCategory::Input,
-              .proto_category = eventgrab::v1::EVENT_CATEGORY_INPUT },
-         { .category       = grab::EventCategory::Window,
-              .proto_category = eventgrab::v1::EVENT_CATEGORY_WINDOW },
-         { .category       = grab::EventCategory::Accessibility,
-              .proto_category = eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY },
-         { .category       = grab::EventCategory::Integration,
-              .proto_category = eventgrab::v1::EVENT_CATEGORY_INTEGRATION },
-         { .category       = grab::EventCategory::Browser,
-              .proto_category = eventgrab::v1::EVENT_CATEGORY_BROWSER },
-         { .category       = grab::EventCategory::State,
-              .proto_category = eventgrab::v1::EVENT_CATEGORY_STATE },
-         }
-    };
+    [[nodiscard]]
+    constexpr ProtoCategoryRow
+    proto_category_row( grab::EventCategory          category,
+                        eventgrab::v1::EventCategory proto_category ) noexcept
+    {
+        return ProtoCategoryRow{
+            .category       = category,
+            .proto_category = proto_category,
+        };
+    }
+
+    inline constexpr auto protoCategoryRows = std::to_array<ProtoCategoryRow>( {
+        proto_category_row( grab::EventCategory::Unspecified,
+                            eventgrab::v1::EVENT_CATEGORY_UNSPECIFIED ),
+        proto_category_row( grab::EventCategory::Input,
+                            eventgrab::v1::EVENT_CATEGORY_INPUT ),
+        proto_category_row( grab::EventCategory::Window,
+                            eventgrab::v1::EVENT_CATEGORY_WINDOW ),
+        proto_category_row( grab::EventCategory::Accessibility,
+                            eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY ),
+        proto_category_row( grab::EventCategory::Integration,
+                            eventgrab::v1::EVENT_CATEGORY_INTEGRATION ),
+        proto_category_row( grab::EventCategory::Browser,
+                            eventgrab::v1::EVENT_CATEGORY_BROWSER ),
+        proto_category_row( grab::EventCategory::State,
+                            eventgrab::v1::EVENT_CATEGORY_STATE ),
+    } );
 
     [[nodiscard]]
     constexpr eventgrab::v1::EventKind
@@ -185,7 +192,7 @@ namespace grab::transport
     static_assert(
         []
         {
-            if( protoCategoryRows.size() != 7U )
+            if( protoCategoryRows.size() != grab::detail::categoryNames.size() )
             {
                 return false;
             }

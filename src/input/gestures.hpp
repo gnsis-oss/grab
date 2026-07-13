@@ -1,32 +1,29 @@
 #pragma once
 
+#include "grab/drag.hpp"
 #include "grab/geometry/point.hpp"
 #include "grab/result.hpp"
 #include "input/seat.hpp"
 
-#include <chrono>
-#include <cstdint>
-
 namespace grab::input
 {
 
-    // Unified geometry point (int32 pixel coordinates). Shared with the
-    // input_sink/gesture stack so a single grab::input::Point type exists.
+    // Unified geometry point (int32 pixel coordinates).
     using Point = geometry::Point;
-
-    struct QtDragParams
-    {
-            std::int32_t              interpolation_steps = 16;
-            std::chrono::milliseconds step_dwell{ 8 };
-            std::chrono::milliseconds drag_start_dwell{ 50 };
-    };
 
     [[nodiscard]]
     grab::Result<void>
-    qt_drag( Seat&               seat,
-             Point               from,
-             Point               to,
-             const QtDragParams& params = {} );
+    linear_drag( Seat&              seat,
+                 Point              from,
+                 Point              to,
+                 const DragOptions& options = {} );
+
+    [[nodiscard]]
+    grab::Result<void>
+    curve_drag( Seat&              seat,
+                Point              from,
+                Point              to,
+                const DragOptions& options = {} );
 
     [[nodiscard]]
     grab::Result<void>

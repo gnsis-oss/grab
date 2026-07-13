@@ -69,7 +69,7 @@ namespace grab
             std::unique_ptr<Impl> impl_;
     };
 
-    // ── Session descriptors (integrated session/inventory subsystem) ─────────
+    // ── Managed-session lifecycle descriptors ────────────────────────────────
     // Distinct from the live `Session` object above: these describe a session
     // to the SessionProvider/SessionManager lifecycle.
 

@@ -475,13 +475,11 @@ namespace grab::codec
                     break;
                 case grab::PixelFormat::Rgb :
                 case grab::PixelFormat::Bgr :
-                case grab::PixelFormat::Rgb24 :
                     layout.color_type    = PngColorType::Truecolor;
                     layout.png_row_bytes = width * rgbBytes;
                     break;
                 case grab::PixelFormat::Rgba :
                 case grab::PixelFormat::Bgra :
-                case grab::PixelFormat::Bgr0 :
                     layout.color_type    = PngColorType::TruecolorAlpha;
                     layout.png_row_bytes = width * rgbaBytes;
                     break;
@@ -572,14 +570,12 @@ namespace grab::codec
                     case grab::PixelFormat::Gray :
                     case grab::PixelFormat::Rgb :
                     case grab::PixelFormat::Rgba :
-                    case grab::PixelFormat::Rgb24 :
                         append_direct_row( scanlines, row, layout.png_row_bytes );
                         break;
                     case grab::PixelFormat::Bgr :
                         append_bgr_row( scanlines, row, layout );
                         break;
                     case grab::PixelFormat::Bgra :
-                    case grab::PixelFormat::Bgr0 :
                         append_bgra_row( scanlines, row, layout );
                         break;
                 }

@@ -37,11 +37,20 @@ namespace
     constexpr std::uint8_t     responseTypeMask        = 0X7FU;
     constexpr std::uint8_t     leftButton              = 1U;
     constexpr std::size_t      expectedTypedKeyPresses = 2U;
+    constexpr std::size_t      expectedPressedKeyCount = 1U;
     constexpr std::int32_t     minimumDragMotionEvents = 1;
     constexpr double           windowCenterFraction    = 0.5;
+    constexpr double           maximumWindowFraction   = 1.0;
+    constexpr double           outsideWindowFraction   = -0.01;
+    constexpr double           curveSourceX            = 0.2;
+    constexpr double           curveSourceY            = 0.3;
+    constexpr double           curveDestinationX       = 0.8;
+    constexpr double           curveDestinationY       = 0.7;
     constexpr auto             eventTimeout            = std::chrono::seconds{ 3 };
     constexpr auto             eventPollInterval       = std::chrono::milliseconds{ 5 };
     constexpr std::string_view typedText               = "Ab";
+    constexpr std::string_view returnKey               = "Return";
+    constexpr std::string_view unknownKey              = "NoSuchGrabKey";
     constexpr std::string_view inputInstance           = "grab-input-instance";
     constexpr std::string_view inputClass              = "GrabInputTestClass";
     constexpr std::string_view windowTitle             = "grab input test";
@@ -402,7 +411,7 @@ TEST( Input,
         create_observer_window( observer.get(), *screen, XCB_EVENT_MASK_KEY_PRESS );
     focus_window( observer.get(), window );
 
-    auto input = grab::Input::open( xvfbDisplay, usLayout );
+    auto input = grab::Input::open( xvfbDisplay );
     ASSERT_TRUE( input.has_value() ) << input.error().message;
 
     const auto type_result = input->type_text( typedText );
@@ -410,6 +419,41 @@ TEST( Input,
 
     EXPECT_GE( count_key_presses( observer.get(), expectedTypedKeyPresses ),
                expectedTypedKeyPresses );
+}
+
+TEST( Input,
+      PressKeyReachesWindow )
+{
+    const ObserverConnection observer{ xvfbDisplay };
+    ASSERT_NE( observer.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
+    const xcb_screen_t* screen =
+        default_screen( observer.get(), observer.screen_index() );
+    ASSERT_NE( screen, nullptr );
+    const xcb_window_t window =
+        create_observer_window( observer.get(), *screen, XCB_EVENT_MASK_KEY_PRESS );
+    focus_window( observer.get(), window );
+
+    auto input = grab::Input::open( xvfbDisplay, usLayout );
+    ASSERT_TRUE( input.has_value() ) << input.error().message;
+
+    const auto key_result = input->press_key( returnKey );
+    ASSERT_TRUE( key_result.has_value() ) << key_result.error().message;
+
+    EXPECT_GE( count_key_presses( observer.get(), expectedPressedKeyCount ),
+               expectedPressedKeyCount );
+}
+
+TEST( Input,
+      PressKeyRejectsUnknownName )
+{
+    auto input = grab::Input::open( xvfbDisplay );
+    ASSERT_TRUE( input.has_value() ) << input.error().message;
+
+    const auto key_result = input->press_key( unknownKey );
+
+    ASSERT_FALSE( key_result.has_value() );
+    EXPECT_EQ( key_result.error().code, grab::ErrorCode::UnsupportedCharacter );
 }
 
 TEST( Input,
@@ -425,7 +469,7 @@ TEST( Input,
         create_observer_window( observer.get(), *screen, XCB_EVENT_MASK_BUTTON_PRESS )
     );
 
-    auto input = grab::Input::open( xvfbDisplay, usLayout );
+    auto input = grab::Input::open( xvfbDisplay );
     ASSERT_TRUE( input.has_value() ) << input.error().message;
     auto located = input->locate( { std::string{ inputClass } }, windowTitle );
     ASSERT_TRUE( located.has_value() ) << located.error().message;
@@ -437,6 +481,62 @@ TEST( Input,
     ASSERT_TRUE( click_result.has_value() ) << click_result.error().message;
 
     EXPECT_TRUE( wait_for_button_press( observer.get() ) ) << missingClickEvent;
+}
+
+TEST( Input,
+      ClickInWindowMaximumFractionUsesLastPixel )
+{
+    const ObserverConnection observer{ xvfbDisplay };
+    ASSERT_NE( observer.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
+    const xcb_screen_t* screen =
+        default_screen( observer.get(), observer.screen_index() );
+    ASSERT_NE( screen, nullptr );
+    static_cast<void>(
+        create_observer_window( observer.get(), *screen, XCB_EVENT_MASK_BUTTON_PRESS )
+    );
+
+    auto input = grab::Input::open( xvfbDisplay );
+    ASSERT_TRUE( input.has_value() ) << input.error().message;
+    auto located = input->locate( { std::string{ inputClass } }, windowTitle );
+    ASSERT_TRUE( located.has_value() ) << located.error().message;
+
+    const auto click_result = input->click_in_window( *located,
+                                                      maximumWindowFraction,
+                                                      maximumWindowFraction,
+                                                      leftButton );
+    ASSERT_TRUE( click_result.has_value() ) << click_result.error().message;
+
+    const auto pointer = take_xcb_owned(
+        xcb_query_pointer_reply( observer.get(),
+                                 xcb_query_pointer( observer.get(), screen->root ),
+                                 nullptr )
+    );
+    ASSERT_NE( pointer, nullptr );
+    EXPECT_EQ( pointer->root_x, windowX + static_cast<std::int32_t>( windowWidth ) - 1 );
+    EXPECT_EQ( pointer->root_y,
+               windowY + static_cast<std::int32_t>( windowHeight ) - 1 );
+}
+
+TEST( Input,
+      ClickInWindowRejectsFractionOutsideUnitInterval )
+{
+    auto input = grab::Input::open( xvfbDisplay );
+    ASSERT_TRUE( input.has_value() ) << input.error().message;
+    const grab::input::LocatedWindow window{
+        .window = 0U,
+        .bounds =
+            { .x = windowX, .y = windowY, .width = windowWidth, .height = windowHeight },
+        .trust = grab::input::GeometryTrust::Trusted,
+    };
+
+    const auto click_result = input->click_in_window( window,
+                                                      outsideWindowFraction,
+                                                      windowCenterFraction,
+                                                      leftButton );
+
+    ASSERT_FALSE( click_result.has_value() );
+    EXPECT_EQ( click_result.error().code, grab::ErrorCode::InvalidArgument );
 }
 
 TEST( Input,
@@ -459,6 +559,38 @@ TEST( Input,
 
     const auto drag_result = input->drag( { .x = dragFromX, .y = dragFromY },
                                           { .x = dragToX, .y = dragToY } );
+    ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
+
+    const std::vector<ObservedPointerEvent> events =
+        collect_pointer_events( observer.get() );
+    EXPECT_TRUE( contains_drag_sequence( events ) );
+}
+
+TEST( Input,
+      CurveDragInWindowEmitsSequence )
+{
+    const ObserverConnection observer{ xvfbDisplay };
+    ASSERT_NE( observer.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
+    const xcb_screen_t* screen =
+        default_screen( observer.get(), observer.screen_index() );
+    ASSERT_NE( screen, nullptr );
+    static_cast<void>( create_observer_window( observer.get(),
+                                               *screen,
+                                               XCB_EVENT_MASK_BUTTON_PRESS |
+                                                   XCB_EVENT_MASK_BUTTON_RELEASE |
+                                                   XCB_EVENT_MASK_POINTER_MOTION ) );
+
+    auto input = grab::Input::open( xvfbDisplay );
+    ASSERT_TRUE( input.has_value() ) << input.error().message;
+    auto located = input->locate( { std::string{ inputClass } }, windowTitle );
+    ASSERT_TRUE( located.has_value() ) << located.error().message;
+
+    const auto drag_result = input->drag_curve_in_window( *located,
+                                                          curveSourceX,
+                                                          curveSourceY,
+                                                          curveDestinationX,
+                                                          curveDestinationY );
     ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
 
     const std::vector<ObservedPointerEvent> events =

@@ -11,9 +11,6 @@
 namespace grab
 {
 
-    // Unified pixel-format set: sg-port's channel-order family plus the two
-    // X11-capture formats (rgb24 = packed RGB, bgr0 = 32-bit BGRX) that the
-    // integrated platform/x11 + png_encoder path produces.
     enum class PixelFormat : std::uint8_t
     {
         Bgra,
@@ -21,8 +18,6 @@ namespace grab
         Rgb,
         Bgr,
         Gray,
-        Rgb24,
-        Bgr0,
     };
 
     [[nodiscard]]
@@ -37,11 +32,9 @@ namespace grab
         {
             case PixelFormat::Bgra :
             case PixelFormat::Rgba :
-            case PixelFormat::Bgr0 :
                 return fourChannelBytes;
             case PixelFormat::Rgb :
             case PixelFormat::Bgr :
-            case PixelFormat::Rgb24 :
                 return threeChannelBytes;
             case PixelFormat::Gray :
                 return grayBytes;
@@ -49,40 +42,6 @@ namespace grab
 
         return grayBytes;
     }
-
-    // Non-owning view over pixel data, used by the integrated png_encoder and
-    // platform/x11 capture path.
-    struct ImageView
-    {
-            const std::uint8_t* data   = nullptr;
-            std::uint32_t       width  = 0U;
-            std::uint32_t       height = 0U;
-            std::size_t         stride = 0U;
-            PixelFormat         format = PixelFormat::Rgb24;
-
-            [[nodiscard]]
-            constexpr geometry::Size
-            size() const noexcept
-            {
-                return geometry::Size{ .width = width, .height = height };
-            }
-
-            [[nodiscard]]
-            static constexpr ImageView
-            from_size( const std::uint8_t* image_data,
-                       geometry::Size      image_size,
-                       std::size_t         image_stride,
-                       PixelFormat         image_format = PixelFormat::Rgb24 ) noexcept
-            {
-                return ImageView{
-                    .data   = image_data,
-                    .width  = image_size.width,
-                    .height = image_size.height,
-                    .stride = image_stride,
-                    .format = image_format,
-                };
-            }
-    };
 
     struct Image
     {
@@ -104,21 +63,6 @@ namespace grab
             size() const noexcept
             {
                 return geometry::Size{ .width = width, .height = height };
-            }
-
-            // View the pixel buffer as raw bytes (for the ImageView-based
-            // encode path).
-            [[nodiscard]]
-            ImageView
-            view() const noexcept
-            {
-                return ImageView{
-                    .data   = reinterpret_cast<const std::uint8_t*>( pixels.data() ),
-                    .width  = width,
-                    .height = height,
-                    .stride = stride,
-                    .format = format,
-                };
             }
 
             [[nodiscard]]

@@ -1,7 +1,9 @@
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
+#include "platform/x11/protocol.hpp"
 #include "screen/enumerate.hpp"
+#include "screen/window_match.hpp"
 #include "screen/x11_capture.hpp"
 
 #include <algorithm>
@@ -11,7 +13,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
-#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
@@ -27,15 +28,11 @@ namespace grab
     namespace
     {
 
-        constexpr int              xcbOk                      = 0;
-        constexpr std::uint8_t     x11SuccessResponse         = 1U;
-        constexpr std::uint8_t     format32Bits               = 32U;
-        constexpr std::uint32_t    propertyOffsetZero         = 0U;
-        constexpr std::uint32_t    singleWindowPropertyLength = 1U;
-        constexpr unsigned char    asciiUpperA                = 'A';
-        constexpr unsigned char    asciiUpperZ                = 'Z';
-        constexpr unsigned char    asciiCaseOffset            = 'a' - 'A';
-        constexpr std::string_view netActiveWindowAtom        = "_NET_ACTIVE_WINDOW";
+        constexpr int           xcbOk                      = 0;
+        constexpr std::uint8_t  x11SuccessResponse         = 1U;
+        constexpr std::uint8_t  format32Bits               = 32U;
+        constexpr std::uint32_t propertyOffsetZero         = 0U;
+        constexpr std::uint32_t singleWindowPropertyLength = 1U;
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -55,57 +52,6 @@ namespace grab
         take_xcb_owned( T* pointer ) noexcept
         {
             return XcbOwned<T>{ pointer, &std::free };
-        }
-
-        [[nodiscard]]
-        char
-        ascii_lower( char value ) noexcept
-        {
-            const auto code = static_cast<unsigned char>( value );
-            if( code >= asciiUpperA && code <= asciiUpperZ )
-            {
-                return static_cast<char>( code + asciiCaseOffset );
-            }
-            return value;
-        }
-
-        [[nodiscard]]
-        std::string
-        ascii_lower_copy( std::string_view text )
-        {
-            std::string result;
-            result.reserve( text.size() );
-            std::ranges::transform( text, std::back_inserter( result ), ascii_lower );
-            return result;
-        }
-
-        [[nodiscard]]
-        std::vector<std::string>
-        normalized_candidates( const std::vector<std::string>& candidates )
-        {
-            std::vector<std::string> result;
-            result.reserve( candidates.size() );
-            for( const std::string& candidate : candidates )
-            {
-                if( !candidate.empty() )
-                {
-                    result.push_back( ascii_lower_copy( candidate ) );
-                }
-            }
-            return result;
-        }
-
-        [[nodiscard]]
-        bool
-        wm_class_matches( std::string_view                wm_class,
-                          const std::vector<std::string>& candidates )
-        {
-            const std::string lowered_class = ascii_lower_copy( wm_class );
-            return std::ranges::any_of( candidates,
-                                        [&lowered_class]( const std::string& candidate )
-                                        {
-                                            return lowered_class.contains( candidate );
-                                        } );
         }
 
         [[nodiscard]]
@@ -157,17 +103,19 @@ namespace grab
         intern_active_window_atom( xcb_connection_t* connection )
         {
             xcb_generic_error_t* raw_error = nullptr;
-            const auto           reply     = take_xcb_owned(
-                xcb_intern_atom_reply( connection,
-                                       xcb_intern_atom( connection,
-                                                        1U,
-                                                        static_cast<std::uint16_t>(
-                                                            netActiveWindowAtom.size()
-                                                        ),
-                                                        netActiveWindowAtom.data() ),
-                                       &raw_error )
-            );
-            const auto error = take_xcb_owned( raw_error );
+            const auto           reply     = take_xcb_owned( xcb_intern_atom_reply(
+                connection,
+                xcb_intern_atom(
+                    connection,
+                    1U,
+                    static_cast<std::uint16_t>(
+                        grab::platform::x11::atom_name::netActiveWindow.size()
+                    ),
+                    grab::platform::x11::atom_name::netActiveWindow.data()
+                ),
+                &raw_error
+            ) );
+            const auto           error     = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
                 return grab::fail( grab::ErrorCode::ProtocolError,
@@ -336,7 +284,7 @@ namespace grab
         }
 
         const std::vector<std::string> candidates =
-            normalized_candidates( wm_class_candidates );
+            grab::screen::normalized_wm_class_candidates( wm_class_candidates );
         if( candidates.empty() )
         {
             return grab::fail( grab::ErrorCode::WindowNotFound,
@@ -351,7 +299,7 @@ namespace grab
 
         for( const screen::WindowInfo& info : *windows )
         {
-            if( wm_class_matches( info.wm_class, candidates ) )
+            if( grab::screen::wm_class_matches_any( info.wm_class, candidates ) )
             {
                 return impl_->capturer.capture_window( info.id );
             }

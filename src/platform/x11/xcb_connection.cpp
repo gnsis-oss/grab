@@ -1,13 +1,10 @@
 #include "grab/result.hpp"
 #include "platform/x11/xcb_connection.hpp"
-#include "platform/x11/xcb_reply.hpp"
 
 #include <string>
 #include <string_view>
 #include <utility>
-#include <xcb/shm.h>
 #include <xcb/xcb.h>
-#include <xcb/xfixes.h>
 #include <xcb/xproto.h>
 
 namespace grab::platform::x11
@@ -37,46 +34,6 @@ namespace grab::platform::x11
         }
 
         [[nodiscard]]
-        bool
-        query_shm( xcb_connection_t* connection ) noexcept
-        {
-            const xcb_query_extension_reply_t* extension =
-                xcb_get_extension_data( connection, &xcb_shm_id );
-            if( extension == nullptr || extension->present == 0 )
-            {
-                return false;
-            }
-
-            const xcb_shm_query_version_cookie_t cookie =
-                xcb_shm_query_version( connection );
-            auto reply = make_xcb_reply(
-                xcb_shm_query_version_reply( connection, cookie, nullptr )
-            );
-            return reply != nullptr;
-        }
-
-        [[nodiscard]]
-        bool
-        query_xfixes( xcb_connection_t* connection ) noexcept
-        {
-            const xcb_query_extension_reply_t* extension =
-                xcb_get_extension_data( connection, &xcb_xfixes_id );
-            if( extension == nullptr || extension->present == 0 )
-            {
-                return false;
-            }
-
-            const xcb_xfixes_query_version_cookie_t cookie =
-                xcb_xfixes_query_version( connection,
-                                          XCB_XFIXES_MAJOR_VERSION,
-                                          XCB_XFIXES_MINOR_VERSION );
-            auto reply = make_xcb_reply(
-                xcb_xfixes_query_version_reply( connection, cookie, nullptr )
-            );
-            return reply != nullptr;
-        }
-
-        [[nodiscard]]
         const char*
         display_name_or_default( const std::string& display ) noexcept
         {
@@ -90,13 +47,9 @@ namespace grab::platform::x11
     }    // namespace
 
     XcbConnection::XcbConnection( xcb_connection_t* connection,
-                                  xcb_window_t      root,
-                                  bool              has_shm,
-                                  bool              has_xfixes ) noexcept :
+                                  xcb_window_t      root ) noexcept :
         connection( connection ),
-        root_window( root ),
-        has_shm_extension( has_shm ),
-        has_xfixes_extension( has_xfixes )
+        root_window( root )
     {
     }
 
@@ -104,11 +57,7 @@ namespace grab::platform::x11
         connection( std::exchange( other.connection,
                                    nullptr ) ),
         root_window( std::exchange( other.root_window,
-                                    XCB_NONE ) ),
-        has_shm_extension( std::exchange( other.has_shm_extension,
-                                          false ) ),
-        has_xfixes_extension( std::exchange( other.has_xfixes_extension,
-                                             false ) )
+                                    XCB_NONE ) )
     {
     }
 
@@ -121,10 +70,8 @@ namespace grab::platform::x11
             {
                 xcb_disconnect( connection );
             }
-            connection           = std::exchange( other.connection, nullptr );
-            root_window          = std::exchange( other.root_window, XCB_NONE );
-            has_shm_extension    = std::exchange( other.has_shm_extension, false );
-            has_xfixes_extension = std::exchange( other.has_xfixes_extension, false );
+            connection  = std::exchange( other.connection, nullptr );
+            root_window = std::exchange( other.root_window, XCB_NONE );
         }
         return *this;
     }
@@ -163,13 +110,7 @@ namespace grab::platform::x11
             return grab::fail( root.error().code, root.error().message );
         }
 
-        const bool has_xfixes = query_xfixes( connection );
-        return XcbConnection{
-            connection,
-            *root,
-            query_shm( connection ),
-            has_xfixes,
-        };
+        return XcbConnection{ connection, *root };
     }
 
     xcb_connection_t*
@@ -182,18 +123,6 @@ namespace grab::platform::x11
     XcbConnection::root() const noexcept
     {
         return root_window;
-    }
-
-    bool
-    XcbConnection::has_shm() const noexcept
-    {
-        return has_shm_extension;
-    }
-
-    bool
-    XcbConnection::has_xfixes() const noexcept
-    {
-        return has_xfixes_extension;
     }
 
 }    // namespace grab::platform::x11

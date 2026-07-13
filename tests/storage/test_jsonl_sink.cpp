@@ -27,6 +27,8 @@ namespace
     constexpr std::string_view thirdDayFileName    = "2024-01-03.jsonl";
     constexpr std::string_view fourthDayFileName   = "2024-01-04.jsonl";
     constexpr std::string_view fifthDayFileName    = "2024-01-05.jsonl";
+    constexpr std::string_view preEpochFileName    = "1969-12-31.jsonl";
+    constexpr std::string_view leapDayFileName     = "2024-02-29.jsonl";
     constexpr std::string_view typeKey             = "type";
     constexpr std::string_view categoryKey         = "category";
     constexpr std::string_view oldTierKey          = "tier";
@@ -52,6 +54,8 @@ namespace
     constexpr char             jsonEscape          = '\\';
     constexpr char             fillerByte          = 'x';
     constexpr double           firstDayTimestamp   = 1'704'067'200.0;
+    constexpr double           preEpochTimestamp   = -0.25;
+    constexpr double           leapDayTimestamp    = 1'709'164'800.0;
     constexpr double           secondsPerDay       = 86'400.0;
     constexpr std::uint64_t    firstSequence       = 1U;
     constexpr std::uint64_t    secondSequence      = firstSequence + 1U;
@@ -356,6 +360,28 @@ TEST( JsonlSink,
                                           std::string{ firstDayFileName } ) );
     EXPECT_TRUE( std::filesystem::exists( temp.path() /
                                           std::string{ secondDayFileName } ) );
+}
+
+TEST( JsonlSink,
+      UsesCalendarDatesAcrossEpochAndLeapDay )
+{
+    const TempDir temp( "UsesCalendarDatesAcrossEpochAndLeapDay" );
+    auto          sink_result = grab::storage::JsonlSink::open(
+        make_options( temp.path(), bufferLimit, generousFileLimit, tinyDiskBudgetMb )
+    );
+    ASSERT_TRUE( is_ok( sink_result ) );
+    auto sink = std::move( sink_result ).value();
+
+    ASSERT_TRUE( is_ok( sink.write( make_key_event( preEpochTimestamp,
+                                                    firstSequence ) ) ) );
+    ASSERT_TRUE( is_ok( sink.write( make_key_event( leapDayTimestamp,
+                                                    secondSequence ) ) ) );
+    ASSERT_TRUE( is_ok( sink.flush() ) );
+
+    EXPECT_TRUE( std::filesystem::exists( temp.path() /
+                                          std::string{ preEpochFileName } ) );
+    EXPECT_TRUE( std::filesystem::exists( temp.path() /
+                                          std::string{ leapDayFileName } ) );
 }
 
 TEST( JsonlSink,

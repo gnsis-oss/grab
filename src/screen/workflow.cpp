@@ -7,6 +7,7 @@
 #include "grab/screen.hpp"
 #include "image/compare.hpp"
 #include "notify/notifier.hpp"
+#include "screen/window_match.hpp"
 #include "screen/workflow.hpp"
 
 #include <algorithm>
@@ -34,9 +35,6 @@ namespace grab::screen
     namespace
     {
 
-        constexpr unsigned char    asciiUpperA                  = 'A';
-        constexpr unsigned char    asciiUpperZ                  = 'Z';
-        constexpr unsigned char    asciiCaseOffset              = 'a' - 'A';
         constexpr char             candidateSeparator           = ',';
         constexpr std::int32_t     defaultNotificationTimeoutMs = -1;
         constexpr std::uint32_t    oneCapture                   = 1U;
@@ -106,57 +104,6 @@ namespace grab::screen
                 grab::Result<void>  result_;
                 std::thread         thread_;
         };
-
-        [[nodiscard]]
-        char
-        ascii_lower( char value ) noexcept
-        {
-            const auto code = static_cast<unsigned char>( value );
-            if( code >= asciiUpperA && code <= asciiUpperZ )
-            {
-                return static_cast<char>( code + asciiCaseOffset );
-            }
-            return value;
-        }
-
-        [[nodiscard]]
-        std::string
-        ascii_lower_copy( std::string_view text )
-        {
-            std::string result;
-            result.reserve( text.size() );
-            std::ranges::transform( text, std::back_inserter( result ), ascii_lower );
-            return result;
-        }
-
-        [[nodiscard]]
-        std::vector<std::string>
-        normalized_candidates( const std::vector<std::string>& candidates )
-        {
-            std::vector<std::string> result;
-            result.reserve( candidates.size() );
-            for( const std::string& candidate : candidates )
-            {
-                if( !candidate.empty() )
-                {
-                    result.push_back( ascii_lower_copy( candidate ) );
-                }
-            }
-            return result;
-        }
-
-        [[nodiscard]]
-        bool
-        wm_class_matches( std::string_view                wm_class,
-                          const std::vector<std::string>& candidates )
-        {
-            const std::string lowered_class = ascii_lower_copy( wm_class );
-            return std::ranges::any_of( candidates,
-                                        [&lowered_class]( const std::string& candidate )
-                                        {
-                                            return lowered_class.contains( candidate );
-                                        } );
-        }
 
         [[nodiscard]]
         std::string
@@ -289,7 +236,9 @@ namespace grab::screen
             }
 
             const auto* payload = std::get_if<grab::WindowChange>( &event.payload );
-            if( payload == nullptr || !wm_class_matches( payload->app, candidates ) )
+            if( payload ==
+                nullptr ||
+                !grab::screen::wm_class_matches_any( payload->app, candidates ) )
             {
                 return std::nullopt;
             }
@@ -436,7 +385,7 @@ namespace grab::screen
         }
 
         const std::vector<std::string> candidates =
-            normalized_candidates( wm_class_candidates );
+            grab::screen::normalized_wm_class_candidates( wm_class_candidates );
         if( candidates.empty() )
         {
             return grab::fail(

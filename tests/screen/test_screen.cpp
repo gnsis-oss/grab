@@ -306,7 +306,6 @@ namespace
         {
             case grab::PixelFormat::Bgra :
             case grab::PixelFormat::Bgr :
-            case grab::PixelFormat::Bgr0 :
                 return ExpectedChannels{
                     .first  = expectedBlue,
                     .second = expectedGreen,
@@ -314,7 +313,6 @@ namespace
                 };
             case grab::PixelFormat::Rgba :
             case grab::PixelFormat::Rgb :
-            case grab::PixelFormat::Rgb24 :
                 return ExpectedChannels{
                     .first  = expectedRed,
                     .second = expectedGreen,

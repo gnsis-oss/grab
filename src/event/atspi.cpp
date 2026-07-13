@@ -1,3 +1,4 @@
+#include "core/ascii.hpp"
 #include "core/reactor.hpp"
 #include "event/atspi.hpp"
 #include "grab/event.hpp"
@@ -48,35 +49,35 @@ namespace grab::event
         constexpr const char*   objectEventInterface = "org.a11y.atspi.Event.Object";
         constexpr const char*   objectEventMatch =
             "type='signal',interface='org.a11y.atspi.Event.Object'";
-        constexpr std::string_view                 stateChangedMember = "StateChanged";
-        constexpr std::string_view                 textChangedMember  = "TextChanged";
-        constexpr std::string_view                 actionMember       = "Action";
-        constexpr std::string_view                 clickedMember      = "Clicked";
-        constexpr std::string_view                 focusedDetail      = "focused";
-        constexpr std::string_view                 pressedDetail      = "pressed";
-        constexpr std::string_view                 clickedDetail      = "clicked";
-        constexpr std::string_view                 clickDetail        = "click";
-        constexpr std::string_view                 activateDetail     = "activate";
-        constexpr std::string_view                 actionDetail       = "action";
-        constexpr std::string_view                 menuOpenedDetail   = "menu-opened";
-        constexpr std::string_view                 menuClosedDetail   = "menu-closed";
-        constexpr std::string_view                 showingDetail      = "showing";
-        constexpr std::string_view                 visibleDetail      = "visible";
-        constexpr std::string_view                 hiddenDetail       = "hidden";
-        constexpr std::string_view                 collapsedDetail    = "collapsed";
-        constexpr std::string_view                 menuRoleNeedle     = "menu";
-        constexpr std::string_view                 buttonRoleNeedle   = "button";
-        constexpr std::string_view                 pushRoleNeedle     = "push";
-        constexpr std::string_view                 textChangedPrefix  = "text-changed";
+        constexpr std::string_view stateChangedMember = "StateChanged";
+        constexpr std::string_view textChangedMember  = "TextChanged";
+        constexpr std::string_view actionMember       = "Action";
+        constexpr std::string_view clickedMember      = "Clicked";
+        constexpr std::string_view focusedDetail      = "focused";
+        constexpr std::string_view pressedDetail      = "pressed";
+        constexpr std::string_view clickedDetail      = "clicked";
+        constexpr std::string_view clickDetail        = "click";
+        constexpr std::string_view activateDetail     = "activate";
+        constexpr std::string_view actionDetail       = "action";
+        constexpr std::string_view menuOpenedDetail   = "menu-opened";
+        constexpr std::string_view menuClosedDetail   = "menu-closed";
+        constexpr std::string_view showingDetail      = "showing";
+        constexpr std::string_view visibleDetail      = "visible";
+        constexpr std::string_view hiddenDetail       = "hidden";
+        constexpr std::string_view collapsedDetail    = "collapsed";
+        constexpr std::string_view menuRoleNeedle     = "menu";
+        constexpr std::string_view buttonRoleNeedle   = "button";
+        constexpr std::string_view pushRoleNeedle     = "push";
+        constexpr std::string_view textChangedPrefix  = "text-changed";
 
-        constexpr std::array<std::string_view, 6U> registeredEvents{
+        constexpr auto             registeredEvents = std::to_array<std::string_view>( {
             "object:state-changed:focused",
             "object:state-changed:pressed",
             "object:state-changed:checked",
             "object:state-changed:showing",
             "object:state-changed:visible",
             "object:text-changed",
-        };
+        } );
 
         struct WatchRegistration
         {
@@ -161,61 +162,22 @@ namespace grab::event
         }
 
         [[nodiscard]]
-        std::string
-        lower_ascii( std::string_view value )
-        {
-            std::string lowered{ value };
-            std::ranges::transform( lowered,
-                                    lowered.begin(),
-                                    []( unsigned char character )
-                                    {
-                                        if( character >= 'A' && character <= 'Z' )
-                                        {
-                                            return static_cast<char>( character +
-                                                                      ( 'a' - 'A' ) );
-                                        }
-                                        return static_cast<char>( character );
-                                    } );
-            return lowered;
-        }
-
-        [[nodiscard]]
-        bool
-        contains_ascii( std::string_view haystack,
-                        std::string_view needle )
-        {
-            const auto lowered_haystack = lower_ascii( haystack );
-            const auto lowered_needle   = lower_ascii( needle );
-            return lowered_haystack.contains( lowered_needle );
-        }
-
-        [[nodiscard]]
-        bool
-        starts_with_ascii( std::string_view value,
-                           std::string_view prefix )
-        {
-            const auto lowered_value  = lower_ascii( value );
-            const auto lowered_prefix = lower_ascii( prefix );
-            return lowered_value.starts_with( lowered_prefix );
-        }
-
-        [[nodiscard]]
         bool
         is_button_signal( const AtspiSignal& signal )
         {
-            return contains_ascii( signal.role, buttonRoleNeedle ) ||
-                   contains_ascii( signal.role, pushRoleNeedle ) ||
-                   contains_ascii( signal.detail, clickedDetail ) ||
-                   contains_ascii( signal.detail, clickDetail ) ||
-                   contains_ascii( signal.detail, activateDetail ) ||
-                   contains_ascii( signal.detail, actionDetail );
+            return grab::core::ascii_icontains( signal.role, buttonRoleNeedle ) ||
+                   grab::core::ascii_icontains( signal.role, pushRoleNeedle ) ||
+                   grab::core::ascii_icontains( signal.detail, clickedDetail ) ||
+                   grab::core::ascii_icontains( signal.detail, clickDetail ) ||
+                   grab::core::ascii_icontains( signal.detail, activateDetail ) ||
+                   grab::core::ascii_icontains( signal.detail, actionDetail );
         }
 
         [[nodiscard]]
         bool
         is_menu_signal( const AtspiSignal& signal )
         {
-            return contains_ascii( signal.role, menuRoleNeedle );
+            return grab::core::ascii_icontains( signal.role, menuRoleNeedle );
         }
 
         [[nodiscard]]
@@ -249,7 +211,7 @@ namespace grab::event
 
             if( signal.member ==
                 textChangedMember ||
-                starts_with_ascii( signal.detail, textChangedPrefix ) )
+                grab::core::ascii_istarts_with( signal.detail, textChangedPrefix ) )
             {
                 return grab::EventKind::A11yTextChanged;
             }

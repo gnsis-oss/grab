@@ -1,9 +1,9 @@
 #pragma once
 
-#include <algorithm>
-
+#include "core/ascii.hpp"
 #include "grab/event.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <optional>
@@ -13,47 +13,29 @@
 namespace grab::event
 {
 
-    constexpr std::array<std::string_view, 16> browserKeywords{
-        {
-         "firefox", "navigator",
-         "mozilla", "chrome",
-         "chromium", "brave",
-         "vivaldi", "opera",
-         "edge", "epiphany",
-         "midori", "min",
-         "zen-browser", "waterfox",
-         "librewolf", "tor browser",
-         }
-    };
-    static_assert( browserKeywords.size() == 16U );
+    constexpr auto             browserKeywords = std::to_array<std::string_view>( {
+        "firefox",
+        "navigator",
+        "mozilla",
+        "chrome",
+        "chromium",
+        "brave",
+        "vivaldi",
+        "opera",
+        "edge",
+        "epiphany",
+        "midori",
+        "min",
+        "zen-browser",
+        "waterfox",
+        "librewolf",
+        "tor browser",
+    } );
 
-    constexpr std::string_view minKeyword = "min";
+    constexpr std::string_view minKeyword      = "min";
 
     namespace detail
     {
-
-        [[nodiscard]]
-        constexpr char
-        lower_ascii( char character ) noexcept
-        {
-            if( character >= 'A' && character <= 'Z' )
-            {
-                return static_cast<char>( character + ( 'a' - 'A' ) );
-            }
-            return character;
-        }
-
-        [[nodiscard]]
-        inline std::string
-        lower_ascii( std::string_view value )
-        {
-            std::string lowered{ value };
-            for( char& character : lowered )
-            {
-                character = lower_ascii( character );
-            }
-            return lowered;
-        }
 
         [[nodiscard]]
         constexpr bool
@@ -61,14 +43,6 @@ namespace grab::event
                         std::string_view needle ) noexcept
         {
             return haystack.find( needle ) != std::string_view::npos;
-        }
-
-        [[nodiscard]]
-        constexpr bool
-        is_ascii_alnum( char character ) noexcept
-        {
-            return ( character >= 'a' && character <= 'z' ) ||
-                   ( character >= '0' && character <= '9' );
         }
 
         [[nodiscard]]
@@ -81,8 +55,8 @@ namespace grab::event
             const auto end      = position + length;
             const bool at_end   = end == value.size();
 
-            return ( at_begin || !is_ascii_alnum( value[position - 1U] ) ) &&
-                   ( at_end || !is_ascii_alnum( value[end] ) );
+            return ( at_begin || !grab::core::ascii_is_alnum( value[position - 1U] ) ) &&
+                   ( at_end || !grab::core::ascii_is_alnum( value[end] ) );
         }
 
         [[nodiscard]]
@@ -108,7 +82,7 @@ namespace grab::event
     inline bool
     is_browser_app( std::string_view app_or_wm_class ) noexcept
     {
-        const std::string lowered = detail::lower_ascii( app_or_wm_class );
+        const std::string lowered = grab::core::ascii_lower_copy( app_or_wm_class );
         // "min" (a real browser) is too short to substring-match safely: it
         // would flag "gnome-terminal", "admin", etc. Require a whole-token match
         // for it; every other keyword is a plain substring.
@@ -119,7 +93,8 @@ namespace grab::event
                 return keyword == minKeyword
                          ? detail::contains_ascii_token( lowered, keyword )
                          : detail::contains_ascii( lowered, keyword );
-            } );
+            }
+        );
     }
 
     [[nodiscard]]

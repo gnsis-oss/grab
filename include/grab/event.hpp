@@ -20,6 +20,7 @@ namespace grab
         Integration   = 4U,
         Browser       = 5U,
         State         = 6U,
+        Count         = 7U,
     };
 
     enum class EventKind : std::uint16_t

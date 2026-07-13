@@ -80,7 +80,6 @@ target_link_libraries(grab_screen
         PkgConfig::GRAB_XCB
         PkgConfig::GRAB_XCB_COMPOSITE
         PkgConfig::GRAB_XCB_SHM
-        PkgConfig::GRAB_XCB_XFIXES
         PkgConfig::GRAB_XCB_RANDR
         ${GRAB_LIBAV_TARGETS}
 )
@@ -129,17 +128,6 @@ target_compile_features(grab_notify PUBLIC cxx_std_23)
 
 target_link_libraries(grab_screen PUBLIC grab_event grab_image grab_notify)
 
-# ── Integrated subsystems from feat/grab-combined ──────────────────────────
-# combined's second PNG encoder (ImageView-based); coexists with grab_codec
-# (Image-based) as a distinct overload set.
-add_library(grab_codec_png STATIC
-    src/codec/png/png_encoder.cpp
-)
-target_link_libraries(grab_codec_png PUBLIC grab_core PRIVATE "${GRAB_ZLIB_TARGET}")
-target_include_directories(grab_codec_png PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
-target_include_directories(grab_codec_png PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-target_compile_features(grab_codec_png PUBLIC cxx_std_23)
-
 add_library(grab_session STATIC
     src/session/manager.cpp
     src/session/record.cpp
@@ -153,38 +141,21 @@ target_include_directories(grab_session PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_session PUBLIC cxx_std_23)
 
 add_library(grab_platform_x11 STATIC
-    src/platform/x11/cursor_overlay.cpp
     src/platform/x11/xcb_connection.cpp
-    src/platform/x11/pixel_format.cpp
-    src/platform/x11/xcb_screen_provider.cpp
-    src/platform/x11/xcb_window.cpp
     src/platform/x11/xi_seat.cpp
     src/session/x11_seat_provider.cpp
     src/session/builtin_session_providers.cpp
 )
-target_link_libraries(grab_platform_x11 PUBLIC grab_core grab_codec_png grab_session
-    PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_SHM PkgConfig::GRAB_XCB_XFIXES
-    PkgConfig::GRAB_XCB_XTEST PkgConfig::GRAB_XCB_XINPUT)
+target_link_libraries(grab_platform_x11 PUBLIC grab_core grab_session
+    PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XINPUT)
 target_include_directories(grab_platform_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_platform_x11 PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 
-# combined's InputSink/drag_curve synthesis stack (renamed from combined's
-# grab_input to avoid clashing with sg-port's grab_input/qt_drag).
-add_library(grab_input_sink STATIC
-    src/input/gesture.cpp
-)
-target_link_libraries(grab_input_sink PUBLIC grab_core)
-target_include_directories(grab_input_sink PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
-target_include_directories(grab_input_sink PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-target_compile_features(grab_input_sink PUBLIC cxx_std_23)
-
 add_library(grab_input_x11 STATIC
     src/platform/x11/xkb_keymap.cpp
-    src/platform/x11/xtest_input.cpp
 )
-target_link_libraries(grab_input_x11 PUBLIC grab_input_sink grab_platform_x11
-    PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XTEST
+target_link_libraries(grab_input_x11 PUBLIC grab_platform_x11
     PkgConfig::GRAB_XKBCOMMON PkgConfig::GRAB_XKBCOMMON_X11)
 target_include_directories(grab_input_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_input_x11 PUBLIC cxx_std_23)
@@ -219,7 +190,7 @@ add_executable(grab_cli
 )
 set_target_properties(grab_cli PROPERTIES OUTPUT_NAME grab)
 target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_service
-    grab_input_sink grab_input_x11 grab_platform_x11 grab_session grab_codec_png)
+    grab_input_x11 grab_platform_x11 grab_session)
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 

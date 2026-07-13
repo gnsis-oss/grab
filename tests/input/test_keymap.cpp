@@ -194,7 +194,6 @@ TEST( Keymap,
     EXPECT_FALSE( keystroke->shift );
     EXPECT_FALSE( keystroke->altgr );
     EXPECT_NE( keymap->shift_keycode(), 0U );
-    EXPECT_NE( keymap->altgr_keycode(), 0U );
 
     std::string produced;
     ASSERT_TRUE( render_keystroke( *keystroke, produced ) );

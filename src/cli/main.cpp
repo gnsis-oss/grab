@@ -1,12 +1,15 @@
+#include "cli/common.hpp"
 #include "cli/input_command.hpp"
 #include "cli/session_command.hpp"
 #include "codec/png.hpp"
 #include "core/doctor.hpp"
 #include "core/prober.hpp"
 #include "core/registry.hpp"
+#include "grab/enum_table.hpp"
 #include "grab/geometry/rectangle.hpp"
 #include "grab/image.hpp"
 #include "grab/input.hpp"
+#include "grab/pointer_button.hpp"
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
 #include "image/compare.hpp"
@@ -15,6 +18,7 @@
 #include "screen/workflow.hpp"
 #include "service/daemon.hpp"
 
+#include <array>
 #include <charconv>
 #include <condition_variable>
 #include <cstddef>
@@ -43,13 +47,12 @@
 namespace
 {
 
-    constexpr int           usageError              = 2;
-    constexpr int           runtimeError            = 1;
-    constexpr int           signalSuccess           = 0;
+    constexpr int           usageError              = grab::cli::usageExitCode;
+    constexpr int           runtimeError            = grab::cli::runtimeExitCode;
+    constexpr int           signalSuccess           = grab::cli::successExitCode;
     constexpr char          coordinateSeparator     = ',';
     constexpr char          dimensionSeparator      = 'x';
     constexpr char          upperDimensionSeparator = 'X';
-    constexpr std::uint8_t  defaultButton           = 1U;
     constexpr std::uint64_t noDiffPixels            = 0U;
     constexpr std::time_t   signalPollSeconds       = 0;
     constexpr auto          signalPollNanoseconds = decltype( timespec{}.tv_nsec ){ 0 };
@@ -61,6 +64,42 @@ namespace
         Display,
         Region,
     };
+
+    enum class Command : std::uint8_t
+    {
+        Doctor,
+        Daemon,
+        Type,
+        Click,
+        Drag,
+        DragCurve,
+        Capture,
+        Batch,
+        Compare,
+        Watch,
+        Key,
+        Session,
+        Count,
+    };
+
+    constexpr auto commandNames = grab::EnumTable{
+        std::to_array( {
+            grab::enum_entry( Command::Doctor, "doctor" ),
+            grab::enum_entry( Command::Daemon, "daemon" ),
+            grab::enum_entry( Command::Type, "type" ),
+            grab::enum_entry( Command::Click, "click" ),
+            grab::enum_entry( Command::Drag, "drag" ),
+            grab::enum_entry( Command::DragCurve, "drag-curve" ),
+            grab::enum_entry( Command::Capture, "capture" ),
+            grab::enum_entry( Command::Batch, "batch" ),
+            grab::enum_entry( Command::Compare, "compare" ),
+            grab::enum_entry( Command::Watch, "watch" ),
+            grab::enum_entry( Command::Key, "key" ),
+            grab::enum_entry( Command::Session, "session" ),
+        } ),
+    };
+    static_assert( grab::enum_table_has_count( commandNames,
+                                               Command::Count ) );
 
     using CaptureRegion = grab::geometry::Rectangle;
 
@@ -98,8 +137,8 @@ namespace
     struct TypeOptions
     {
             std::string text;
-            const char* display  = nullptr;
-            std::string layout   = "us";
+            const char* display = nullptr;
+            std::string layout;
             bool        has_text = false;
     };
 
@@ -107,7 +146,7 @@ namespace
     {
             grab::input::Point at;
             const char*        display = nullptr;
-            std::uint8_t       button  = defaultButton;
+            std::uint8_t       button  = grab::input::primaryButton;
             bool               has_at  = false;
     };
 
@@ -152,7 +191,12 @@ namespace
                             stderr );
         ( void )std::fputs( "       grab type --text TEXT [--display D] [--layout L]\n"
                             "       grab click --at X,Y [--button N] [--display D]\n"
-                            "       grab drag --from X,Y --to X,Y [--display D]\n",
+                            "       grab drag --from X,Y --to X,Y [--display D]\n"
+                            "       grab key --window APP --keysym NAME [--display D] "
+                            "[--layout L]\n",
+                            stderr );
+        ( void )std::fputs( "       grab drag-curve --window APP --src X,Y --dst X,Y "
+                            "[--display D]\n",
                             stderr );
         ( void )std::fputs( "       grab capture --window WMCLASS --out FILE.png\n"
                             "       grab capture --display --out FILE.png\n"
@@ -175,13 +219,7 @@ namespace
         ( void )print( stderr, "grab: fatal: %s\n", detail );
     }
 
-    void
-    print_error( std::string_view detail )
-    {
-        ( void )std::fputs( "grab: error: ", stderr );
-        ( void )std::fwrite( detail.data(), sizeof( char ), detail.size(), stderr );
-        ( void )std::fputc( '\n', stderr );
-    }
+    using grab::cli::print_error;
 
     [[nodiscard]]
     grab::Result<std::int16_t>
@@ -1407,98 +1445,66 @@ namespace
 
         const std::span<char*>     args( argv, static_cast<std::size_t>( argc ) );
         const auto                 cli_args = args.subspan( 1 );
-        const std::string_view     command  = cli_args.front();
-        constexpr std::string_view doctorCommand{ "doctor" };
-        constexpr std::string_view daemonCommand{ "daemon" };
-        constexpr std::string_view typeCommand{ "type" };
-        constexpr std::string_view clickCommand{ "click" };
-        constexpr std::string_view dragCommand{ "drag" };
-        constexpr std::string_view captureCommand{ "capture" };
-        constexpr std::string_view batchCommand{ "batch" };
-        constexpr std::string_view compareCommand{ "compare" };
-        constexpr std::string_view watchCommand{ "watch" };
-        constexpr std::string_view keyCommand{ "key" };
-        constexpr std::string_view dragCurveCommand{ "drag-curve" };
-        constexpr std::string_view sessionCommand{ "session" };
+        const auto                 command  = commandNames.value_of( cli_args.front() );
         constexpr std::string_view jsonFlag{ "--json" };
 
-        if( command == doctorCommand )
+        if( !command.has_value() )
         {
-            bool as_json = false;
-            for( const char* arg : cli_args.subspan( 1 ) )
-            {
-                if( std::string_view( arg ) == jsonFlag )
+            print_usage();
+            return usageError;
+        }
+
+        switch( *command )
+        {
+            case Command::Doctor :
                 {
-                    as_json = true;
+                    bool as_json = false;
+                    for( const char* arg : cli_args.subspan( 1 ) )
+                    {
+                        if( std::string_view( arg ) == jsonFlag )
+                        {
+                            as_json = true;
+                        }
+                        else
+                        {
+                            print_usage();
+                            return usageError;
+                        }
+                    }
+                    return run_doctor_command( as_json );
                 }
-                else
+            case Command::Daemon :
+                return run_daemon_command( cli_args.subspan( 1 ) );
+            case Command::Type :
+                return run_type_command( cli_args.subspan( 1 ) );
+            case Command::Click :
+                return run_click_command( cli_args.subspan( 1 ) );
+            case Command::Drag :
+                return run_drag_command( cli_args.subspan( 1 ) );
+            case Command::DragCurve :
+                return grab::cli::run_drag_curve_command( cli_args.subspan( 1 ) );
+            case Command::Capture :
+                return run_capture_command( cli_args.subspan( 1 ) );
+            case Command::Batch :
+                return run_batch_command( cli_args.subspan( 1 ) );
+            case Command::Compare :
+                return run_compare_command( cli_args.subspan( 1 ) );
+            case Command::Watch :
+                return run_watch_command( cli_args.subspan( 1 ) );
+            case Command::Key :
+                return grab::cli::run_key_command( cli_args.subspan( 1 ) );
+            case Command::Session :
                 {
-                    print_usage();
-                    return usageError;
+                    std::vector<std::string_view> session_args;
+                    session_args.reserve( cli_args.size() - 1U );
+                    for( const char* arg : cli_args.subspan( 1 ) )
+                    {
+                        session_args.emplace_back( arg );
+                    }
+                    return grab::cli::run_session_command( session_args );
                 }
-            }
-            return run_doctor_command( as_json );
-        }
-
-        if( command == daemonCommand )
-        {
-            return run_daemon_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == typeCommand )
-        {
-            return run_type_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == clickCommand )
-        {
-            return run_click_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == dragCommand )
-        {
-            return run_drag_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == captureCommand )
-        {
-            return run_capture_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == batchCommand )
-        {
-            return run_batch_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == compareCommand )
-        {
-            return run_compare_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == watchCommand )
-        {
-            return run_watch_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == keyCommand )
-        {
-            return grab::cli::run_key_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == dragCurveCommand )
-        {
-            return grab::cli::run_drag_curve_command( cli_args.subspan( 1 ) );
-        }
-
-        if( command == sessionCommand )
-        {
-            std::vector<std::string_view> session_args;
-            session_args.reserve( cli_args.size() - 1U );
-            for( const char* arg : cli_args.subspan( 1 ) )
-            {
-                session_args.emplace_back( arg );
-            }
-            return grab::cli::run_session_command( session_args );
+            case Command::Count :
+                break;
         }
 
         print_usage();

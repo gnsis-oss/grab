@@ -36,8 +36,6 @@ namespace grab::platform::x11
         constexpr xkb_level_index_t  levelFour             = 3U;
         constexpr xkb_level_index_t  expressibleLevelCount = 4U;
         constexpr xkb_keysym_t       noSymbol              = XKB_KEY_NoSymbol;
-        constexpr std::uint32_t      fallbackShiftKeycode  = 50U;
-        constexpr std::uint32_t      fallbackAltgrKeycode  = 92U;
         constexpr std::uint32_t      hexDigitCount         = 16U;
         constexpr std::size_t        maxCodepointHexDigits = 8U;
         constexpr std::string_view   hexDigits             = "0123456789ABCDEF";
@@ -320,14 +318,13 @@ namespace grab::platform::x11
         }
 
         [[nodiscard]]
-        std::uint32_t
-        keycode_for_keysym( xkb_keymap*   keymap,
-                            xkb_keysym_t  target,
-                            std::uint32_t fallback )
+        std::optional<std::uint32_t>
+        keycode_for_keysym( xkb_keymap*  keymap,
+                            xkb_keysym_t target )
         {
             if( keymap == nullptr )
             {
-                return fallback;
+                return std::nullopt;
             }
 
             const xkb_keycode_t min_keycode = xkb_keymap_min_keycode( keymap );
@@ -343,7 +340,7 @@ namespace grab::platform::x11
                     return static_cast<std::uint32_t>( keycode );
                 }
             }
-            return fallback;
+            return std::nullopt;
         }
 
         class XkbKeymap final : public grab::Keymap::Backend
@@ -431,21 +428,40 @@ namespace grab::platform::x11
                 std::uint32_t
                 shift_keycode() const override
                 {
-                    return keycode_for_keysym( keymap_.get(),
-                                               XKB_KEY_Shift_L,
-                                               fallbackShiftKeycode );
+                    auto keycode = keycode_for_keysym( keymap_.get(), XKB_KEY_Shift_L );
+                    if( keycode.has_value() )
+                    {
+                        return *keycode;
+                    }
+                    return keycode_for_keysym( keymap_.get(), XKB_KEY_Shift_R )
+                        .value_or( 0U );
                 }
 
                 [[nodiscard]]
                 std::uint32_t
                 altgr_keycode() const override
                 {
-                    return keycode_for_keysym( keymap_.get(),
-                                               XKB_KEY_ISO_Level3_Shift,
-                                               fallbackAltgrKeycode );
+                    return keycode_for_keysym( keymap_.get(), XKB_KEY_ISO_Level3_Shift )
+                        .value_or( 0U );
                 }
 
             private:
+
+                [[nodiscard]]
+                xkb_layout_index_t
+                layout_for_key( xkb_keycode_t keycode ) const noexcept
+                {
+                    if( state_ != nullptr )
+                    {
+                        const xkb_layout_index_t layout =
+                            xkb_state_key_get_layout( state_.get(), keycode );
+                        if( layout != XKB_LAYOUT_INVALID )
+                        {
+                            return layout;
+                        }
+                    }
+                    return firstLayout;
+                }
 
                 [[nodiscard]]
                 std::optional<grab::Keystroke>
@@ -474,8 +490,11 @@ namespace grab::platform::x11
                     for( xkb_keycode_t keycode = min_keycode; keycode <= max_keycode;
                          ++keycode )
                     {
-                        if( xkb_keymap_num_layouts_for_key( keymap_.get(), keycode ) ==
-                            0U )
+                        const xkb_layout_index_t layout = layout_for_key( keycode );
+                        if( layout ==
+                            XKB_LAYOUT_INVALID ||
+                            layout >=
+                            xkb_keymap_num_layouts_for_key( keymap_.get(), keycode ) )
                         {
                             continue;
                         }
@@ -483,25 +502,26 @@ namespace grab::platform::x11
                         const xkb_level_index_t levels =
                             std::min( xkb_keymap_num_levels_for_key( keymap_.get(),
                                                                      keycode,
-                                                                     firstLayout ),
+                                                                     layout ),
                                       expressibleLevelCount );
                         for( xkb_level_index_t level = levelOne; level < levels;
                              ++level )
                         {
-                            record_keysyms( keycode, level );
+                            record_keysyms( keycode, layout, level );
                         }
                     }
                 }
 
                 void
-                record_keysyms( xkb_keycode_t     keycode,
-                                xkb_level_index_t level )
+                record_keysyms( xkb_keycode_t      keycode,
+                                xkb_layout_index_t layout,
+                                xkb_level_index_t  level )
                 {
                     const xkb_keysym_t* symbols = nullptr;
                     const int           symbol_count =
                         xkb_keymap_key_get_syms_by_level( keymap_.get(),
                                                           keycode,
-                                                          firstLayout,
+                                                          layout,
                                                           level,
                                                           &symbols );
                     if( symbol_count <= 0 || symbols == nullptr )

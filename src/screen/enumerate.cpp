@@ -1,5 +1,6 @@
 #include "grab/geometry/rectangle.hpp"
 #include "grab/result.hpp"
+#include "platform/x11/protocol.hpp"
 #include "screen/enumerate.hpp"
 
 #include <algorithm>
@@ -35,9 +36,6 @@ namespace grab::screen
         constexpr std::uint8_t     format8Bits           = 8U;
         constexpr std::uint8_t     format32Bits          = 32U;
         constexpr std::int16_t     rootOrigin            = 0;
-        constexpr std::string_view netClientListAtom     = "_NET_CLIENT_LIST";
-        constexpr std::string_view netWmNameAtom         = "_NET_WM_NAME";
-        constexpr std::string_view utf8StringAtom        = "UTF8_STRING";
         constexpr std::string_view randrExtensionName    = "RANDR";
         constexpr std::string_view fallbackOutputName    = "screen";
         constexpr std::string_view generatedOutputPrefix = "output-";
@@ -183,19 +181,26 @@ namespace grab::screen
         grab::Result<Atoms>
         intern_atoms( xcb_connection_t* connection )
         {
-            auto net_client_list = intern_atom( connection, netClientListAtom, true );
+            auto net_client_list =
+                intern_atom( connection,
+                             grab::platform::x11::atom_name::netClientList,
+                             true );
             if( !net_client_list.has_value() )
             {
                 return std::unexpected( std::move( net_client_list.error() ) );
             }
 
-            auto net_wm_name = intern_atom( connection, netWmNameAtom, true );
+            auto net_wm_name = intern_atom( connection,
+                                            grab::platform::x11::atom_name::netWmName,
+                                            true );
             if( !net_wm_name.has_value() )
             {
                 return std::unexpected( std::move( net_wm_name.error() ) );
             }
 
-            auto utf8_string = intern_atom( connection, utf8StringAtom, true );
+            auto utf8_string = intern_atom( connection,
+                                            grab::platform::x11::atom_name::utf8String,
+                                            true );
             if( !utf8_string.has_value() )
             {
                 return std::unexpected( std::move( utf8_string.error() ) );

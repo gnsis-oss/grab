@@ -11,6 +11,8 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <expected>
 #include <filesystem>
@@ -22,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -30,8 +33,6 @@ namespace grab::service
     namespace
     {
 
-        constexpr std::size_t      storageQueueDepth  = 65'536U;
-        constexpr std::size_t      storageBufferLimit = 1U;
         constexpr std::string_view reactorThreadStartStep =
             "daemon reactor thread start";
         constexpr std::string_view reactorRunStep = "daemon reactor run";
@@ -163,6 +164,41 @@ namespace grab::service
 
     }    // namespace
 
+    std::string
+    default_daemon_endpoint()
+    {
+        constexpr std::string_view unixEndpointPrefix = "unix:";
+        constexpr std::string_view socketFileName     = "grab.sock";
+        constexpr std::string_view fallbackPrefix     = "grab-";
+        constexpr std::string_view socketExtension    = ".sock";
+        constexpr std::string_view fallbackDirectory  = "/tmp";
+
+        // Options are constructed before daemon worker threads start, so reading
+        // the process environment cannot race with daemon-owned work.
+        // NOLINTNEXTLINE(concurrency-mt-unsafe)
+        const char* const          runtime_dir_value = std::getenv( "XDG_RUNTIME_DIR" );
+        if( runtime_dir_value != nullptr )
+        {
+            const std::string_view runtime_dir{ runtime_dir_value };
+            if( !runtime_dir.empty() )
+            {
+                const std::filesystem::path root{ runtime_dir };
+                if( root.is_absolute() )
+                {
+                    return std::string{ unixEndpointPrefix } +
+                           ( root / socketFileName ).string();
+                }
+            }
+        }
+
+        const std::string fallback_name =
+            std::string{ fallbackPrefix } +
+            std::to_string( static_cast<std::uint64_t>( getuid() ) ) +
+            std::string{ socketExtension };
+        return std::string{ unixEndpointPrefix } +
+               ( std::filesystem::path{ fallbackDirectory } / fallback_name ).string();
+    }
+
     class Daemon::Impl
     {
         public:
@@ -230,6 +266,8 @@ namespace grab::service
 
             std::string                          endpoint_;
             std::optional<std::filesystem::path> store_dir_;
+            std::size_t                          storage_queue_depth_;
+            std::size_t                          storage_buffer_limit_;
             std::function<std::vector<std::unique_ptr<grab::event::EventSource>>()>
                                                             source_factory_;
             grab::EventBus                                  bus_;
@@ -246,6 +284,8 @@ namespace grab::service
     Daemon::Impl::Impl( DaemonOptions options ) :
         endpoint_( std::move( options.endpoint ) ),
         store_dir_( std::move( options.store_dir ) ),
+        storage_queue_depth_( options.storage_queue_depth ),
+        storage_buffer_limit_( options.storage_buffer_limit ),
         source_factory_( std::move( options.source_factory ) ),
         drain_state_( std::make_shared<DrainState>() )
     {
@@ -272,7 +312,7 @@ namespace grab::service
 
         auto sink = grab::storage::JsonlSink::open( grab::storage::JsonlOptions{
             .dir          = *store_dir_,
-            .buffer_limit = storageBufferLimit,
+            .buffer_limit = storage_buffer_limit_,
         } );
         if( !sink.has_value() )
         {
@@ -416,7 +456,8 @@ namespace grab::service
             // under extreme overflow); a future EventBus durable-sink hook would
             // make it strictly lossless. This is a known follow-up.
             grab::EventFilter filter;
-            auto subscription = bus_.subscribe( std::move( filter ), storageQueueDepth );
+            auto              subscription =
+                bus_.subscribe( std::move( filter ), storage_queue_depth_ );
             subscription.set_notify(
                 [state = drain_state_]
                 {
@@ -611,6 +652,12 @@ namespace grab::service
     grab::Result<Daemon>
     Daemon::start( DaemonOptions options )
     {
+        if( options.store_dir.has_value() && options.storage_queue_depth == 0U )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "daemon storage queue depth must be greater than zero" );
+        }
+
         try
         {
             auto impl           = std::make_unique<Impl>( std::move( options ) );

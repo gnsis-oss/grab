@@ -36,25 +36,13 @@ namespace grab::platform::x11
             xcb_window_t
             root() const noexcept;
 
-            [[nodiscard]]
-            bool
-            has_shm() const noexcept;
-
-            [[nodiscard]]
-            bool
-            has_xfixes() const noexcept;
-
         private:
 
             XcbConnection( xcb_connection_t* connection,
-                           xcb_window_t      root,
-                           bool              has_shm,
-                           bool              has_xfixes ) noexcept;
+                           xcb_window_t      root ) noexcept;
 
-            xcb_connection_t* connection           = nullptr;
-            xcb_window_t      root_window          = XCB_NONE;
-            bool              has_shm_extension    = false;
-            bool              has_xfixes_extension = false;
+            xcb_connection_t* connection  = nullptr;
+            xcb_window_t      root_window = XCB_NONE;
     };
 
 }    // namespace grab::platform::x11

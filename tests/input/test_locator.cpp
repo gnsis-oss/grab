@@ -1,13 +1,17 @@
 #include "grab/result.hpp"
 #include "input/locator.hpp"
+#include "platform/x11/protocol.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -19,32 +23,37 @@
 namespace
 {
 
-    constexpr const char*      xvfbDisplay         = ":98";
-    constexpr int              xcbOk               = 0;
+    constexpr const char*      xvfbDisplay             = ":98";
+    constexpr int              xcbOk                   = 0;
 
-    constexpr std::int16_t     firstWindowX        = 140;
-    constexpr std::int16_t     firstWindowY        = 180;
-    constexpr std::int16_t     secondWindowX       = 360;
-    constexpr std::int16_t     secondWindowY       = 240;
-    constexpr std::uint16_t    windowWidth         = 220U;
-    constexpr std::uint16_t    windowHeight        = 130U;
-    constexpr std::uint16_t    windowBorderWidth   = 0U;
-    constexpr std::uint32_t    windowValueMask     = XCB_CW_BACK_PIXEL;
-    constexpr std::uint32_t    propertyReplaceMode = XCB_PROP_MODE_REPLACE;
-    constexpr std::uint8_t     format8Bits         = 8U;
-    constexpr std::uint8_t     responseTypeMask    = 0X7FU;
-    constexpr auto             mapTimeout          = std::chrono::seconds{ 2 };
-    constexpr auto             mapPollInterval     = std::chrono::milliseconds{ 10 };
+    constexpr std::int16_t     firstWindowX            = 140;
+    constexpr std::int16_t     firstWindowY            = 180;
+    constexpr std::int16_t     secondWindowX           = 360;
+    constexpr std::int16_t     secondWindowY           = 240;
+    constexpr std::uint16_t    windowWidth             = 220U;
+    constexpr std::uint16_t    windowHeight            = 130U;
+    constexpr std::uint16_t    windowBorderWidth       = 0U;
+    constexpr std::uint32_t    windowValueMask         = XCB_CW_BACK_PIXEL;
+    constexpr std::uint32_t    propertyReplaceMode     = XCB_PROP_MODE_REPLACE;
+    constexpr std::uint8_t     format8Bits             = 8U;
+    constexpr std::uint8_t     format32Bits            = 32U;
+    constexpr std::uint8_t     responseTypeMask        = 0X7FU;
+    constexpr auto             mapTimeout              = std::chrono::seconds{ 2 };
+    constexpr auto             mapPollInterval         = std::chrono::milliseconds{ 10 };
+    constexpr auto             activationResponseDelay = std::chrono::milliseconds{ 50 };
+    constexpr auto             managerEventTimeout     = std::chrono::seconds{ 2 };
 
-    constexpr std::string_view knownInstance       = "grab-locator-instance";
-    constexpr std::string_view knownClass          = "GrabLocatorKnownClass";
-    constexpr std::string_view sharedInstance      = "grab-locator-shared-instance";
-    constexpr std::string_view sharedClass         = "GrabLocatorSharedClass";
-    constexpr std::string_view nonTargetTitle      = "ordinary locator title";
-    constexpr std::string_view targetTitle         = "prefix the-target-title suffix";
-    constexpr std::string_view targetNeedle        = "the-target-title";
-    constexpr std::string_view missingClassName    = "class-that-does-not-exist";
-    constexpr auto             windowNotFoundCode  = grab::ErrorCode::WindowNotFound;
+    constexpr std::string_view knownInstance           = "grab-locator-instance";
+    constexpr std::string_view knownClass              = "GrabLocatorKnownClass";
+    constexpr std::string_view sharedInstance          = "grab-locator-shared-instance";
+    constexpr std::string_view sharedClass             = "GrabLocatorSharedClass";
+    constexpr std::string_view nonTargetTitle          = "ordinary locator title";
+    constexpr std::string_view targetTitle        = "prefix the-target-title suffix";
+    constexpr std::string_view targetNeedle       = "the-target-title";
+    constexpr std::string_view stackingClass      = "GrabLocatorStackingClass";
+    constexpr std::string_view visibilityClass    = "GrabLocatorVisibilityClass";
+    constexpr std::string_view missingClassName   = "class-that-does-not-exist";
+    constexpr auto             windowNotFoundCode = grab::ErrorCode::WindowNotFound;
 
     template<typename T>
     using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -166,6 +175,67 @@ namespace
         }
         atom = reply->atom;
         return testing::AssertionSuccess();
+    }
+
+    class ScopedRootListProperties
+    {
+        public:
+
+            ScopedRootListProperties( xcb_connection_t* connection,
+                                      xcb_window_t      root,
+                                      xcb_atom_t        client_list,
+                                      xcb_atom_t        stacking_list ) noexcept :
+                connection_( connection ),
+                root_( root ),
+                client_list_( client_list ),
+                stacking_list_( stacking_list )
+            {
+            }
+
+            ~ScopedRootListProperties()
+            {
+                if( connection_ == nullptr )
+                {
+                    return;
+                }
+                ( void )xcb_delete_property( connection_, root_, client_list_ );
+                ( void )xcb_delete_property( connection_, root_, stacking_list_ );
+                ( void )xcb_flush( connection_ );
+            }
+
+            ScopedRootListProperties( const ScopedRootListProperties& ) = delete;
+            ScopedRootListProperties&
+            operator=( const ScopedRootListProperties& )           = delete;
+            ScopedRootListProperties( ScopedRootListProperties&& ) = delete;
+            ScopedRootListProperties&
+            operator=( ScopedRootListProperties&& ) = delete;
+
+        private:
+
+            xcb_connection_t* connection_    = nullptr;
+            xcb_window_t      root_          = XCB_WINDOW_NONE;
+            xcb_atom_t        client_list_   = XCB_ATOM_NONE;
+            xcb_atom_t        stacking_list_ = XCB_ATOM_NONE;
+    };
+
+    [[nodiscard]]
+    testing::AssertionResult
+    set_window_list( xcb_connection_t*             connection,
+                     xcb_window_t                  root,
+                     xcb_atom_t                    property,
+                     std::span<const xcb_window_t> windows )
+    {
+        return request_succeeded(
+            connection,
+            xcb_change_property_checked( connection,
+                                         propertyReplaceMode,
+                                         root,
+                                         property,
+                                         XCB_ATOM_WINDOW,
+                                         format32Bits,
+                                         static_cast<std::uint32_t>( windows.size() ),
+                                         windows.data() )
+        );
     }
 
     [[nodiscard]]
@@ -307,6 +377,85 @@ namespace
     }
 
     [[nodiscard]]
+    xcb_window_t
+    create_child_window( xcb_connection_t*   connection,
+                         const xcb_screen_t& screen,
+                         xcb_window_t        parent )
+    {
+        const xcb_window_t                 window = xcb_generate_id( connection );
+        const std::array<std::uint32_t, 1> values{ screen.black_pixel };
+        EXPECT_TRUE(
+            request_succeeded( connection,
+                               xcb_create_window_checked( connection,
+                                                          screen.root_depth,
+                                                          window,
+                                                          parent,
+                                                          0,
+                                                          0,
+                                                          windowWidth,
+                                                          windowHeight,
+                                                          windowBorderWidth,
+                                                          XCB_WINDOW_CLASS_INPUT_OUTPUT,
+                                                          screen.root_visual,
+                                                          windowValueMask,
+                                                          values.data() ) )
+        );
+        EXPECT_TRUE( request_succeeded( connection,
+                                        xcb_map_window_checked( connection, window ) ) );
+        EXPECT_TRUE( flush_succeeded( connection ) );
+        return window;
+    }
+
+    void
+    apply_focus_after_activation_request( xcb_connection_t* connection,
+                                          xcb_atom_t        active_window_atom,
+                                          xcb_window_t      target,
+                                          xcb_window_t      focus_child,
+                                          std::atomic_bool& focus_applied )
+    {
+        const auto deadline = std::chrono::steady_clock::now() + managerEventTimeout;
+        while( std::chrono::steady_clock::now() < deadline )
+        {
+            const auto event = take_xcb_owned( xcb_poll_for_event( connection ) );
+            if( event == nullptr )
+            {
+                if( xcb_connection_has_error( connection ) != xcbOk )
+                {
+                    return;
+                }
+                std::this_thread::sleep_for( mapPollInterval );
+                continue;
+            }
+
+            const auto response_type =
+                static_cast<std::uint8_t>( event->response_type & responseTypeMask );
+            if( response_type != XCB_CLIENT_MESSAGE )
+            {
+                continue;
+            }
+
+            const void* const raw_event = event.get();
+            const auto* const message =
+                static_cast<const xcb_client_message_event_t*>( raw_event );
+            if( message->type != active_window_atom || message->window != target )
+            {
+                continue;
+            }
+
+            std::this_thread::sleep_for( activationResponseDelay );
+            ( void )xcb_set_input_focus( connection,
+                                         XCB_INPUT_FOCUS_POINTER_ROOT,
+                                         focus_child,
+                                         XCB_CURRENT_TIME );
+            const bool flushed = xcb_flush( connection ) >
+                                 0 &&
+                                 xcb_connection_has_error( connection ) == xcbOk;
+            focus_applied.store( flushed );
+            return;
+        }
+    }
+
+    [[nodiscard]]
     testing::AssertionResult
     setup_root_event_mask( xcb_connection_t*   connection,
                            const xcb_screen_t& screen )
@@ -398,6 +547,185 @@ TEST( Locator,
     EXPECT_EQ( located->bounds.width, windowWidth );
     EXPECT_EQ( located->bounds.height, windowHeight );
     EXPECT_EQ( located->trust, grab::input::GeometryTrust::Trusted );
+}
+
+TEST( Locator,
+      PrefersTopmostStackingListWindow )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen, nullptr );
+    ASSERT_TRUE( setup_root_event_mask( connection.get(), *screen ) );
+
+    const xcb_window_t first = create_test_window( connection.get(),
+                                                   *screen,
+                                                   firstWindowX,
+                                                   firstWindowY,
+                                                   sharedInstance,
+                                                   stackingClass,
+                                                   nonTargetTitle );
+    ASSERT_TRUE( wait_for_map_notify( connection.get(), first ) );
+    const xcb_window_t topmost = create_test_window( connection.get(),
+                                                     *screen,
+                                                     secondWindowX,
+                                                     secondWindowY,
+                                                     sharedInstance,
+                                                     stackingClass,
+                                                     targetTitle );
+    ASSERT_TRUE( wait_for_map_notify( connection.get(), topmost ) );
+
+    xcb_atom_t client_list   = XCB_ATOM_NONE;
+    xcb_atom_t stacking_list = XCB_ATOM_NONE;
+    ASSERT_TRUE( intern_atom( connection.get(),
+                              grab::platform::x11::atom_name::netClientList,
+                              client_list ) );
+    ASSERT_TRUE( intern_atom( connection.get(),
+                              grab::platform::x11::atom_name::netClientListStacking,
+                              stacking_list ) );
+    const ScopedRootListProperties properties{
+        connection.get(),
+        screen->root,
+        client_list,
+        stacking_list,
+    };
+
+    const std::array<xcb_window_t, 2> ordinary_order{ topmost, first };
+    const std::array<xcb_window_t, 2> stacking_order{ first, topmost };
+    ASSERT_TRUE(
+        set_window_list( connection.get(), screen->root, client_list, ordinary_order )
+    );
+    ASSERT_TRUE(
+        set_window_list( connection.get(), screen->root, stacking_list, stacking_order )
+    );
+
+    auto locator = grab::input::WindowLocator::open( xvfbDisplay );
+    ASSERT_TRUE( locator.has_value() ) << locator.error().message;
+
+    auto located = locator->locate( { std::string{ stackingClass } } );
+
+    ASSERT_TRUE( located.has_value() ) << located.error().message;
+    EXPECT_EQ( located->window, topmost );
+}
+
+TEST( Locator,
+      SkipsUnmappedStackingListWindow )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen, nullptr );
+    ASSERT_TRUE( setup_root_event_mask( connection.get(), *screen ) );
+
+    const xcb_window_t visible = create_test_window( connection.get(),
+                                                     *screen,
+                                                     firstWindowX,
+                                                     firstWindowY,
+                                                     sharedInstance,
+                                                     visibilityClass,
+                                                     nonTargetTitle );
+    ASSERT_TRUE( wait_for_map_notify( connection.get(), visible ) );
+    const xcb_window_t hidden = create_test_window( connection.get(),
+                                                    *screen,
+                                                    secondWindowX,
+                                                    secondWindowY,
+                                                    sharedInstance,
+                                                    visibilityClass,
+                                                    targetTitle );
+    ASSERT_TRUE( wait_for_map_notify( connection.get(), hidden ) );
+    ASSERT_TRUE( request_succeeded( connection.get(),
+                                    xcb_unmap_window_checked( connection.get(),
+                                                              hidden ) ) );
+
+    xcb_atom_t client_list   = XCB_ATOM_NONE;
+    xcb_atom_t stacking_list = XCB_ATOM_NONE;
+    ASSERT_TRUE( intern_atom( connection.get(),
+                              grab::platform::x11::atom_name::netClientList,
+                              client_list ) );
+    ASSERT_TRUE( intern_atom( connection.get(),
+                              grab::platform::x11::atom_name::netClientListStacking,
+                              stacking_list ) );
+    const ScopedRootListProperties properties{
+        connection.get(),
+        screen->root,
+        client_list,
+        stacking_list,
+    };
+    const std::array<xcb_window_t, 2> stacking_order{ visible, hidden };
+    ASSERT_TRUE(
+        set_window_list( connection.get(), screen->root, client_list, stacking_order )
+    );
+    ASSERT_TRUE(
+        set_window_list( connection.get(), screen->root, stacking_list, stacking_order )
+    );
+
+    auto locator = grab::input::WindowLocator::open( xvfbDisplay );
+    ASSERT_TRUE( locator.has_value() ) << locator.error().message;
+
+    auto located = locator->locate( { std::string{ visibilityClass } } );
+
+    ASSERT_TRUE( located.has_value() ) << located.error().message;
+    EXPECT_EQ( located->window, visible );
+}
+
+TEST( Locator,
+      ActivateWaitsForFocusedDescendant )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen, nullptr );
+    ASSERT_TRUE( setup_root_event_mask( connection.get(), *screen ) );
+
+    const xcb_window_t target = create_test_window( connection.get(),
+                                                    *screen,
+                                                    firstWindowX,
+                                                    firstWindowY,
+                                                    knownInstance,
+                                                    knownClass,
+                                                    targetTitle );
+    ASSERT_TRUE( wait_for_map_notify( connection.get(), target ) );
+    const xcb_window_t focus_child =
+        create_child_window( connection.get(), *screen, target );
+    ASSERT_TRUE(
+        request_succeeded( connection.get(),
+                           xcb_set_input_focus_checked( connection.get(),
+                                                        XCB_INPUT_FOCUS_POINTER_ROOT,
+                                                        screen->root,
+                                                        XCB_CURRENT_TIME ) )
+    );
+
+    xcb_atom_t active_window = XCB_ATOM_NONE;
+    ASSERT_TRUE( intern_atom( connection.get(),
+                              grab::platform::x11::atom_name::netActiveWindow,
+                              active_window ) );
+    auto locator = grab::input::WindowLocator::open( xvfbDisplay );
+    ASSERT_TRUE( locator.has_value() ) << locator.error().message;
+
+    std::atomic_bool focus_applied = false;
+    std::thread      manager{
+        apply_focus_after_activation_request,
+        connection.get(),
+        active_window,
+        target,
+        focus_child,
+        std::ref( focus_applied )
+    };
+
+    grab::input::LocatedWindow target_window{};
+    target_window.window                       = target;
+    const auto activation                      = locator->activate( target_window );
+    const bool focus_was_applied_before_return = focus_applied.load();
+    manager.join();
+
+    ASSERT_TRUE( activation.has_value() ) << activation.error().message;
+    EXPECT_TRUE( focus_was_applied_before_return );
 }
 
 TEST( Locator,

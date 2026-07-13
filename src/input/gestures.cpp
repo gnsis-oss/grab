@@ -1,14 +1,18 @@
+#include "grab/geometry/curve.hpp"
+#include "grab/geometry/point.hpp"
+#include "grab/pointer_button.hpp"
 #include "grab/result.hpp"
 #include "input/gestures.hpp"
 #include "input/seat.hpp"
 
-#include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <limits>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace grab::input
 {
@@ -16,39 +20,7 @@ namespace grab::input
     namespace
     {
 
-        constexpr std::uint8_t leftButton                = 1U;
-        constexpr std::int16_t armVerticalOffset         = 6;
-        constexpr std::int32_t qtStartDragDistance       = 20;
-        constexpr std::int32_t minimumInterpolationSteps = 1;
-        constexpr auto         dragArmOffsets            = std::to_array<std::int16_t>( {
-            10,
-            20,
-            32,
-            46,
-            62,
-            80,
-        } );
-        constexpr auto         finalNudges               = std::to_array<Point>( {
-            Point{ .x = 0,  .y = 0},
-            Point{ .x = 4,  .y = 3},
-            Point{.x = -3,  .y = 2},
-            Point{ .x = 2, .y = -2},
-        } );
-
-        [[nodiscard]]
-        std::int32_t
-        absolute( std::int32_t value ) noexcept
-        {
-            return value < 0 ? -value : value;
-        }
-
-        [[nodiscard]]
-        std::int32_t
-        direction_toward( std::int32_t from,
-                          std::int32_t to ) noexcept
-        {
-            return to < from ? -1 : 1;
-        }
+        constexpr double cubicControlDivisor = 3.0;
 
         [[nodiscard]]
         grab::Result<void>
@@ -58,29 +30,21 @@ namespace grab::input
         }
 
         [[nodiscard]]
-        grab::Result<Point>
-        translated( Point        origin,
-                    std::int32_t dx,
-                    std::int32_t dy )
+        grab::Result<void>
+        validate_point( Point point )
         {
-            const std::int32_t x = static_cast<std::int32_t>( origin.x ) + dx;
-            const std::int32_t y = static_cast<std::int32_t>( origin.y ) + dy;
-            if( x <
+            if( point.x <
                 std::numeric_limits<std::int16_t>::min() ||
-                x >
+                point.x >
                 std::numeric_limits<std::int16_t>::max() ||
-                y <
+                point.y <
                 std::numeric_limits<std::int16_t>::min() ||
-                y > std::numeric_limits<std::int16_t>::max() )
+                point.y > std::numeric_limits<std::int16_t>::max() )
             {
                 return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "Qt drag coordinate is outside int16 range" );
+                                   "drag coordinate is outside int16 range" );
             }
-
-            return Point{
-                .x = static_cast<std::int16_t>( x ),
-                .y = static_cast<std::int16_t>( y ),
-            };
+            return {};
         }
 
         [[nodiscard]]
@@ -101,18 +65,6 @@ namespace grab::input
                 .x = static_cast<std::int16_t>( start_x + ( ( dx * current ) / count ) ),
                 .y = static_cast<std::int16_t>( start_y + ( ( dy * current ) / count ) ),
             };
-        }
-
-        [[nodiscard]]
-        bool
-        crosses_start_drag_distance( Point origin,
-                                     Point current ) noexcept
-        {
-            const std::int32_t dx = static_cast<std::int32_t>( current.x ) -
-                                    static_cast<std::int32_t>( origin.x );
-            const std::int32_t dy = static_cast<std::int32_t>( current.y ) -
-                                    static_cast<std::int32_t>( origin.y );
-            return absolute( dx ) + absolute( dy ) >= qtStartDragDistance;
         }
 
         [[nodiscard]]
@@ -155,7 +107,7 @@ namespace grab::input
         grab::Result<void>
         release_and_flush( Seat& seat )
         {
-            auto button_result = button( seat, leftButton, false );
+            auto button_result = button( seat, primaryButton, false );
             if( !button_result.has_value() )
             {
                 return button_result;
@@ -172,54 +124,81 @@ namespace grab::input
 
         [[nodiscard]]
         grab::Result<void>
-        validate_qt_drag_points( Point from,
-                                 Point to )
+        release_after_error( Seat&       seat,
+                             grab::Error error )
         {
-            const std::int32_t x_direction = direction_toward( from.x, to.x );
-            for( const std::int16_t arm_offset : dragArmOffsets )
+            auto release_result = release_and_flush( seat );
+            static_cast<void>( release_result );
+            return std::unexpected( std::move( error ) );
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        validate_drag_points( Point from,
+                              Point to )
+        {
+            auto from_result = validate_point( from );
+            if( !from_result.has_value() )
             {
-                auto point_result =
-                    translated( from,
-                                static_cast<std::int32_t>( arm_offset ) * x_direction,
-                                armVerticalOffset );
-                if( !point_result.has_value() )
+                return from_result;
+            }
+            auto to_result = validate_point( to );
+            if( !to_result.has_value() )
+            {
+                return to_result;
+            }
+            return {};
+        }
+
+        [[nodiscard]]
+        grab::geometry::PointF
+        floating_point( Point point ) noexcept
+        {
+            return grab::geometry::PointF{
+                .x = static_cast<double>( point.x ),
+                .y = static_cast<double>( point.y ),
+            };
+        }
+
+        [[nodiscard]]
+        grab::geometry::Curve
+        curve_path( Point from,
+                    Point to )
+        {
+            const auto start = floating_point( from );
+            const auto end   = floating_point( to );
+            const auto dx    = ( end.x - start.x ) / cubicControlDivisor;
+            return grab::geometry::Curve::cubic( start,
+                                                 start.translated( dx, 0.0 ),
+                                                 end.translated( -dx, 0.0 ),
+                                                 end );
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        validate_points( const std::vector<Point>& points )
+        {
+            for( const Point point : points )
+            {
+                auto validated = validate_point( point );
+                if( !validated.has_value() )
                 {
-                    return std::unexpected( std::move( point_result.error() ) );
+                    return std::unexpected( std::move( validated.error() ) );
                 }
             }
-
-            for( const Point nudge : finalNudges )
-            {
-                auto point_result = translated( to, nudge.x, nudge.y );
-                if( !point_result.has_value() )
-                {
-                    return std::unexpected( std::move( point_result.error() ) );
-                }
-            }
-
             return {};
         }
 
         [[nodiscard]]
         grab::Result<void>
         move_drag_step( Seat&                            seat,
-                        Point                            drag_origin,
                         Point                            point,
-                        const std::chrono::milliseconds& step_dwell,
-                        const std::chrono::milliseconds& drag_start_dwell,
-                        bool&                            applied_drag_start_dwell )
+                        const std::chrono::milliseconds& step_dwell )
         {
             auto move_result = move_and_flush( seat, point );
             if( !move_result.has_value() )
             {
                 return move_result;
-            }
-
-            if( !applied_drag_start_dwell &&
-                crosses_start_drag_distance( drag_origin, point ) )
-            {
-                std::this_thread::sleep_for( drag_start_dwell );
-                applied_drag_start_dwell = true;
             }
 
             std::this_thread::sleep_for( step_dwell );
@@ -229,18 +208,25 @@ namespace grab::input
     }    // namespace
 
     grab::Result<void>
-    qt_drag( Seat&               seat,
-             Point               from,
-             Point               to,
-             const QtDragParams& params )
+    linear_drag( Seat&              seat,
+                 Point              from,
+                 Point              to,
+                 const DragOptions& options )
     {
-        if( params.interpolation_steps < minimumInterpolationSteps )
+        if( options.interpolation_steps <
+            DragOptions::minimumInterpolationSteps ||
+            options.interpolation_steps > DragOptions::maximumInterpolationSteps )
         {
             return grab::fail( grab::ErrorCode::InvalidArgument,
-                               "Qt drag requires at least one interpolation step" );
+                               "linear drag interpolation-step count is out of range" );
+        }
+        if( options.step_dwell < std::chrono::milliseconds::zero() )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "linear drag dwell must not be negative" );
         }
 
-        auto validation_result = validate_qt_drag_points( from, to );
+        auto validation_result = validate_drag_points( from, to );
         if( !validation_result.has_value() )
         {
             return validation_result;
@@ -252,69 +238,79 @@ namespace grab::input
             return move_result;
         }
 
-        auto press_result = button( seat, leftButton, true );
+        auto press_result = button( seat, primaryButton, true );
         if( !press_result.has_value() )
         {
             return press_result;
         }
 
-        const std::int32_t x_direction              = direction_toward( from.x, to.x );
-        Point              arm_point                = from;
-        bool               applied_drag_start_dwell = false;
-        for( const std::int16_t arm_offset : dragArmOffsets )
-        {
-            auto point_result =
-                translated( from,
-                            static_cast<std::int32_t>( arm_offset ) * x_direction,
-                            armVerticalOffset );
-            if( !point_result.has_value() )
-            {
-                return std::unexpected( std::move( point_result.error() ) );
-            }
-            arm_point        = *point_result;
-
-            auto step_result = move_drag_step( seat,
-                                               from,
-                                               arm_point,
-                                               params.step_dwell,
-                                               params.drag_start_dwell,
-                                               applied_drag_start_dwell );
-            if( !step_result.has_value() )
-            {
-                return step_result;
-            }
-        }
-
-        for( std::int32_t step = 1; step <= params.interpolation_steps; ++step )
+        for( std::int32_t step = 1; step <= options.interpolation_steps; ++step )
         {
             const Point point =
-                interpolated( arm_point, to, step, params.interpolation_steps );
-            auto step_result = move_drag_step( seat,
-                                               from,
-                                               point,
-                                               params.step_dwell,
-                                               params.drag_start_dwell,
-                                               applied_drag_start_dwell );
+                interpolated( from, to, step, options.interpolation_steps );
+            auto step_result = move_drag_step( seat, point, options.step_dwell );
             if( !step_result.has_value() )
             {
-                return step_result;
+                return release_after_error( seat, std::move( step_result.error() ) );
             }
         }
 
-        for( const Point nudge : finalNudges )
-        {
-            auto point_result = translated( to, nudge.x, nudge.y );
-            if( !point_result.has_value() )
-            {
-                return std::unexpected( std::move( point_result.error() ) );
-            }
+        return release_and_flush( seat );
+    }
 
-            auto nudge_result = move_and_flush( seat, *point_result );
-            if( !nudge_result.has_value() )
+    grab::Result<void>
+    curve_drag( Seat&              seat,
+                Point              from,
+                Point              to,
+                const DragOptions& options )
+    {
+        if( options.interpolation_steps <
+            DragOptions::minimumInterpolationSteps ||
+            options.interpolation_steps > DragOptions::maximumInterpolationSteps )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "curve drag interpolation-step count is out of range" );
+        }
+        if( options.step_dwell < std::chrono::milliseconds::zero() )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "curve drag dwell must not be negative" );
+        }
+        auto validation_result = validate_drag_points( from, to );
+        if( !validation_result.has_value() )
+        {
+            return validation_result;
+        }
+
+        const auto sample_count =
+            static_cast<std::size_t>( options.interpolation_steps ) + 1U;
+        const std::vector<Point> path = curve_path( from, to ).sample( sample_count );
+        auto                     path_validation = validate_points( path );
+        if( !path_validation.has_value() )
+        {
+            return path_validation;
+        }
+
+        auto move_result = move_and_flush( seat, from );
+        if( !move_result.has_value() )
+        {
+            return move_result;
+        }
+
+        auto press_result = button( seat, primaryButton, true );
+        if( !press_result.has_value() )
+        {
+            return press_result;
+        }
+
+        for( std::size_t index = 1U; index < path.size(); ++index )
+        {
+            auto step_result =
+                move_drag_step( seat, path.at( index ), options.step_dwell );
+            if( !step_result.has_value() )
             {
-                return nudge_result;
+                return release_after_error( seat, std::move( step_result.error() ) );
             }
-            std::this_thread::sleep_for( params.step_dwell );
         }
 
         return release_and_flush( seat );
@@ -330,7 +326,7 @@ namespace grab::input
             return move_result;
         }
 
-        auto press_result = button( seat, leftButton, true );
+        auto press_result = button( seat, primaryButton, true );
         if( !press_result.has_value() )
         {
             return press_result;

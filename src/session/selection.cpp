@@ -6,6 +6,7 @@
 #include "session/selection.hpp"
 
 #include <array>
+#include <cstddef>
 #include <expected>
 #include <span>
 #include <string>
@@ -161,10 +162,11 @@ namespace grab::session
     session_availability_report( std::span<const SessionProvider* const> providers,
                                  const grab::core::Environment&          env )
     {
-        constexpr std::array<SessionMode, 2U> modes{
+        constexpr auto modes = std::to_array<SessionMode>( {
             SessionMode::Shared,
             SessionMode::Offscreen,
-        };
+        } );
+        static_assert( modes.size() == static_cast<std::size_t>( SessionMode::Count ) );
 
         std::vector<SessionModeReport> report;
         report.reserve( modes.size() );

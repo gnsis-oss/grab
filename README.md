@@ -28,7 +28,7 @@ Its very useful if you want to :
 
 | Capability          | Technology                          |
 | ------------------- | ----------------------------------- |
-| Screen capture      | XComposite + XShm, XFixes cursor    |
+| Screen capture      | XComposite + XShm                   |
 | Screenshots (PNG)   | in-tree encoder + zlib              |
 | Video recording     | libavcodec (FFmpeg)                 |
 | Input synthesis     | XTest + xkbcommon                   |

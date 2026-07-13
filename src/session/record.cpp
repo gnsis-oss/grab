@@ -3,16 +3,13 @@
 #include "grab/session.hpp"
 #include "session/record.hpp"
 
-#include <charconv>
 #include <cstdint>
-#include <iterator>
 #include <limits>
 #include <nlohmann/json.hpp>    // IWYU pragma: keep
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 
 namespace grab::session
@@ -20,325 +17,91 @@ namespace grab::session
     namespace
     {
 
-        constexpr std::string_view name_field              = "name";
-        constexpr std::string_view provider_field          = "provider";
-        constexpr std::string_view endpoint_field          = "endpoint";
-        constexpr std::string_view control_socket_field    = "control_socket";
-        constexpr std::string_view mode_field              = "mode";
-        constexpr std::string_view state_field             = "state";
-        constexpr std::string_view width_field             = "width";
-        constexpr std::string_view height_field            = "height";
-        constexpr std::string_view supervisor_pid_field    = "supervisor_pid";
-        constexpr std::string_view created_monotonic_field = "created_monotonic";
-        constexpr std::string_view unicode_control_prefix  = "00";
-        constexpr unsigned int     decimal_digit_count     = 10U;
-        constexpr unsigned int     high_nibble_shift       = 4U;
-        constexpr auto             quote_count             = 2U;
-        constexpr auto             unicode_digit_count     = 2U;
+        constexpr std::string_view nameField             = "name";
+        constexpr std::string_view providerField         = "provider";
+        constexpr std::string_view endpointField         = "endpoint";
+        constexpr std::string_view controlSocketField    = "control_socket";
+        constexpr std::string_view modeField             = "mode";
+        constexpr std::string_view stateField            = "state";
+        constexpr std::string_view widthField            = "width";
+        constexpr std::string_view heightField           = "height";
+        constexpr std::string_view supervisorPidField    = "supervisor_pid";
+        constexpr std::string_view createdMonotonicField = "created_monotonic";
+
+        using Json                                       = nlohmann::json;
 
         [[nodiscard]]
-        bool
-        is_whitespace( char value ) noexcept
+        const Json*
+        find_field( const Json&      object,
+                    std::string_view field )
         {
-            switch( value )
+            const auto member = object.find( std::string{ field } );
+            if( member == object.end() )
             {
-                case ' ' :
-                case '\n' :
-                case '\r' :
-                case '\t' :
-                    return true;
-                default :
-                    return false;
+                return nullptr;
             }
+            return &*member;
         }
 
-        [[nodiscard]]
-        bool
-        is_digit( char value ) noexcept
-        {
-            return value >= '0' && value <= '9';
-        }
-
-        [[nodiscard]]
-        char
-        char_at( std::string_view            text,
-                 std::string_view::size_type position )
-        {
-            return text.at( position );
-        }
-
-        [[nodiscard]]
-        std::optional<unsigned int>
-        hex_value( char value ) noexcept
-        {
-            if( value >= '0' && value <= '9' )
-            {
-                return static_cast<unsigned int>( value - '0' );
-            }
-            if( value >= 'a' && value <= 'f' )
-            {
-                return decimal_digit_count + static_cast<unsigned int>( value - 'a' );
-            }
-            if( value >= 'A' && value <= 'F' )
-            {
-                return decimal_digit_count + static_cast<unsigned int>( value - 'A' );
-            }
-            return std::nullopt;
-        }
-
-        [[nodiscard]]
-        std::string
-        quoted_key( std::string_view key )
-        {
-            std::string token;
-            token.reserve( key.size() + quote_count );
-            token += '"';
-            token += key;
-            token += '"';
-            return token;
-        }
-
-        [[nodiscard]]
-        std::string_view::size_type
-        skip_whitespace( std::string_view            text,
-                         std::string_view::size_type position ) noexcept
-        {
-            while( position < text.size() && is_whitespace( char_at( text, position ) ) )
-            {
-                ++position;
-            }
-            return position;
-        }
-
-        [[nodiscard]]
-        std::optional<std::string_view::size_type>
-        find_value_start( std::string_view text,
-                          std::string_view key )
-        {
-            const auto token   = quoted_key( key );
-            const auto key_pos = text.find( token );
-            if( key_pos == std::string_view::npos )
-            {
-                return std::nullopt;
-            }
-
-            auto position = key_pos + token.size();
-            position      = skip_whitespace( text, position );
-            if( position >= text.size() || char_at( text, position ) != ':' )
-            {
-                return std::nullopt;
-            }
-
-            ++position;
-            return skip_whitespace( text, position );
-        }
-
-        [[nodiscard]]
-        std::optional<char>
-        read_unicode_control_escape( std::string_view             text,
-                                     std::string_view::size_type& position )
-        {
-            const auto required_size =
-                unicode_control_prefix.size() + unicode_digit_count;
-            if( text.size() - position < required_size )
-            {
-                return std::nullopt;
-            }
-            if( text.substr( position, unicode_control_prefix.size() ) !=
-                unicode_control_prefix )
-            {
-                return std::nullopt;
-            }
-
-            position        += unicode_control_prefix.size();
-            const auto high  = hex_value( char_at( text, position ) );
-            ++position;
-            const auto low = hex_value( char_at( text, position ) );
-            ++position;
-            if( !high.has_value() || !low.has_value() )
-            {
-                return std::nullopt;
-            }
-
-            const auto byte = ( *high << high_nibble_shift ) | *low;
-            return static_cast<char>( byte );
-        }
-
-        // Extract a quoted string value for "key" from a flat one-level object.
-        // Returns std::nullopt if the key or its value is absent/malformed.
         [[nodiscard]]
         std::optional<std::string>
-        find_string( std::string_view text,
-                     std::string_view key )
+        string_field( const Json&      object,
+                      std::string_view field )
         {
-            auto position = find_value_start( text, key );
-            if( !position.has_value() ||
-                *position >=
-                text.size() ||
-                char_at( text, *position ) != '"' )
+            const Json* value = find_field( object, field );
+            if( value == nullptr || !value->is_string() )
             {
                 return std::nullopt;
             }
-
-            ++*position;
-            std::string value;
-            while( *position < text.size() )
-            {
-                const auto current = char_at( text, *position );
-                ++*position;
-
-                if( current == '"' )
-                {
-                    return value;
-                }
-                if( current != '\\' )
-                {
-                    value += current;
-                    continue;
-                }
-                if( *position >= text.size() )
-                {
-                    return std::nullopt;
-                }
-
-                const auto escape = char_at( text, *position );
-                ++*position;
-                switch( escape )
-                {
-                    case '"' :
-                        value += '"';
-                        break;
-                    case '\\' :
-                        value += '\\';
-                        break;
-                    case 'n' :
-                        value += '\n';
-                        break;
-                    case 't' :
-                        value += '\t';
-                        break;
-                    case 'r' :
-                        value += '\r';
-                        break;
-                    case 'u' :
-                        {
-                            auto unicode =
-                                read_unicode_control_escape( text, *position );
-                            if( !unicode.has_value() )
-                            {
-                                return std::nullopt;
-                            }
-                            value += *unicode;
-                            break;
-                        }
-                    default :
-                        return std::nullopt;
-                }
-            }
-
-            return std::nullopt;
-        }
-
-        [[nodiscard]]
-        std::optional<std::string_view>
-        find_number( std::string_view text,
-                     std::string_view key )
-        {
-            const auto start = find_value_start( text, key );
-            if( !start.has_value() || *start >= text.size() )
-            {
-                return std::nullopt;
-            }
-
-            auto position = *start;
-            if( char_at( text, position ) == '-' )
-            {
-                ++position;
-            }
-
-            const auto digit_start = position;
-            while( position < text.size() && is_digit( char_at( text, position ) ) )
-            {
-                ++position;
-            }
-            if( digit_start == position )
-            {
-                return std::nullopt;
-            }
-
-            const auto value_end = position;
-            position             = skip_whitespace( text, position );
-            if( position <
-                text.size() &&
-                char_at( text, position ) !=
-                ',' &&
-                char_at( text, position ) != '}' )
-            {
-                return std::nullopt;
-            }
-
-            return text.substr( *start, value_end - *start );
+            return value->get<std::string>();
         }
 
         [[nodiscard]]
         std::optional<std::uint64_t>
-        parse_uint64_token( std::string_view token )
+        uint64_field( const Json&      object,
+                      std::string_view field )
         {
-            if( token.empty() || token.front() == '-' )
+            const Json* value = find_field( object, field );
+            if( value == nullptr || !value->is_number_integer() )
             {
                 return std::nullopt;
+            }
+            if( value->is_number_unsigned() )
+            {
+                return value->get<std::uint64_t>();
             }
 
-            std::uint64_t value  = 0U;
-            const auto*   begin  = token.data();
-            const auto*   end    = std::next( begin, std::ssize( token ) );
-            const auto    result = std::from_chars( begin, end, value );
-            if( result.ec != std::errc{} || result.ptr != end )
+            const auto signed_value = value->get<std::int64_t>();
+            if( signed_value < 0 )
             {
                 return std::nullopt;
             }
-            return value;
+            return static_cast<std::uint64_t>( signed_value );
         }
 
         [[nodiscard]]
         std::optional<std::int64_t>
-        parse_int64_token( std::string_view token )
+        int64_field( const Json&      object,
+                     std::string_view field )
         {
-            std::int64_t value  = 0;
-            const auto*  begin  = token.data();
-            const auto*  end    = std::next( begin, std::ssize( token ) );
-            const auto   result = std::from_chars( begin, end, value );
-            if( result.ec != std::errc{} || result.ptr != end )
+            const Json* value = find_field( object, field );
+            if( value == nullptr || !value->is_number_integer() )
             {
                 return std::nullopt;
             }
-            return value;
-        }
+            if( !value->is_number_unsigned() )
+            {
+                return value->get<std::int64_t>();
+            }
 
-        [[nodiscard]]
-        std::optional<std::uint64_t>
-        find_uint64( std::string_view text,
-                     std::string_view key )
-        {
-            const auto token = find_number( text, key );
-            if( !token.has_value() )
+            const auto     unsigned_value = value->get<std::uint64_t>();
+            constexpr auto maxSigned =
+                static_cast<std::uint64_t>( std::numeric_limits<std::int64_t>::max() );
+            if( unsigned_value > maxSigned )
             {
                 return std::nullopt;
             }
-            return parse_uint64_token( *token );
-        }
-
-        [[nodiscard]]
-        std::optional<std::int64_t>
-        find_int64( std::string_view text,
-                    std::string_view key )
-        {
-            const auto token = find_number( text, key );
-            if( !token.has_value() )
-            {
-                return std::nullopt;
-            }
-            return parse_int64_token( *token );
+            return static_cast<std::int64_t>( unsigned_value );
         }
 
         [[nodiscard]]
@@ -362,92 +125,102 @@ namespace grab::session
     std::string
     to_json( const SessionRecord& record )
     {
-        const nlohmann::ordered_json object{
-            {             "name",                                          record.name},
-            {         "provider",                                      record.provider},
-            {         "endpoint",                                      record.endpoint},
-            {   "control_socket",                                record.control_socket},
-            {             "mode",              std::string{ mode_name( record.mode ) }},
-            {            "state",            std::string{ state_name( record.state ) }},
-            {            "width",  static_cast<std::uint64_t>( record.geometry.width )},
-            {           "height", static_cast<std::uint64_t>( record.geometry.height )},
-            {   "supervisor_pid",                        record.supervisor_pid.value()},
-            {"created_monotonic",                             record.created_monotonic},
-        };
+        nlohmann::ordered_json object = nlohmann::ordered_json::object();
+        object.emplace( std::string{ nameField }, record.name );
+        object.emplace( std::string{ providerField }, record.provider );
+        object.emplace( std::string{ endpointField }, record.endpoint );
+        object.emplace( std::string{ controlSocketField }, record.control_socket );
+        object.emplace( std::string{ modeField },
+                        std::string{ mode_name( record.mode ) } );
+        object.emplace( std::string{ stateField },
+                        std::string{ state_name( record.state ) } );
+        object.emplace( std::string{ widthField },
+                        static_cast<std::uint64_t>( record.geometry.width ) );
+        object.emplace( std::string{ heightField },
+                        static_cast<std::uint64_t>( record.geometry.height ) );
+        object.emplace( std::string{ supervisorPidField },
+                        record.supervisor_pid.value() );
+        object.emplace( std::string{ createdMonotonicField }, record.created_monotonic );
         return object.dump();
     }
 
     grab::Result<SessionRecord>
     parse_record( std::string_view text )
     {
-        auto name = find_string( text, name_field );
+        const Json object = Json::parse( text, nullptr, false );
+        if( object.is_discarded() || !object.is_object() )
+        {
+            return fail_record_field( nameField );
+        }
+
+        auto name = string_field( object, nameField );
         if( !name.has_value() )
         {
-            return fail_record_field( name_field );
+            return fail_record_field( nameField );
         }
 
-        auto provider = find_string( text, provider_field );
+        auto provider = string_field( object, providerField );
         if( !provider.has_value() )
         {
-            return fail_record_field( provider_field );
+            return fail_record_field( providerField );
         }
 
-        auto endpoint = find_string( text, endpoint_field );
+        auto endpoint = string_field( object, endpointField );
         if( !endpoint.has_value() )
         {
-            return fail_record_field( endpoint_field );
+            return fail_record_field( endpointField );
         }
 
-        auto control_socket = find_string( text, control_socket_field );
+        auto control_socket = string_field( object, controlSocketField );
         if( !control_socket.has_value() )
         {
-            return fail_record_field( control_socket_field );
+            return fail_record_field( controlSocketField );
         }
 
-        const auto mode_text = find_string( text, mode_field );
+        const auto mode_text = string_field( object, modeField );
         if( !mode_text.has_value() )
         {
-            return fail_record_field( mode_field );
+            return fail_record_field( modeField );
         }
         const auto mode = mode_from_string( *mode_text );
         if( !mode.has_value() )
         {
-            return fail_record_field( mode_field );
+            return fail_record_field( modeField );
         }
 
-        const auto state_text = find_string( text, state_field );
+        const auto state_text = string_field( object, stateField );
         if( !state_text.has_value() )
         {
-            return fail_record_field( state_field );
+            return fail_record_field( stateField );
         }
         const auto state = session_state_from_string( *state_text );
         if( !state.has_value() )
         {
-            return fail_record_field( state_field );
+            return fail_record_field( stateField );
         }
 
-        const auto width = find_uint64( text, width_field );
+        const auto width = uint64_field( object, widthField );
         if( !width.has_value() || !fits_uint16( *width ) )
         {
-            return fail_record_field( width_field );
+            return fail_record_field( widthField );
         }
 
-        const auto height = find_uint64( text, height_field );
+        const auto height = uint64_field( object, heightField );
         if( !height.has_value() || !fits_uint16( *height ) )
         {
-            return fail_record_field( height_field );
+            return fail_record_field( heightField );
         }
 
-        const auto supervisor_pid = find_int64( text, supervisor_pid_field );
+        const auto supervisor_pid = int64_field( object, supervisorPidField );
         if( !supervisor_pid.has_value() )
         {
-            return fail_record_field( supervisor_pid_field );
+            return fail_record_field( supervisorPidField );
         }
 
-        const auto created_monotonic = find_uint64( text, created_monotonic_field );
+        const auto created_monotonic = uint64_field( object, createdMonotonicField );
         if( !created_monotonic.has_value() )
         {
-            return fail_record_field( created_monotonic_field );
+            return fail_record_field( createdMonotonicField );
         }
 
         const SessionGeometry geometry{

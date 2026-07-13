@@ -129,7 +129,6 @@ namespace
                     pixels.push_back( channel_byte( pixel_index, graySeed ) );
                     break;
                 case grab::PixelFormat::Rgb :
-                case grab::PixelFormat::Rgb24 :
                     append_rgb_pixel( pixels, pixel_index );
                     break;
                 case grab::PixelFormat::Bgr :
@@ -139,7 +138,6 @@ namespace
                     append_rgba_pixel( pixels, pixel_index );
                     break;
                 case grab::PixelFormat::Bgra :
-                case grab::PixelFormat::Bgr0 :
                     append_bgra_pixel( pixels, pixel_index );
                     break;
             }
@@ -194,10 +192,6 @@ namespace
                 return "rgb";
             case grab::PixelFormat::Bgr :
                 return "bgr";
-            case grab::PixelFormat::Rgb24 :
-                return "rgb24";
-            case grab::PixelFormat::Bgr0 :
-                return "bgr0";
             case grab::PixelFormat::Gray :
                 return "gray";
         }

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -41,36 +42,12 @@ namespace grab::storage
         constexpr int            monthDayWidth    = 2;
         constexpr std::uintmax_t bytesPerKilobyte = 1'024U;
         constexpr std::uintmax_t bytesPerMegabyte = bytesPerKilobyte * bytesPerKilobyte;
-        constexpr std::int64_t   secondsPerDay    = 86'400;
-        constexpr std::int64_t   unixEpochToCivilOffsetDays = 719'468;
-        constexpr std::int64_t   daysPerEra                 = 146'097;
-        constexpr std::int64_t   yearsPerEra                = 400;
-        constexpr std::int64_t   daysPerNormalYear          = 365;
-        constexpr std::int64_t   daysPerFourYears           = 1'460;
-        constexpr std::int64_t   daysPerCentury             = 36'524;
-        constexpr std::int64_t   leapYearCycle              = 4;
-        constexpr std::int64_t   centuryCycle               = 100;
-        constexpr std::int64_t   marchMonthNumerator        = 5;
-        constexpr std::int64_t   marchMonthOffset           = 2;
-        constexpr std::int64_t   daysPerMarchMonthBlock     = 153;
-        constexpr std::int64_t   calendarOrdinalBase        = 1;
-        constexpr std::int64_t   marchMonthCutoff           = 10;
-        constexpr std::int64_t   marchToJanuaryOffset       = 3;
-        constexpr std::int64_t   marchToCalendarOffset      = 9;
-        constexpr std::int64_t   februaryNumber             = 2;
-        constexpr std::string_view jsonlExtension           = ".jsonl";
-        constexpr std::string_view jsonlSuffix              = ".jsonl";
-        constexpr std::string_view sinkClosedMessage        = "jsonl sink is closed";
-        constexpr std::string_view movedFromMessage         = "jsonl sink is moved-from";
+        constexpr std::string_view jsonlExtension = ".jsonl";
+        constexpr std::string_view jsonlSuffix    = ".jsonl";
+        constexpr std::string_view sinkClosedMessage = "jsonl sink is closed";
+        constexpr std::string_view movedFromMessage  = "jsonl sink is moved-from";
 
-        using OrderedJson                                   = nlohmann::ordered_json;
-
-        struct CivilDate
-        {
-                std::int64_t year  = 0;
-                unsigned int month = 0U;
-                unsigned int day   = 0U;
-        };
+        using OrderedJson                            = nlohmann::ordered_json;
 
         struct BufferedLine
         {
@@ -360,59 +337,6 @@ namespace grab::storage
         }
 
         [[nodiscard]]
-        std::int64_t
-        days_since_unix_epoch( std::int64_t seconds ) noexcept
-        {
-            auto       days = seconds / secondsPerDay;
-            const auto rem  = seconds % secondsPerDay;
-            if( seconds < 0 && rem != 0 )
-            {
-                --days;
-            }
-            return days;
-        }
-
-        [[nodiscard]]
-        CivilDate
-        civil_from_days( std::int64_t days_since_epoch ) noexcept
-        {
-            const auto z = days_since_epoch + unixEpochToCivilOffsetDays;
-            const auto era =
-                ( z >= 0 ? z : z - ( daysPerEra - calendarOrdinalBase ) ) / daysPerEra;
-            const auto day_of_era  = z - ( era * daysPerEra );
-            const auto year_of_era = ( day_of_era -
-                                       ( day_of_era / daysPerFourYears ) +
-                                       ( day_of_era / daysPerCentury ) -
-                                       ( day_of_era / daysPerEra ) ) /
-                                     daysPerNormalYear;
-            auto       year        = year_of_era + ( era * yearsPerEra );
-            const auto day_of_year = day_of_era - ( ( daysPerNormalYear * year_of_era ) +
-                                                    ( year_of_era / leapYearCycle ) -
-                                                    ( year_of_era / centuryCycle ) );
-            const auto month_prime =
-                ( ( ( marchMonthNumerator * day_of_year ) + marchMonthOffset ) /
-                  daysPerMarchMonthBlock );
-            const auto day =
-                day_of_year -
-                ( ( ( daysPerMarchMonthBlock * month_prime ) + marchMonthOffset ) /
-                  marchMonthNumerator ) +
-                calendarOrdinalBase;
-            const auto month = month_prime < marchMonthCutoff
-                                 ? month_prime + marchToJanuaryOffset
-                                 : month_prime - marchToCalendarOffset;
-            if( month <= februaryNumber )
-            {
-                ++year;
-            }
-
-            return CivilDate{
-                .year  = year,
-                .month = static_cast<unsigned int>( month ),
-                .day   = static_cast<unsigned int>( day ),
-            };
-        }
-
-        [[nodiscard]]
         grab::Result<std::string>
         date_from_timestamp( double timestamp )
         {
@@ -432,13 +356,33 @@ namespace grab::storage
                                          "jsonl event timestamp is out of range" );
             }
 
-            const auto seconds   = static_cast<std::int64_t>( std::floor( timestamp ) );
-            const CivilDate date = civil_from_days( days_since_unix_epoch( seconds ) );
+            using TimestampDuration    = std::chrono::duration<double>;
+            const auto timestamp_point = std::chrono::sys_time<TimestampDuration>{
+                TimestampDuration{ timestamp }
+            };
+            const auto day = std::chrono::floor<std::chrono::days>( timestamp_point );
 
-            std::ostringstream output;
-            output << std::setfill( '0' ) << std::setw( yearWidth ) << date.year << '-'
-                   << std::setw( monthDayWidth ) << date.month << '-'
-                   << std::setw( monthDayWidth ) << date.day;
+            constexpr std::chrono::sys_days firstSupportedDay{
+                std::chrono::year::min() / std::chrono::January / 1,
+            };
+            constexpr std::chrono::sys_days lastSupportedDay{
+                std::chrono::year::max() / std::chrono::December / std::chrono::last,
+            };
+            if( day < firstSupportedDay || day > lastSupportedDay )
+            {
+                return unexpected_error( grab::ErrorCode::InvalidArgument,
+                                         "jsonl event timestamp is out of range" );
+            }
+
+            const std::chrono::year_month_day date{ day };
+
+            std::ostringstream                output;
+            output << std::setfill( '0' ) << std::setw( yearWidth )
+                   << static_cast<int>( date.year() ) << '-'
+                   << std::setw( monthDayWidth )
+                   << static_cast<unsigned int>( date.month() ) << '-'
+                   << std::setw( monthDayWidth )
+                   << static_cast<unsigned int>( date.day() );
             return output.str();
         }
 

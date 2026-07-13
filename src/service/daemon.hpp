@@ -2,6 +2,7 @@
 
 #include "grab/result.hpp"
 
+#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -26,10 +27,19 @@ namespace grab::event
 namespace grab::service
 {
 
+    [[nodiscard]]
+    std::string
+    default_daemon_endpoint();
+
     struct DaemonOptions
     {
-            std::string                          endpoint = "unix:/tmp/grab.sock";
+            static constexpr std::size_t         defaultStorageQueueDepth  = 65'536U;
+            static constexpr std::size_t         defaultStorageBufferLimit = 1U;
+
+            std::string                          endpoint = default_daemon_endpoint();
             std::optional<std::filesystem::path> store_dir;
+            std::size_t storage_queue_depth  = defaultStorageQueueDepth;
+            std::size_t storage_buffer_limit = defaultStorageBufferLimit;
             std::function<std::vector<std::unique_ptr<grab::event::EventSource>>()>
                 source_factory;
     };

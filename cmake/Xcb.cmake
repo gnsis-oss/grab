@@ -16,10 +16,8 @@ function(grab_find_xcb)
         xcb-xtest
         xcb-composite
         xcb-shm
-        xcb-xfixes
         xcb-randr
         xcb-xinput
-        xcb-record
         xkbcommon-x11
         dbus-1
     )

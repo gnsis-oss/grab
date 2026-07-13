@@ -19,25 +19,25 @@
 namespace
 {
 
-    constexpr const char*      xvfbDisplay        = ":96";
-    constexpr int              xcbOk              = 0;
-    constexpr std::int16_t     windowX            = 120;
-    constexpr std::int16_t     windowY            = 140;
-    constexpr std::uint16_t    windowWidth        = 420U;
-    constexpr std::uint16_t    windowHeight       = 280U;
-    constexpr std::uint16_t    windowBorderWidth  = 0U;
-    constexpr std::int16_t     dragFromX          = windowX + 64;
-    constexpr std::int16_t     dragFromY          = windowY + 72;
-    constexpr std::int16_t     dragToX            = windowX + 312;
-    constexpr std::int16_t     dragToY            = windowY + 184;
-    constexpr std::int16_t     menuItemX          = windowX + 180;
-    constexpr std::int16_t     menuItemY          = windowY + 96;
-    constexpr std::int32_t     interpolationSteps = 16;
-    constexpr auto             stepDwell          = std::chrono::milliseconds{ 2 };
-    constexpr auto             dragStartDwell     = std::chrono::milliseconds{ 2 };
-    constexpr std::uint32_t    windowEventMask    = XCB_EVENT_MASK_BUTTON_PRESS |
-                                                    XCB_EVENT_MASK_BUTTON_RELEASE |
-                                                    XCB_EVENT_MASK_POINTER_MOTION;
+    constexpr const char*      xvfbDisplay             = ":96";
+    constexpr int              xcbOk                   = 0;
+    constexpr std::int16_t     windowX                 = 120;
+    constexpr std::int16_t     windowY                 = 140;
+    constexpr std::uint16_t    windowWidth             = 420U;
+    constexpr std::uint16_t    windowHeight            = 280U;
+    constexpr std::uint16_t    windowBorderWidth       = 0U;
+    constexpr std::int16_t     dragFromX               = windowX + 64;
+    constexpr std::int16_t     dragFromY               = windowY + 72;
+    constexpr std::int16_t     dragToX                 = windowX + 312;
+    constexpr std::int16_t     dragToY                 = windowY + 184;
+    constexpr std::int16_t     menuItemX               = windowX + 180;
+    constexpr std::int16_t     menuItemY               = windowY + 96;
+    constexpr std::int32_t     interpolationSteps      = 16;
+    constexpr std::int32_t     minimumDragMotionEvents = 1;
+    constexpr auto             stepDwell               = std::chrono::milliseconds{ 2 };
+    constexpr std::uint32_t    windowEventMask         = XCB_EVENT_MASK_BUTTON_PRESS |
+                                                         XCB_EVENT_MASK_BUTTON_RELEASE |
+                                                         XCB_EVENT_MASK_POINTER_MOTION;
     constexpr std::uint32_t    windowValueMask  = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
     constexpr std::uint8_t     responseTypeMask = 0X7FU;
     constexpr auto             pointerEventTimeout = std::chrono::seconds{ 2 };
@@ -281,7 +281,7 @@ namespace
 }    // namespace
 
 TEST( Gestures,
-      QtDragEmitsPressMotionsRelease )
+      LinearDragEmitsPressMotionsRelease )
 {
     const ObserverConnection observer{ xvfbDisplay };
     ASSERT_NE( observer.get(), nullptr );
@@ -293,20 +293,66 @@ TEST( Gestures,
 
     auto seat = grab::input::Seat::open( xvfbDisplay );
     ASSERT_TRUE( seat.has_value() ) << seat.error().message;
-    const grab::input::QtDragParams params{
+    const grab::input::DragOptions options{
         .interpolation_steps = interpolationSteps,
         .step_dwell          = stepDwell,
-        .drag_start_dwell    = dragStartDwell,
     };
 
-    const auto drag_result = grab::input::qt_drag( *seat,
-                                                   { .x = dragFromX, .y = dragFromY },
-                                                   { .x = dragToX, .y = dragToY },
-                                                   params );
+    const auto drag_result =
+        grab::input::linear_drag( *seat,
+                                  { .x = dragFromX, .y = dragFromY },
+                                  { .x = dragToX, .y = dragToY },
+                                  options );
     ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
 
     const std::vector<ObservedEvent> events = collect_pointer_events( observer.get() );
     EXPECT_TRUE( contains_drag_sequence( events, interpolationSteps ) );
+
+    const auto pointer = take_xcb_owned(
+        xcb_query_pointer_reply( observer.get(),
+                                 xcb_query_pointer( observer.get(), screen->root ),
+                                 nullptr )
+    );
+    ASSERT_NE( pointer, nullptr );
+    EXPECT_EQ( pointer->root_x, dragToX );
+    EXPECT_EQ( pointer->root_y, dragToY );
+}
+
+TEST( Gestures,
+      CurveDragEndsAtRequestedPoint )
+{
+    const ObserverConnection observer{ xvfbDisplay };
+    ASSERT_NE( observer.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
+    const xcb_screen_t* screen =
+        default_screen( observer.get(), observer.screen_index() );
+    ASSERT_NE( screen, nullptr );
+    static_cast<void>( create_observer_window( observer.get(), *screen ) );
+
+    auto seat = grab::input::Seat::open( xvfbDisplay );
+    ASSERT_TRUE( seat.has_value() ) << seat.error().message;
+    const grab::input::DragOptions options{
+        .interpolation_steps = interpolationSteps,
+        .step_dwell          = stepDwell,
+    };
+
+    const auto drag_result = grab::input::curve_drag( *seat,
+                                                      { .x = dragFromX, .y = dragFromY },
+                                                      { .x = dragToX, .y = dragToY },
+                                                      options );
+    ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
+
+    const std::vector<ObservedEvent> events = collect_pointer_events( observer.get() );
+    EXPECT_TRUE( contains_drag_sequence( events, minimumDragMotionEvents ) );
+
+    const auto pointer = take_xcb_owned(
+        xcb_query_pointer_reply( observer.get(),
+                                 xcb_query_pointer( observer.get(), screen->root ),
+                                 nullptr )
+    );
+    ASSERT_NE( pointer, nullptr );
+    EXPECT_EQ( pointer->root_x, dragToX );
+    EXPECT_EQ( pointer->root_y, dragToY );
 }
 
 TEST( Gestures,

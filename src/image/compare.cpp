@@ -302,7 +302,6 @@ namespace grab::image
                             byte_at( row, offset + blueOffset )
                         ),
                     };
-                case grab::PixelFormat::Bgr0 :
                 case grab::PixelFormat::Bgra :
                     return Rgb{
                         .red = std::to_integer<unsigned int>(
@@ -315,7 +314,6 @@ namespace grab::image
                             byte_at( row, offset + redOffset )
                         ),
                     };
-                case grab::PixelFormat::Rgb24 :
                 case grab::PixelFormat::Rgb :
                     return Rgb{
                         .red = std::to_integer<unsigned int>(

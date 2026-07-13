@@ -49,6 +49,10 @@ namespace grab::input
             locate( const std::vector<std::string>& wm_class_candidates,
                     std::string_view                title = {} );
 
+            [[nodiscard]]
+            grab::Result<void>
+            activate( const LocatedWindow& window );
+
         private:
 
             WindowLocator( xcb_connection_t* connection,

@@ -6,6 +6,7 @@
 #include "grab/event_descriptor.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
+#include "platform/x11/protocol.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -47,11 +48,6 @@ namespace grab::event
             static_cast<std::uint32_t>( XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY );
         constexpr std::uint32_t rootValueMask =
             static_cast<std::uint32_t>( XCB_CW_EVENT_MASK );
-
-        constexpr std::string_view netActiveWindowAtom = "_NET_ACTIVE_WINDOW";
-        constexpr std::string_view netWmNameAtom       = "_NET_WM_NAME";
-        constexpr std::string_view netWmPidAtom        = "_NET_WM_PID";
-        constexpr std::string_view utf8StringAtom      = "UTF8_STRING";
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -152,25 +148,30 @@ namespace grab::event
         grab::Result<Atoms>
         intern_atoms( xcb_connection_t* connection )
         {
-            auto net_active_window = intern_atom( connection, netActiveWindowAtom );
+            auto net_active_window =
+                intern_atom( connection,
+                             grab::platform::x11::atom_name::netActiveWindow );
             if( !net_active_window.has_value() )
             {
                 return std::unexpected( std::move( net_active_window.error() ) );
             }
 
-            auto net_wm_name = intern_atom( connection, netWmNameAtom );
+            auto net_wm_name =
+                intern_atom( connection, grab::platform::x11::atom_name::netWmName );
             if( !net_wm_name.has_value() )
             {
                 return std::unexpected( std::move( net_wm_name.error() ) );
             }
 
-            auto net_wm_pid = intern_atom( connection, netWmPidAtom );
+            auto net_wm_pid =
+                intern_atom( connection, grab::platform::x11::atom_name::netWmPid );
             if( !net_wm_pid.has_value() )
             {
                 return std::unexpected( std::move( net_wm_pid.error() ) );
             }
 
-            auto utf8_string = intern_atom( connection, utf8StringAtom );
+            auto utf8_string =
+                intern_atom( connection, grab::platform::x11::atom_name::utf8String );
             if( !utf8_string.has_value() )
             {
                 return std::unexpected( std::move( utf8_string.error() ) );

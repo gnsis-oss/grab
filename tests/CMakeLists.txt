@@ -1,4 +1,6 @@
 add_executable(grab_core_tests
+    ${CMAKE_SOURCE_DIR}/src/cli/input_command.cpp
+    cli/input_command_test.cpp
     core/test_capability.cpp
     core/test_enum_table.cpp
     core/test_log.cpp
@@ -79,18 +81,6 @@ else()
     gtest_discover_tests(grab_core_tests)
 endif()
 
-# ── Integrated subsystem tests (from feat/grab-combined) ───────────────────
-add_executable(grab_input_sink_tests input/gesture_test.cpp)
-target_link_libraries(grab_input_sink_tests PRIVATE grab_input_sink GTest::gtest_main)
-target_include_directories(grab_input_sink_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
-gtest_discover_tests(grab_input_sink_tests)
-
-add_executable(grab_codec_png_tests codec/png_encoder_test.cpp)
-target_link_libraries(grab_codec_png_tests PRIVATE grab_codec_png GTest::gtest_main)
-target_include_directories(grab_codec_png_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(grab_codec_png_tests PRIVATE GRAB_CODEC_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/fixtures")
-gtest_discover_tests(grab_codec_png_tests)
-
 add_executable(grab_session_tests
     session/fake_session_provider_test.cpp
     session/manager_test.cpp
@@ -105,18 +95,13 @@ target_include_directories(grab_session_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${
 gtest_discover_tests(grab_session_tests)
 
 add_executable(grab_x11_tests
-    ${CMAKE_SOURCE_DIR}/src/cli/input_command.cpp
-    x11/cursor_overlay_test.cpp
-    x11/xcb_atom_test.cpp
     x11/xcb_reply_test.cpp
-    x11/pixel_format_test.cpp
-    x11/xcb_window_test.cpp
     x11/xkb_keymap_test.cpp
     x11/xi_seat_test.cpp
     session/x11_seat_provider_test.cpp
     session/builtin_session_providers_test.cpp
 )
-target_link_libraries(grab_x11_tests PRIVATE grab_core grab_platform_x11 grab_input_x11 grab_session grab_input_sink GTest::gtest_main)
+target_link_libraries(grab_x11_tests PRIVATE grab_core grab_platform_x11 grab_input_x11 grab_session GTest::gtest_main)
 target_include_directories(grab_x11_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(GRAB_TEST_PROVISION_XVFB)

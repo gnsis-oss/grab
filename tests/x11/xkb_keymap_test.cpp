@@ -1,4 +1,3 @@
-#include "cli/input_command.hpp"
 #include "grab/keymap.hpp"
 #include "grab/result.hpp"
 #include "platform/x11/xkb_keymap.hpp"
@@ -20,27 +19,23 @@
 namespace
 {
 
-    namespace x11                                         = grab::platform::x11;
+    namespace x11                                       = grab::platform::x11;
 
-    constexpr const char*        us_layout                = "us";
-    constexpr std::string_view   return_keysym_name       = "Return";
-    constexpr std::string_view   unknown_keysym_name      = "NoSuchGrabKeysym";
-    constexpr std::string_view   text                     = "aA!";
-    constexpr std::size_t        expected_stroke_count    = 3U;
-    constexpr std::size_t        lower_a_index            = 0U;
-    constexpr std::size_t        upper_a_index            = 1U;
-    constexpr std::size_t        exclamation_index        = 2U;
-    constexpr std::uint32_t      unsupported_codepoint    = 0X1FU;
-    constexpr std::size_t        unsupported_byte_count   = 1U;
-    constexpr std::string_view   fraction_pair_text       = "0.06,0.235";
-    constexpr std::string_view   malformed_fraction_pair  = "0.06";
-    constexpr double             expected_first_fraction  = 0.06;
-    constexpr double             expected_second_fraction = 0.235;
-    constexpr const char*        altgr_modifier_name      = "Mod5";
-    constexpr xkb_mod_mask_t     no_modifier_mask         = 0U;
-    constexpr xkb_layout_index_t default_layout           = 0U;
-    constexpr std::size_t        null_terminator_size     = 1U;
-    constexpr int                no_produced_bytes        = 0;
+    constexpr const char*        us_layout              = "us";
+    constexpr std::string_view   return_keysym_name     = "Return";
+    constexpr std::string_view   unknown_keysym_name    = "NoSuchGrabKeysym";
+    constexpr std::string_view   text                   = "aA!";
+    constexpr std::size_t        expected_stroke_count  = 3U;
+    constexpr std::size_t        lower_a_index          = 0U;
+    constexpr std::size_t        upper_a_index          = 1U;
+    constexpr std::size_t        exclamation_index      = 2U;
+    constexpr std::uint32_t      unsupported_codepoint  = 0X1FU;
+    constexpr std::size_t        unsupported_byte_count = 1U;
+    constexpr const char*        altgr_modifier_name    = "Mod5";
+    constexpr xkb_mod_mask_t     no_modifier_mask       = 0U;
+    constexpr xkb_layout_index_t default_layout         = 0U;
+    constexpr std::size_t        null_terminator_size   = 1U;
+    constexpr int                no_produced_bytes      = 0;
     constexpr auto               context_flags = XKB_CONTEXT_NO_ENVIRONMENT_NAMES;
 
     using XkbContext = std::unique_ptr<xkb_context, decltype( &xkb_context_unref )>;
@@ -225,23 +220,4 @@ TEST( XkbKeymap,
 
     ASSERT_FALSE( strokes.has_value() );
     EXPECT_EQ( strokes.error().code, grab::ErrorCode::UnsupportedCharacter );
-}
-
-TEST( InputCommand,
-      ParsesFractionPairs )
-{
-    auto parsed = grab::cli::parse_fraction_pair( fraction_pair_text );
-    ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
-
-    EXPECT_DOUBLE_EQ( parsed->first, expected_first_fraction );
-    EXPECT_DOUBLE_EQ( parsed->second, expected_second_fraction );
-}
-
-TEST( InputCommand,
-      RejectsMalformedFractionPairs )
-{
-    auto parsed = grab::cli::parse_fraction_pair( malformed_fraction_pair );
-
-    ASSERT_FALSE( parsed.has_value() );
-    EXPECT_EQ( parsed.error().code, grab::ErrorCode::InvalidArgument );
 }

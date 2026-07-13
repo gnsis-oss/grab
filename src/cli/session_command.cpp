@@ -239,9 +239,7 @@ namespace grab::cli
                 return error_exit_code;
             }
 
-            const auto              providers = session::builtin_session_providers();
-            session::SessionManager manager{ *registry, *providers.front() };
-            const auto              records = manager.list();
+            const auto records = registry->list();
             for( const auto& record : records )
             {
                 print_record( record );

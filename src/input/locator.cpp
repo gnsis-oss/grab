@@ -1,10 +1,12 @@
+#include "core/ascii.hpp"
 #include "grab/result.hpp"
 #include "input/locator.hpp"
+#include "platform/x11/protocol.hpp"
 
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -15,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <xcb/xcb.h>
@@ -33,10 +36,17 @@ namespace grab::input
         constexpr std::uint32_t    maxPropertyBytes     = 1U * 1'024U * 1'024U;
         constexpr std::uint8_t     format8Bits          = 8U;
         constexpr std::uint8_t     format32Bits         = 32U;
-        constexpr std::string_view netClientListAtom    = "_NET_CLIENT_LIST";
-        constexpr std::string_view netWmNameAtom        = "_NET_WM_NAME";
-        constexpr std::string_view utf8StringAtom       = "UTF8_STRING";
+        constexpr std::uint8_t     doNotPropagate       = 0U;
+        constexpr std::uint32_t    activeSourceNormal   = 1U;
+        constexpr std::uint32_t    noCurrentWindow      = 0U;
+        constexpr std::uint32_t    stackAbove           = XCB_STACK_MODE_ABOVE;
         constexpr std::string_view locatorContext       = "XCB window locator";
+        constexpr auto             activationTimeout    = std::chrono::seconds{ 1 };
+        constexpr auto          activationPollInterval = std::chrono::milliseconds{ 10 };
+
+        constexpr std::uint32_t activeWindowEventMask =
+            static_cast<std::uint32_t>( XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY ) |
+            static_cast<std::uint32_t>( XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT );
 
         template<typename T>
         using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -46,9 +56,10 @@ namespace grab::input
 
         struct Atoms
         {
-                xcb_atom_t net_client_list = XCB_ATOM_NONE;
-                xcb_atom_t net_wm_name     = XCB_ATOM_NONE;
-                xcb_atom_t utf8_string     = XCB_ATOM_NONE;
+                xcb_atom_t net_client_list          = XCB_ATOM_NONE;
+                xcb_atom_t net_client_list_stacking = XCB_ATOM_NONE;
+                xcb_atom_t net_wm_name              = XCB_ATOM_NONE;
+                xcb_atom_t utf8_string              = XCB_ATOM_NONE;
         };
 
         struct PropertyData
@@ -80,6 +91,21 @@ namespace grab::input
             {
                 return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    "XCB window locator connection is not open" );
+            }
+            return {};
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        check_request( xcb_connection_t* connection,
+                       xcb_void_cookie_t cookie,
+                       std::string_view  operation )
+        {
+            const auto error = take_xcb_owned( xcb_request_check( connection, cookie ) );
+            if( error != nullptr )
+            {
+                return grab::fail( grab::ErrorCode::ProtocolError,
+                                   std::string{ operation } + " failed" );
             }
             return {};
         }
@@ -138,28 +164,45 @@ namespace grab::input
         grab::Result<Atoms>
         intern_atoms( xcb_connection_t* connection )
         {
-            auto net_client_list = intern_atom( connection, netClientListAtom, true );
+            auto net_client_list_stacking =
+                intern_atom( connection,
+                             grab::platform::x11::atom_name::netClientListStacking,
+                             true );
+            if( !net_client_list_stacking.has_value() )
+            {
+                return std::unexpected( std::move( net_client_list_stacking.error() ) );
+            }
+
+            auto net_client_list =
+                intern_atom( connection,
+                             grab::platform::x11::atom_name::netClientList,
+                             true );
             if( !net_client_list.has_value() )
             {
                 return std::unexpected( std::move( net_client_list.error() ) );
             }
 
-            auto net_wm_name = intern_atom( connection, netWmNameAtom, true );
+            auto net_wm_name = intern_atom( connection,
+                                            grab::platform::x11::atom_name::netWmName,
+                                            true );
             if( !net_wm_name.has_value() )
             {
                 return std::unexpected( std::move( net_wm_name.error() ) );
             }
 
-            auto utf8_string = intern_atom( connection, utf8StringAtom, true );
+            auto utf8_string = intern_atom( connection,
+                                            grab::platform::x11::atom_name::utf8String,
+                                            true );
             if( !utf8_string.has_value() )
             {
                 return std::unexpected( std::move( utf8_string.error() ) );
             }
 
             return Atoms{
-                .net_client_list = *net_client_list,
-                .net_wm_name     = *net_wm_name,
-                .utf8_string     = *utf8_string,
+                .net_client_list          = *net_client_list,
+                .net_client_list_stacking = *net_client_list_stacking,
+                .net_wm_name              = *net_wm_name,
+                .utf8_string              = *utf8_string,
             };
         }
 
@@ -316,38 +359,6 @@ namespace grab::input
         }
 
         [[nodiscard]]
-        std::string
-        ascii_lower( std::string_view text )
-        {
-            std::string lowered;
-            lowered.reserve( text.size() );
-            std::ranges::transform(
-                text,
-                std::back_inserter( lowered ),
-                []( unsigned char value )
-                {
-                    return static_cast<char>( std::tolower( value ) );
-                }
-            );
-            return lowered;
-        }
-
-        [[nodiscard]]
-        bool
-        contains_case_insensitive( std::string_view haystack,
-                                   std::string_view needle )
-        {
-            if( needle.empty() )
-            {
-                return true;
-            }
-
-            const std::string lower_haystack = ascii_lower( haystack );
-            const std::string lower_needle   = ascii_lower( needle );
-            return lower_haystack.contains( lower_needle );
-        }
-
-        [[nodiscard]]
         bool
         wm_class_matches( const WindowClass&              window_class,
                           const std::vector<std::string>& candidates )
@@ -357,10 +368,10 @@ namespace grab::input
                 [&]( const std::string& candidate )
                 {
                     return !candidate.empty() &&
-                           ( contains_case_insensitive( window_class.instance,
-                                                        candidate ) ||
-                             contains_case_insensitive( window_class.class_name,
-                                                        candidate ) );
+                           ( grab::core::ascii_icontains( window_class.instance,
+                                                          candidate ) ||
+                             grab::core::ascii_icontains( window_class.class_name,
+                                                          candidate ) );
                 }
             );
         }
@@ -458,6 +469,12 @@ namespace grab::input
             return result;
         }
 
+        void
+        prefer_topmost_windows( std::vector<xcb_window_t>& windows )
+        {
+            std::ranges::reverse( windows );
+        }
+
         [[nodiscard]]
         grab::Result<std::vector<xcb_window_t>>
         root_tree_windows( xcb_connection_t* connection,
@@ -492,6 +509,7 @@ namespace grab::input
             {
                 windows.push_back( child );
             }
+            prefer_topmost_windows( windows );
             return windows;
         }
 
@@ -501,17 +519,66 @@ namespace grab::input
                            xcb_window_t      root,
                            const Atoms&      atoms )
         {
+            auto stacking_list =
+                net_client_list_windows( connection,
+                                         root,
+                                         atoms.net_client_list_stacking );
+            if( !stacking_list.has_value() )
+            {
+                return std::unexpected( std::move( stacking_list.error() ) );
+            }
+            prefer_topmost_windows( *stacking_list );
+
             auto client_list =
                 net_client_list_windows( connection, root, atoms.net_client_list );
             if( !client_list.has_value() )
             {
                 return std::unexpected( std::move( client_list.error() ) );
             }
-            if( !client_list->empty() )
+            prefer_topmost_windows( *client_list );
+
+            stacking_list->reserve( stacking_list->size() + client_list->size() );
+            for( const xcb_window_t window : *client_list )
             {
-                return client_list;
+                if( std::ranges::find( *stacking_list, window ) == stacking_list->end() )
+                {
+                    stacking_list->push_back( window );
+                }
+            }
+            if( !stacking_list->empty() )
+            {
+                return stacking_list;
             }
             return root_tree_windows( connection, root );
+        }
+
+        [[nodiscard]]
+        grab::Result<bool>
+        window_is_viewable( xcb_connection_t* connection,
+                            xcb_window_t      window )
+        {
+            xcb_generic_error_t* raw_error = nullptr;
+            const auto           reply = take_xcb_owned( xcb_get_window_attributes_reply(
+                connection,
+                xcb_get_window_attributes( connection, window ),
+                &raw_error
+            ) );
+            const auto           error = take_xcb_owned( raw_error );
+            if( error != nullptr )
+            {
+                if( stale_window_error( *error ) )
+                {
+                    return false;
+                }
+                return grab::fail( grab::ErrorCode::ProtocolError,
+                                   "XCB window attributes query failed" );
+            }
+            if( reply == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::ProtocolError,
+                                   "XCB window attributes reply is unavailable" );
+            }
+            return reply->map_state == XCB_MAP_STATE_VIEWABLE;
         }
 
         [[nodiscard]]
@@ -557,6 +624,118 @@ namespace grab::input
             located.bounds.y = translation->dst_y;
             located.trust    = GeometryTrust::Trusted;
             return located;
+        }
+
+        [[nodiscard]]
+        grab::Result<xcb_window_t>
+        input_focus( xcb_connection_t* connection )
+        {
+            xcb_generic_error_t* raw_error = nullptr;
+            const auto           reply     = take_xcb_owned(
+                xcb_get_input_focus_reply( connection,
+                                           xcb_get_input_focus( connection ),
+                                           &raw_error )
+            );
+            const auto error = take_xcb_owned( raw_error );
+            if( error != nullptr || reply == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::ProtocolError,
+                                   "X11 input-focus query failed" );
+            }
+            return reply->focus;
+        }
+
+        [[nodiscard]]
+        grab::Result<bool>
+        target_owns_focus( xcb_connection_t*                           connection,
+                           xcb_window_t                                target,
+                           xcb_window_t                                focus,
+                           const std::chrono::steady_clock::time_point deadline )
+        {
+            if( focus == target )
+            {
+                return true;
+            }
+            if( focus == XCB_INPUT_FOCUS_NONE || focus == XCB_INPUT_FOCUS_POINTER_ROOT )
+            {
+                return false;
+            }
+
+            xcb_window_t current = focus;
+            while( std::chrono::steady_clock::now() < deadline )
+            {
+                xcb_generic_error_t* raw_error = nullptr;
+                const auto           reply     = take_xcb_owned(
+                    xcb_query_tree_reply( connection,
+                                          xcb_query_tree( connection, current ),
+                                          &raw_error )
+                );
+                const auto error = take_xcb_owned( raw_error );
+                if( error != nullptr )
+                {
+                    if( stale_window_error( *error ) )
+                    {
+                        return false;
+                    }
+                    return grab::fail( grab::ErrorCode::ProtocolError,
+                                       "X11 focus ancestry query failed" );
+                }
+                if( reply == nullptr )
+                {
+                    return grab::fail( grab::ErrorCode::ProtocolError,
+                                       "X11 focus ancestry reply is unavailable" );
+                }
+
+                const xcb_window_t parent = reply->parent;
+                if( parent == target )
+                {
+                    return true;
+                }
+                if( parent ==
+                    XCB_WINDOW_NONE ||
+                    parent ==
+                    current ||
+                    current == reply->root )
+                {
+                    return false;
+                }
+                current = parent;
+            }
+            return false;
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        wait_for_target_focus( xcb_connection_t* connection,
+                               xcb_window_t      target )
+        {
+            const auto deadline = std::chrono::steady_clock::now() + activationTimeout;
+            while( true )
+            {
+                auto focus = input_focus( connection );
+                if( !focus.has_value() )
+                {
+                    return std::unexpected( std::move( focus.error() ) );
+                }
+
+                auto owns_focus =
+                    target_owns_focus( connection, target, *focus, deadline );
+                if( !owns_focus.has_value() )
+                {
+                    return std::unexpected( std::move( owns_focus.error() ) );
+                }
+                if( *owns_focus )
+                {
+                    return {};
+                }
+                if( std::chrono::steady_clock::now() >= deadline )
+                {
+                    return grab::fail( grab::ErrorCode::ProviderFailed,
+                                       "X11 window activation did not acquire input "
+                                       "focus before timeout" );
+                }
+                std::this_thread::sleep_for( activationPollInterval );
+            }
         }
 
     }    // namespace
@@ -648,6 +827,16 @@ namespace grab::input
 
         for( const xcb_window_t window : *windows )
         {
+            auto viewable = window_is_viewable( connection_, window );
+            if( !viewable.has_value() )
+            {
+                return std::unexpected( std::move( viewable.error() ) );
+            }
+            if( !*viewable )
+            {
+                continue;
+            }
+
             auto window_class = window_class_for( connection_, window );
             if( !window_class.has_value() )
             {
@@ -666,7 +855,7 @@ namespace grab::input
                 {
                     return std::unexpected( std::move( window_title.error() ) );
                 }
-                if( !contains_case_insensitive( *window_title, title ) )
+                if( !grab::core::ascii_icontains( *window_title, title ) )
                 {
                     continue;
                 }
@@ -677,6 +866,76 @@ namespace grab::input
 
         return grab::fail( grab::ErrorCode::WindowNotFound,
                            "No top-level X11 window matched the requested WM_CLASS" );
+    }
+
+    grab::Result<void>
+    WindowLocator::activate( const LocatedWindow& window )
+    {
+        auto open_result = fail_if_connection_closed( connection_ );
+        if( !open_result.has_value() )
+        {
+            return std::unexpected( std::move( open_result.error() ) );
+        }
+        if( window.window == XCB_WINDOW_NONE )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "cannot activate an empty X11 window" );
+        }
+
+        auto atom = intern_atom( connection_,
+                                 grab::platform::x11::atom_name::netActiveWindow,
+                                 false );
+        if( !atom.has_value() )
+        {
+            return std::unexpected( std::move( atom.error() ) );
+        }
+
+        const xcb_client_message_event_t event{
+            .response_type = XCB_CLIENT_MESSAGE,
+            .format        = format32Bits,
+            .sequence      = 0U,
+            .window        = window.window,
+            .type          = *atom,
+            .data          = xcb_client_message_data_t{
+                                                       .data32 = {
+                    activeSourceNormal,
+                    XCB_CURRENT_TIME,
+                    noCurrentWindow,
+                }, },
+        };
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto* const raw_event = reinterpret_cast<const char*>( &event );
+        auto send_result = check_request( connection_,
+                                          xcb_send_event_checked( connection_,
+                                                                  doNotPropagate,
+                                                                  root_,
+                                                                  activeWindowEventMask,
+                                                                  raw_event ),
+                                          "X11 active-window request" );
+        if( !send_result.has_value() )
+        {
+            return send_result;
+        }
+
+        auto stack_result =
+            check_request( connection_,
+                           xcb_configure_window_checked( connection_,
+                                                         window.window,
+                                                         XCB_CONFIG_WINDOW_STACK_MODE,
+                                                         &stackAbove ),
+                           "X11 window raise request" );
+        if( !stack_result.has_value() )
+        {
+            return stack_result;
+        }
+
+        if( xcb_flush( connection_ ) <= xcbOk )
+        {
+            return grab::fail( grab::ErrorCode::ProtocolError,
+                               "X11 window activation flush failed" );
+        }
+
+        return wait_for_target_focus( connection_, window.window );
     }
 
 }    // namespace grab::input

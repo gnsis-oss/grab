@@ -11,7 +11,7 @@ namespace grab::platform::x11
 
     [[nodiscard]]
     grab::Result<grab::Keymap>
-    make_keymap_from_layout( std::string_view layout = "us" );
+    make_keymap_from_layout( std::string_view layout );
 
     [[nodiscard]]
     grab::Result<grab::Keymap>

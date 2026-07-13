@@ -1,22 +1,19 @@
+#include "cli/common.hpp"
 #include "cli/input_command.hpp"
-#include "core/checked.hpp"
-#include "grab/keymap.hpp"
+#include "grab/input.hpp"
 #include "grab/result.hpp"
-#include "grab/window.hpp"
-#include "input/gesture.hpp"
-#include "platform/x11/xcb_connection.hpp"
-#include "platform/x11/xcb_window.hpp"
-#include "platform/x11/xkb_keymap.hpp"
-#include "platform/x11/xtest_input.hpp"
+#include "input/locator.hpp"
 
 #include <charconv>
-#include <cstdint>
-#include <cstdio>
+#include <cmath>
+#include <cstddef>
+#include <expected>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 #include <xkbcommon/xkbcommon.h>
 
 namespace grab::cli
@@ -25,21 +22,45 @@ namespace grab::cli
     namespace
     {
 
-        constexpr int              success_exit_code = 0;
-        constexpr int              error_exit_code   = 1;
-        constexpr std::size_t      flag_value_stride = 2U;
-        constexpr std::size_t      value_offset      = 1U;
-        constexpr std::size_t      single_arg_count  = 1U;
-        constexpr std::string_view display_flag      = "--display";
-        constexpr std::string_view window_flag       = "--window";
-        constexpr std::string_view fx_flag           = "--fx";
-        constexpr std::string_view fy_flag           = "--fy";
-        constexpr std::string_view button_flag       = "--button";
-        constexpr std::string_view text_flag         = "--text";
-        constexpr std::string_view keysym_flag       = "--keysym";
-        constexpr std::string_view src_flag          = "--src";
-        constexpr std::string_view dst_flag          = "--dst";
-        constexpr xkb_keysym_t     no_symbol         = 0U;
+        constexpr char             pointSeparator  = ',';
+        constexpr xkb_keysym_t     noSymbol        = 0U;
+        constexpr std::string_view displayFlag     = "--display";
+        constexpr std::string_view destinationFlag = "--dst";
+        constexpr std::string_view keysymFlag      = "--keysym";
+        constexpr std::string_view layoutFlag      = "--layout";
+        constexpr std::string_view sourceFlag      = "--src";
+        constexpr std::string_view windowFlag      = "--window";
+
+        struct TargetOptions
+        {
+                std::string display;
+                std::string window;
+                bool        has_window = false;
+        };
+
+        struct KeyOptions
+        {
+                TargetOptions target;
+                std::string   keysym;
+                std::string   layout;
+                bool          has_keysym = false;
+                bool          has_layout = false;
+        };
+
+        struct FractionPoint
+        {
+                double x = 0.0;
+                double y = 0.0;
+        };
+
+        struct DragCurveOptions
+        {
+                TargetOptions target;
+                FractionPoint source;
+                FractionPoint destination;
+                bool          has_source      = false;
+                bool          has_destination = false;
+        };
 
         struct FlagValue
         {
@@ -47,160 +68,58 @@ namespace grab::cli
                 std::string_view value;
         };
 
-        struct TargetOptions
-        {
-                std::string display;
-                WindowMatch window_match;
-                bool        has_window = false;
-        };
-
-        struct ClickOptions
-        {
-                TargetOptions target;
-                double        fx     = 0.0;
-                double        fy     = 0.0;
-                std::uint8_t  button = grab::input::left_button;
-                bool          has_fx = false;
-                bool          has_fy = false;
-        };
-
-        struct TypeOptions
-        {
-                TargetOptions target;
-                std::string   text;
-                bool          has_text = false;
-        };
-
-        struct KeyOptions
-        {
-                TargetOptions target;
-                std::string   keysym;
-                bool          has_keysym = false;
-        };
-
-        struct DragCurveOptions
-        {
-                TargetOptions target;
-                FractionPair  source;
-                FractionPair  destination;
-                bool          has_source      = false;
-                bool          has_destination = false;
-        };
-
-        struct InputContext
-        {
-                grab::platform::x11::XcbConnection connection;
-                WindowRef                          window;
-                WindowRect                         rect;
-                grab::Keymap                       keymap;
-        };
-
         [[nodiscard]]
         grab::Result<std::string_view>
-        read_arg( std::span<char* const> args,
-                  std::size_t            index )
+        argument_at( std::span<char* const> args,
+                     std::size_t            index )
         {
             if( index >= args.size() )
             {
                 return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "argument is missing" );
+                                   "command argument is missing" );
             }
-
-            const char* const value = args.subspan( index, single_arg_count ).front();
-            if( value == nullptr )
+            const char* const argument = args.subspan( index, 1U ).front();
+            if( argument == nullptr )
             {
                 return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "argument is null" );
+                                   "command argument is missing" );
             }
-            return std::string_view{ value };
+            return std::string_view{ argument };
         }
 
         [[nodiscard]]
         grab::Result<FlagValue>
-        read_flag_value( std::span<char* const> args,
-                         std::size_t            index )
+        flag_value_at( std::span<char* const> args,
+                       std::size_t            index )
         {
-            auto flag = read_arg( args, index );
+            auto flag = argument_at( args, index );
             if( !flag.has_value() )
             {
-                return grab::fail( flag.error().code, flag.error().message );
+                return std::unexpected( std::move( flag.error() ) );
             }
-
-            const std::size_t value_index = index + value_offset;
-            if( value_index >= args.size() )
+            auto value = argument_at( args, index + 1U );
+            if( !value.has_value() )
             {
                 return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ *flag } + " requires a value" );
             }
-
-            auto value = read_arg( args, value_index );
-            if( !value.has_value() )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   std::string{ *flag } + " value is null" );
-            }
-
-            return FlagValue{
-                .flag  = *flag,
-                .value = *value,
-            };
-        }
-
-        [[nodiscard]]
-        grab::Result<std::uint8_t>
-        parse_button( std::string_view input )
-        {
-            if( input.empty() )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument, "button is empty" );
-            }
-
-            std::uint32_t     value = 0U;
-            const char* const first = input.data();
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            const char* const last   = first + input.size();
-            const auto        parsed = std::from_chars( first, last, value );
-            if( parsed.ec != std::errc{} || parsed.ptr != last )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "button contains an invalid number" );
-            }
-
-            auto button =
-                grab::checked_cast<std::uint8_t>( value,
-                                                  grab::ErrorCode::InvalidArgument,
-                                                  "button is out of range" );
-            if( !button.has_value() )
-            {
-                return grab::fail( button.error().code, button.error().message );
-            }
-            return *button;
+            return FlagValue{ .flag = *flag, .value = *value };
         }
 
         [[nodiscard]]
         bool
-        is_known_keysym_name( std::string_view name )
-        {
-            const std::string  name_storage{ name };
-            const xkb_keysym_t keysym =
-                xkb_keysym_from_name( name_storage.c_str(), XKB_KEYSYM_NO_FLAGS );
-            return keysym != no_symbol;
-        }
-
-        [[nodiscard]]
-        bool
-        apply_target_option( TargetOptions&   options,
+        apply_target_option( TargetOptions&   target,
                              const FlagValue& option )
         {
-            if( option.flag == display_flag )
+            if( option.flag == displayFlag )
             {
-                options.display = option.value;
+                target.display = option.value;
                 return true;
             }
-            if( option.flag == window_flag )
+            if( option.flag == windowFlag )
             {
-                options.window_match = WindowMatch{ .app = std::string{ option.value } };
-                options.has_window   = true;
+                target.window     = option.value;
+                target.has_window = true;
                 return true;
             }
             return false;
@@ -208,9 +127,9 @@ namespace grab::cli
 
         [[nodiscard]]
         grab::Result<void>
-        validate_target( const TargetOptions& options )
+        validate_target( const TargetOptions& target )
         {
-            if( !options.has_window )
+            if( !target.has_window || target.window.empty() )
             {
                 return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "--window is required" );
@@ -219,490 +138,284 @@ namespace grab::cli
         }
 
         [[nodiscard]]
-        grab::Result<void>
-        apply_click_option( ClickOptions&    options,
-                            const FlagValue& option )
+        grab::Result<double>
+        parse_fraction( std::string_view input )
         {
-            if( apply_target_option( options.target, option ) )
+            if( input.empty() )
             {
-                return {};
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "fraction is empty" );
             }
-            if( option.flag == fx_flag )
+
+            double            value = 0.0;
+            const char* const first = input.data();
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            const char* const last   = first + input.size();
+            const auto        parsed = std::from_chars( first, last, value );
+            if( parsed.ec !=
+                std::errc{} ||
+                parsed.ptr !=
+                last ||
+                !std::isfinite( value ) )
             {
-                auto fx = detail::parse_fraction_number( option.value );
-                if( !fx.has_value() )
-                {
-                    return grab::fail( fx.error().code, fx.error().message );
-                }
-                options.fx     = *fx;
-                options.has_fx = true;
-                return {};
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "fraction is not a finite number" );
             }
-            if( option.flag == fy_flag )
-            {
-                auto fy = detail::parse_fraction_number( option.value );
-                if( !fy.has_value() )
-                {
-                    return grab::fail( fy.error().code, fy.error().message );
-                }
-                options.fy     = *fy;
-                options.has_fy = true;
-                return {};
-            }
-            if( option.flag == button_flag )
-            {
-                auto button = parse_button( option.value );
-                if( !button.has_value() )
-                {
-                    return grab::fail( button.error().code, button.error().message );
-                }
-                options.button = *button;
-                return {};
-            }
-            return grab::fail( grab::ErrorCode::InvalidArgument,
-                               "unknown click argument: " + std::string{ option.flag } );
+            return value;
         }
 
         [[nodiscard]]
-        grab::Result<void>
-        apply_type_option( TypeOptions&     options,
-                           const FlagValue& option )
+        grab::Result<FractionPoint>
+        parse_fraction_point( std::string_view input )
         {
-            if( apply_target_option( options.target, option ) )
+            const std::size_t separator = input.find( pointSeparator );
+            if( separator ==
+                std::string_view::npos ||
+                input.find( pointSeparator, separator + 1U ) != std::string_view::npos )
             {
-                return {};
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "fraction point must match X,Y" );
             }
-            if( option.flag == text_flag )
+
+            auto x = parse_fraction( input.substr( 0U, separator ) );
+            if( !x.has_value() )
             {
-                options.text     = option.value;
-                options.has_text = true;
-                return {};
+                return std::unexpected( std::move( x.error() ) );
             }
-            return grab::fail( grab::ErrorCode::InvalidArgument,
-                               "unknown type argument: " + std::string{ option.flag } );
+            auto y = parse_fraction( input.substr( separator + 1U ) );
+            if( !y.has_value() )
+            {
+                return std::unexpected( std::move( y.error() ) );
+            }
+            return FractionPoint{ .x = *x, .y = *y };
         }
 
         [[nodiscard]]
-        grab::Result<void>
-        apply_key_option( KeyOptions&      options,
-                          const FlagValue& option )
+        bool
+        is_known_keysym( std::string_view name )
         {
-            if( apply_target_option( options.target, option ) )
-            {
-                return {};
-            }
-            if( option.flag == keysym_flag )
-            {
-                options.keysym     = option.value;
-                options.has_keysym = true;
-                return {};
-            }
-            return grab::fail( grab::ErrorCode::InvalidArgument,
-                               "unknown key argument: " + std::string{ option.flag } );
+            const std::string name_storage{ name };
+            return xkb_keysym_from_name( name_storage.c_str(), XKB_KEYSYM_NO_FLAGS ) !=
+                   noSymbol;
         }
 
         [[nodiscard]]
-        grab::Result<void>
-        apply_drag_curve_option( DragCurveOptions& options,
-                                 const FlagValue&  option )
+        grab::Result<KeyOptions>
+        parse_key_options( std::span<char* const> args )
         {
-            if( apply_target_option( options.target, option ) )
+            KeyOptions options;
+            for( std::size_t index = 0U; index < args.size(); index += 2U )
             {
-                return {};
-            }
-            if( option.flag == src_flag )
-            {
-                auto source = parse_fraction_pair( option.value );
-                if( !source.has_value() )
-                {
-                    return grab::fail( source.error().code, source.error().message );
-                }
-                options.source     = *source;
-                options.has_source = true;
-                return {};
-            }
-            if( option.flag == dst_flag )
-            {
-                auto destination = parse_fraction_pair( option.value );
-                if( !destination.has_value() )
-                {
-                    return grab::fail( destination.error().code,
-                                       destination.error().message );
-                }
-                options.destination     = *destination;
-                options.has_destination = true;
-                return {};
-            }
-            return grab::fail( grab::ErrorCode::InvalidArgument,
-                               "unknown drag-curve argument: " +
-                                   std::string{ option.flag } );
-        }
-
-        template<typename Options,
-                 typename Apply>
-        [[nodiscard]]
-        grab::Result<Options>
-        parse_options( std::span<char* const> args,
-                       Apply                  apply )
-        {
-            Options options;
-            for( std::size_t index  = 0U; index < args.size();
-                 index             += flag_value_stride )
-            {
-                auto option = read_flag_value( args, index );
+                auto option = flag_value_at( args, index );
                 if( !option.has_value() )
                 {
-                    return grab::fail( option.error().code, option.error().message );
+                    return std::unexpected( std::move( option.error() ) );
                 }
 
-                auto applied = apply( options, *option );
-                if( !applied.has_value() )
+                if( apply_target_option( options.target, *option ) )
                 {
-                    return grab::fail( applied.error().code, applied.error().message );
+                    continue;
                 }
+                if( option->flag == keysymFlag )
+                {
+                    options.keysym     = option->value;
+                    options.has_keysym = true;
+                    continue;
+                }
+                if( option->flag == layoutFlag )
+                {
+                    options.layout     = option->value;
+                    options.has_layout = true;
+                    continue;
+                }
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "unknown option for key: " +
+                                       std::string{ option->flag } );
+            }
+
+            auto target = validate_target( options.target );
+            if( !target.has_value() )
+            {
+                return std::unexpected( std::move( target.error() ) );
+            }
+            if( !options.has_keysym || options.keysym.empty() )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "key requires --keysym" );
+            }
+            if( !is_known_keysym( options.keysym ) )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "unknown keysym: " + options.keysym );
+            }
+            if( options.has_layout && options.layout.empty() )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "--layout must not be empty" );
             }
             return options;
         }
 
         [[nodiscard]]
-        grab::Result<ClickOptions>
-        parse_click_args( std::span<char* const> args )
-        {
-            auto options = parse_options<ClickOptions>( args, apply_click_option );
-            if( !options.has_value() )
-            {
-                return grab::fail( options.error().code, options.error().message );
-            }
-            auto target = validate_target( options->target );
-            if( !target.has_value() )
-            {
-                return grab::fail( target.error().code, target.error().message );
-            }
-            if( !options->has_fx )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "--fx is required" );
-            }
-            if( !options->has_fy )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "--fy is required" );
-            }
-            return *options;
-        }
-
-        [[nodiscard]]
-        grab::Result<TypeOptions>
-        parse_type_args( std::span<char* const> args )
-        {
-            auto options = parse_options<TypeOptions>( args, apply_type_option );
-            if( !options.has_value() )
-            {
-                return grab::fail( options.error().code, options.error().message );
-            }
-            auto target = validate_target( options->target );
-            if( !target.has_value() )
-            {
-                return grab::fail( target.error().code, target.error().message );
-            }
-            if( !options->has_text )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "--text is required" );
-            }
-            return *options;
-        }
-
-        [[nodiscard]]
-        grab::Result<KeyOptions>
-        parse_key_args( std::span<char* const> args )
-        {
-            auto options = parse_options<KeyOptions>( args, apply_key_option );
-            if( !options.has_value() )
-            {
-                return grab::fail( options.error().code, options.error().message );
-            }
-            auto target = validate_target( options->target );
-            if( !target.has_value() )
-            {
-                return grab::fail( target.error().code, target.error().message );
-            }
-            if( !options->has_keysym )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "--keysym is required" );
-            }
-            return *options;
-        }
-
-        [[nodiscard]]
         grab::Result<DragCurveOptions>
-        parse_drag_curve_args( std::span<char* const> args )
+        parse_drag_curve_options( std::span<char* const> args )
         {
-            auto options =
-                parse_options<DragCurveOptions>( args, apply_drag_curve_option );
-            if( !options.has_value() )
+            DragCurveOptions options;
+            for( std::size_t index = 0U; index < args.size(); index += 2U )
             {
-                return grab::fail( options.error().code, options.error().message );
-            }
-            auto target = validate_target( options->target );
-            if( !target.has_value() )
-            {
-                return grab::fail( target.error().code, target.error().message );
-            }
-            if( !options->has_source )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "--src is required" );
-            }
-            if( !options->has_destination )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "--dst is required" );
-            }
-            return *options;
-        }
-
-        [[nodiscard]]
-        grab::Result<InputContext>
-        make_input_context( const TargetOptions& options )
-        {
-            auto connection =
-                grab::platform::x11::XcbConnection::open( options.display );
-            if( !connection.has_value() )
-            {
-                return grab::fail( connection.error().code, connection.error().message );
-            }
-
-            auto window =
-                grab::platform::x11::find_window( *connection, options.window_match );
-            if( !window.has_value() )
-            {
-                return grab::fail( window.error().code, window.error().message );
-            }
-
-            auto rect = grab::platform::x11::window_geometry( *connection, *window );
-            if( !rect.has_value() )
-            {
-                return grab::fail( rect.error().code, rect.error().message );
-            }
-
-            auto keymap =
-                grab::platform::x11::make_keymap_from_connection( *connection );
-            if( !keymap.has_value() )
-            {
-                return grab::fail( keymap.error().code, keymap.error().message );
-            }
-
-            return InputContext{
-                .connection = std::move( *connection ),
-                .window     = *window,
-                .rect       = *rect,
-                .keymap     = std::move( *keymap ),
-            };
-        }
-
-        [[nodiscard]]
-        grab::Result<void>
-        validate_text( const grab::Keymap& keymap,
-                       std::string_view    text )
-        {
-            auto strokes = keymap.text_to_keystrokes( text );
-            if( !strokes.has_value() )
-            {
-                return grab::fail( strokes.error().code, strokes.error().message );
-            }
-            return {};
-        }
-
-        [[nodiscard]]
-        grab::Result<void>
-        validate_keysym( const grab::Keymap& keymap,
-                         std::string_view    name )
-        {
-            auto stroke = keymap.keystroke_for_key( name );
-            if( !stroke.has_value() )
-            {
-                if( is_known_keysym_name( name ) )
+                auto option = flag_value_at( args, index );
+                if( !option.has_value() )
                 {
-                    return grab::fail( grab::ErrorCode::UnsupportedCharacter,
-                                       "keysym is not present in keymap: " +
-                                           std::string{ name } );
+                    return std::unexpected( std::move( option.error() ) );
+                }
+
+                if( apply_target_option( options.target, *option ) )
+                {
+                    continue;
+                }
+                if( option->flag == sourceFlag )
+                {
+                    auto point = parse_fraction_point( option->value );
+                    if( !point.has_value() )
+                    {
+                        return std::unexpected( std::move( point.error() ) );
+                    }
+                    options.source     = *point;
+                    options.has_source = true;
+                    continue;
+                }
+                if( option->flag == destinationFlag )
+                {
+                    auto point = parse_fraction_point( option->value );
+                    if( !point.has_value() )
+                    {
+                        return std::unexpected( std::move( point.error() ) );
+                    }
+                    options.destination     = *point;
+                    options.has_destination = true;
+                    continue;
                 }
                 return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   "unknown keysym: " + std::string{ name } );
+                                   "unknown option for drag-curve: " +
+                                       std::string{ option->flag } );
             }
-            return {};
+
+            auto target = validate_target( options.target );
+            if( !target.has_value() )
+            {
+                return std::unexpected( std::move( target.error() ) );
+            }
+            if( !options.has_source || !options.has_destination )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "drag-curve requires --src and --dst" );
+            }
+            return options;
+        }
+
+        [[nodiscard]]
+        grab::Result<grab::Input>
+        open_input( const TargetOptions& target,
+                    std::string_view     layout = {} )
+        {
+            const char* const display =
+                target.display.empty() ? nullptr : target.display.c_str();
+            return grab::Input::open( display, layout );
+        }
+
+        [[nodiscard]]
+        grab::Result<grab::input::LocatedWindow>
+        locate_and_activate( grab::Input&         input,
+                             const TargetOptions& target )
+        {
+            auto window = input.locate( std::vector<std::string>{ target.window } );
+            if( !window.has_value() )
+            {
+                return std::unexpected( std::move( window.error() ) );
+            }
+            auto activation = input.activate( *window );
+            if( !activation.has_value() )
+            {
+                return std::unexpected( std::move( activation.error() ) );
+            }
+            return *window;
         }
 
         [[nodiscard]]
         grab::Result<void>
-        run_click( const ClickOptions& options )
+        press_key( const KeyOptions& options )
         {
-            auto context = make_input_context( options.target );
-            if( !context.has_value() )
+            auto input =
+                open_input( options.target,
+                            options.has_layout ? options.layout : std::string_view{} );
+            if( !input.has_value() )
             {
-                return grab::fail( context.error().code, context.error().message );
+                return std::unexpected( std::move( input.error() ) );
             }
-
-            grab::platform::x11::XtestInputSink sink{
-                context->connection,
-                context->keymap,
-                context->window,
-            };
-            grab::input::activate( sink );
-            grab::input::click_frac( sink,
-                                     context->rect,
-                                     options.fx,
-                                     options.fy,
-                                     options.button );
-            return {};
+            auto window = locate_and_activate( *input, options.target );
+            if( !window.has_value() )
+            {
+                return std::unexpected( std::move( window.error() ) );
+            }
+            return input->press_key( options.keysym );
         }
 
         [[nodiscard]]
         grab::Result<void>
-        run_type( const TypeOptions& options )
+        drag_curve( const DragCurveOptions& options )
         {
-            auto context = make_input_context( options.target );
-            if( !context.has_value() )
+            auto input = open_input( options.target );
+            if( !input.has_value() )
             {
-                return grab::fail( context.error().code, context.error().message );
+                return std::unexpected( std::move( input.error() ) );
             }
-
-            auto text = validate_text( context->keymap, options.text );
-            if( !text.has_value() )
+            auto window = locate_and_activate( *input, options.target );
+            if( !window.has_value() )
             {
-                return grab::fail( text.error().code, text.error().message );
+                return std::unexpected( std::move( window.error() ) );
             }
-
-            grab::platform::x11::XtestInputSink sink{
-                context->connection,
-                context->keymap,
-                context->window,
-            };
-            grab::input::activate( sink );
-            grab::input::type_text( sink, options.text );
-            return {};
-        }
-
-        [[nodiscard]]
-        grab::Result<void>
-        run_key( const KeyOptions& options )
-        {
-            auto context = make_input_context( options.target );
-            if( !context.has_value() )
-            {
-                return grab::fail( context.error().code, context.error().message );
-            }
-
-            auto keysym = validate_keysym( context->keymap, options.keysym );
-            if( !keysym.has_value() )
-            {
-                return grab::fail( keysym.error().code, keysym.error().message );
-            }
-
-            grab::platform::x11::XtestInputSink sink{
-                context->connection,
-                context->keymap,
-                context->window,
-            };
-            grab::input::activate( sink );
-            grab::input::key( sink, options.keysym );
-            return {};
-        }
-
-        [[nodiscard]]
-        grab::Result<void>
-        run_drag_curve( const DragCurveOptions& options )
-        {
-            auto context = make_input_context( options.target );
-            if( !context.has_value() )
-            {
-                return grab::fail( context.error().code, context.error().message );
-            }
-
-            grab::platform::x11::XtestInputSink sink{
-                context->connection,
-                context->keymap,
-                context->window,
-            };
-            grab::input::activate( sink );
-            grab::input::drag_curve( sink,
-                                     context->rect,
-                                     options.source.first,
-                                     options.source.second,
-                                     options.destination.first,
-                                     options.destination.second );
-            return {};
-        }
-
-        void
-        print_error( std::string_view message )
-        {
-            ( void )std::fputs( "grab: ", stderr );
-            ( void )std::fputs( std::string{ message }.c_str(), stderr );
-            ( void )std::fputc( '\n', stderr );
+            return input->drag_curve_in_window( *window,
+                                                options.source.x,
+                                                options.source.y,
+                                                options.destination.x,
+                                                options.destination.y );
         }
 
         int
-        finish( const grab::Result<void>& result )
+        finish( grab::Result<void> result )
         {
             if( !result.has_value() )
             {
                 print_error( result.error().message );
-                return error_exit_code;
+                return runtimeExitCode;
             }
-            return success_exit_code;
+            return successExitCode;
         }
 
     }    // namespace
 
     int
-    run_click_command( std::span<char* const> args )
-    {
-        auto options = parse_click_args( args );
-        if( !options.has_value() )
-        {
-            print_error( options.error().message );
-            return error_exit_code;
-        }
-        return finish( run_click( *options ) );
-    }
-
-    int
-    run_type_command( std::span<char* const> args )
-    {
-        auto options = parse_type_args( args );
-        if( !options.has_value() )
-        {
-            print_error( options.error().message );
-            return error_exit_code;
-        }
-        return finish( run_type( *options ) );
-    }
-
-    int
     run_key_command( std::span<char* const> args )
     {
-        auto options = parse_key_args( args );
+        auto options = parse_key_options( args );
         if( !options.has_value() )
         {
             print_error( options.error().message );
-            return error_exit_code;
+            return usageExitCode;
         }
-        return finish( run_key( *options ) );
+        return finish( press_key( *options ) );
     }
 
     int
     run_drag_curve_command( std::span<char* const> args )
     {
-        auto options = parse_drag_curve_args( args );
+        auto options = parse_drag_curve_options( args );
         if( !options.has_value() )
         {
             print_error( options.error().message );
-            return error_exit_code;
+            return usageExitCode;
         }
-        return finish( run_drag_curve( *options ) );
+        return finish( drag_curve( *options ) );
     }
 
 }    // namespace grab::cli

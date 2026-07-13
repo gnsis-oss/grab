@@ -143,10 +143,6 @@ namespace grab::screen
                     return AV_PIX_FMT_RGB24;
                 case grab::PixelFormat::Bgr :
                     return AV_PIX_FMT_BGR24;
-                case grab::PixelFormat::Rgb24 :
-                    return AV_PIX_FMT_RGB24;
-                case grab::PixelFormat::Bgr0 :
-                    return AV_PIX_FMT_BGR0;
                 case grab::PixelFormat::Gray :
                     return AV_PIX_FMT_GRAY8;
             }
