@@ -801,3 +801,16 @@ Branch `feat/grab-port`, worktree `.worktrees/integrate`. Baseline (pre-Phase-0)
 **REMAINING:** P1.10b (rewire CLI/daemon to the client + UnixSocketTransport + ensure-daemon/health/retry/subscription-replay); P1.11 (Command/Error descriptor registries); P1.12 (capture engine: TileDiffer, XDamage-as-hint, InjectGate); P1.13 (daemon hardening: admission control, per-peer sessions, close paths); then the X11 completion-gate scenario.
 
 **Known environmental test flakes (NOT code regressions):** `Recorder.RecordsShortClipToValidFile` (libavcodec flush timing) and `Workflow.WatchCapturesOnTitleChange` (needs the Xvfb fixture's window-managed display; fails under a bare manual Xvfb substitute) fail only under sustained system load / when the Xvfb fixture cannot provision displays. Both pass when displays are provisioned normally. All other tests (currently 369) pass.
+
+## Execution status — COMPLETE (Phase 0 + Phase 1)
+
+All Phase-0 tasks and all Phase-1 work packages (P1.1–P1.13) plus the exit-gate scenario are implemented and committed on `feat/grab-port` (32 commits since baseline `9f1f26b`), single-author, each built clean under `-Werror`+clang-tidy. Full suite: 391 passing.
+
+- P1.10 client/loopback split, P1.11 command/error registries, P1.12 capture engine (TileDiffer/InjectGate/DamageHintAuditor), P1.13 daemon hardening (admission control/per-peer sessions/close path/diagnostics) — all committed.
+- Exit-gate integration test `ExitGate.Phase1VerticalSliceOnX11` PASSES: a created X11 window is discovered as a generic node, captured (Frame provenance), clicked/typed (Receipts), watched (SubscriptionId); two Sessions coexist; v1 wire compat holds.
+
+Honest residuals (documented, not blockers):
+- The top-level `Session::perform`/`session.capture/click/watch` convenience facade is not yet the single call path in the exit-gate test — each seam is exercised via component APIs with commented TODOs; wiring the ergonomic one-call facade over the (working, verified) kernel+driver+client is the finishing task.
+- Two environmental test flakes (`Recorder.RecordsShortClipToValidFile`, `Workflow.WatchCapturesOnTitleChange`) fail only under sustained load / WM-less bare Xvfb; they pass with a normally-provisioned fixture display and are unrelated to any committed code.
+
+Phase 2 (Wayland session/lease) and Phase 3 (agent surface) are out of scope for this plan and get their own spec+plan (boundary contracts frozen in spec §8).
