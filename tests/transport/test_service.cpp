@@ -740,3 +740,54 @@ TEST( EventService,
 
     server.shutdown();
 }
+
+TEST( EventService,
+      ClientContextIsReturnedWithMonotonicDiagnostics )
+{
+    constexpr std::uint64_t firstClientSequence  = 41U;
+    constexpr std::uint64_t secondClientSequence = firstClientSequence + 1U;
+
+    grab::EventBus          bus;
+    const TestServer        server{ bus };
+    ASSERT_TRUE( server.started() );
+
+    eventgrab::v1::SetClientContextRequest first_request;
+    first_request.set_context( "client-context:first" );
+    first_request.set_sequence( firstClientSequence );
+    eventgrab::v1::SetClientContextResponse first_response;
+    grpc::ClientContext                     first_context;
+    first_context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+
+    const auto first_status =
+        server.stub().SetClientContext( &first_context, first_request, &first_response );
+    ASSERT_TRUE( first_status.ok() ) << first_status.error_message();
+    EXPECT_EQ( first_response.sequence(), first_request.sequence() );
+    ASSERT_EQ( first_response.diagnostics().log_size(), 1 );
+    const auto first_sequence = first_response.diagnostics().log( 0 ).sequence();
+    EXPECT_EQ( first_sequence, first_request.sequence() );
+    EXPECT_NE(
+        first_response.diagnostics().log( 0 ).message().find( first_request.context() ),
+        std::string::npos
+    );
+
+    eventgrab::v1::SetClientContextRequest second_request;
+    second_request.set_context( "client-context:second" );
+    second_request.set_sequence( secondClientSequence );
+    eventgrab::v1::SetClientContextResponse second_response;
+    grpc::ClientContext                     second_context;
+    second_context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+
+    const auto second_status = server.stub().SetClientContext( &second_context,
+                                                               second_request,
+                                                               &second_response );
+    ASSERT_TRUE( second_status.ok() ) << second_status.error_message();
+    EXPECT_EQ( second_response.sequence(), second_request.sequence() );
+    ASSERT_EQ( second_response.diagnostics().log_size(), 1 );
+    EXPECT_EQ( second_response.diagnostics().log( 0 ).sequence(),
+               second_request.sequence() );
+    EXPECT_GT( second_response.diagnostics().log( 0 ).sequence(), first_sequence );
+    EXPECT_NE( second_response.diagnostics().log( 0 ).message().find(
+                   second_request.context()
+               ),
+               std::string::npos );
+}

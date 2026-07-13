@@ -12,15 +12,40 @@ service EventGrabService {
 
   // Bridge: app extensions push events to the daemon.
   rpc PushEvent(PushEventRequest) returns (PushEventResponse);
+
+  // Records caller context in the daemon diagnostic stream.
+  rpc SetClientContext(SetClientContextRequest) returns (SetClientContextResponse);
+}
+
+message DiagnosticEntry {
+  uint64 sequence = 1;
+  string message = 2;
+}
+
+message ResponseDiagnostics {
+  repeated DiagnosticEntry log = 1;
 }
 
 message ListEventTypesRequest {}
 message ListEventTypesResponse {
   repeated EventTypeInfo types = 1;
+  ResponseDiagnostics diagnostics = 2;
 }
 
 message PushEventRequest {
   Event event = 1;
 }
 
-message PushEventResponse {}
+message PushEventResponse {
+  ResponseDiagnostics diagnostics = 1;
+}
+
+message SetClientContextRequest {
+  string context = 1;
+  uint64 sequence = 2;
+}
+
+message SetClientContextResponse {
+  ResponseDiagnostics diagnostics = 1;
+  uint64 sequence = 2;
+}

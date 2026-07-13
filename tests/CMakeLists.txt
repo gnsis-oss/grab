@@ -65,6 +65,7 @@ add_executable(grab_core_tests
     storage/test_jsonl_sink.cpp
     service/test_daemon.cpp
     transport/test_service.cpp
+    transport/test_service_hardening.cpp
     event/test_browser_classifier.cpp
 )
 target_link_libraries(grab_core_tests PRIVATE grab_core grab_vendor_l0 grab_codec grab_screen grab_image grab_event grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)

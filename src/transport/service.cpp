@@ -4,14 +4,19 @@
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/process_ref.hpp"
 #include "grab/result.hpp"
 #include "transport/codec.hpp"
 #include "transport/proto_descriptor.hpp"
 #include "transport/service.hpp"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <deque>
 #include <expected>
 #include <grpcpp/server_context.h>
 #include <grpcpp/support/status.h>
@@ -19,14 +24,35 @@
 #include <grpcpp/support/sync_stream.h>
 #include <memory>
 #include <mutex>
+#include <random>
+#include <sstream>
+#include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace grab::transport
 {
     namespace
     {
+
+        constexpr auto admissionPollInterval = std::chrono::milliseconds{ 2 };
+        constexpr std::string_view queueFullReason{
+            "admission rejected: concurrency cap reached and bounded queue full",
+        };
+        constexpr std::string_view admissionDeadlineReason{
+            "admission rejected: per-call deadline expired",
+        };
+
+        constexpr auto registeredRpcNames = std::to_array<std::string_view>( {
+            "PushEvent",
+            "ListEventTypes",
+            "Subscribe",
+            "SetClientContext",
+        } );
 
         struct NotifyState
         {
@@ -50,6 +76,49 @@ namespace grab::transport
         internal_error( std::string_view message )
         {
             return grpc::Status{ grpc::StatusCode::INTERNAL, std::string{ message } };
+        }
+
+        [[nodiscard]]
+        grpc::Status
+        unauthenticated( std::string_view message )
+        {
+            return grpc::Status{
+                grpc::StatusCode::UNAUTHENTICATED,
+                std::string{ message }
+            };
+        }
+
+        [[nodiscard]]
+        std::string
+        make_session_value( std::string_view prefix,
+                            std::uint64_t    sequence )
+        {
+            std::random_device random;
+            std::ostringstream value;
+            value << prefix << '-' << std::hex << sequence << '-'
+                  << static_cast<std::uint64_t>( random() ) << '-'
+                  << static_cast<std::uint64_t>( random() );
+            return value.str();
+        }
+
+        [[nodiscard]]
+        bool
+        token_matches( std::string_view expected,
+                       std::string_view supplied ) noexcept
+        {
+            std::size_t difference = expected.size() ^ supplied.size();
+            const auto  length     = std::max( expected.size(), supplied.size() );
+            for( std::size_t index = 0U; index < length; ++index )
+            {
+                const auto left   = index < expected.size()
+                                      ? static_cast<unsigned char>( expected[index] )
+                                      : static_cast<unsigned char>( 0U );
+                const auto right  = index < supplied.size()
+                                      ? static_cast<unsigned char>( supplied[index] )
+                                      : static_cast<unsigned char>( 0U );
+                difference       |= static_cast<std::size_t>( left ^ right );
+            }
+            return difference == 0U;
         }
 
         [[nodiscard]]
@@ -174,59 +243,526 @@ namespace grab::transport
 
     }    // namespace
 
+    class EventService::AdmissionController
+    {
+        public:
+
+            explicit AdmissionController( AdmissionPolicy policy ) :
+                policy_( policy )
+            {
+            }
+
+            [[nodiscard]]
+            grpc::Status
+            run( grpc::ServerContext*                 context,
+                 const std::function<grpc::Status()>& work )
+            {
+                const auto admission = acquire( context );
+                if( !admission.ok() )
+                {
+                    return admission;
+                }
+
+                struct SlotRelease
+                {
+                        AdmissionController* controller;
+
+                        ~SlotRelease()
+                        {
+                            controller->release();
+                        }
+                };
+
+                const SlotRelease release{ this };
+                return work();
+            }
+
+        private:
+
+            [[nodiscard]]
+            bool
+            healthy() const noexcept
+            {
+                return policy_.healthy ==
+                       nullptr ||
+                       policy_.healthy->load( std::memory_order_acquire );
+            }
+
+            [[nodiscard]]
+            grpc::Status
+            acquire( grpc::ServerContext* context )
+            {
+                if( !healthy() )
+                {
+                    return grpc::Status{
+                        grpc::StatusCode::UNAVAILABLE,
+                        std::string{ policy_.unhealthy_reason }
+                    };
+                }
+
+                std::unique_lock lock( mutex_ );
+                if( active_ < policy_.concurrency_cap && queue_.empty() )
+                {
+                    ++active_;
+                    return grpc::Status::OK;
+                }
+                if( queue_.size() >= policy_.queue_capacity )
+                {
+                    return grpc::Status{
+                        grpc::StatusCode::RESOURCE_EXHAUSTED,
+                        std::string{ queueFullReason }
+                    };
+                }
+
+                const auto ticket = next_ticket_++;
+                queue_.push_back( ticket );
+                const auto deadline =
+                    std::chrono::steady_clock::now() + policy_.per_call_deadline;
+
+                while( true )
+                {
+                    if( !healthy() )
+                    {
+                        erase_ticket( ticket );
+                        return grpc::Status{
+                            grpc::StatusCode::UNAVAILABLE,
+                            std::string{ policy_.unhealthy_reason }
+                        };
+                    }
+                    if( context != nullptr && context->IsCancelled() )
+                    {
+                        erase_ticket( ticket );
+                        return grpc::Status{
+                            grpc::StatusCode::CANCELLED,
+                            "admission cancelled"
+                        };
+                    }
+                    if( !queue_.empty() &&
+                        queue_.front() ==
+                        ticket &&
+                        active_ < policy_.concurrency_cap )
+                    {
+                        queue_.pop_front();
+                        ++active_;
+                        return grpc::Status::OK;
+                    }
+                    if( std::chrono::steady_clock::now() >= deadline )
+                    {
+                        erase_ticket( ticket );
+                        return grpc::Status{
+                            grpc::StatusCode::DEADLINE_EXCEEDED,
+                            std::string{ admissionDeadlineReason }
+                        };
+                    }
+                    condition_.wait_for( lock, admissionPollInterval );
+                }
+            }
+
+            void
+            erase_ticket( std::uint64_t ticket )
+            {
+                const auto entry = std::find( queue_.begin(), queue_.end(), ticket );
+                if( entry != queue_.end() )
+                {
+                    queue_.erase( entry );
+                    condition_.notify_all();
+                }
+            }
+
+            void
+            release() noexcept
+            {
+                {
+                    const std::scoped_lock lock( mutex_ );
+                    if( active_ > 0U )
+                    {
+                        --active_;
+                    }
+                }
+                condition_.notify_all();
+            }
+
+            AdmissionPolicy           policy_;
+            std::mutex                mutex_;
+            std::condition_variable   condition_;
+            std::deque<std::uint64_t> queue_;
+            std::uint64_t             next_ticket_{};
+            std::size_t               active_{};
+    };
+
+    PeerSessionRegistry::CatalogScope::CatalogScope(
+        PeerSessionRegistry&            registry,
+        std::string                     peer,
+        std::unordered_set<std::string> snapshot
+    ) noexcept :
+        registry_( &registry ),
+        peer_( std::move( peer ) ),
+        snapshot_( std::move( snapshot ) )
+    {
+    }
+
+    PeerSessionRegistry::CatalogScope::CatalogScope( CatalogScope&& other ) noexcept :
+        registry_( std::exchange( other.registry_,
+                                  nullptr ) ),
+        peer_( std::move( other.peer_ ) ),
+        snapshot_( std::move( other.snapshot_ ) )
+    {
+    }
+
+    PeerSessionRegistry::CatalogScope&
+    PeerSessionRegistry::CatalogScope::operator=( CatalogScope&& other ) noexcept
+    {
+        if( this != &other )
+        {
+            finish();
+            registry_ = std::exchange( other.registry_, nullptr );
+            peer_     = std::move( other.peer_ );
+            snapshot_ = std::move( other.snapshot_ );
+        }
+        return *this;
+    }
+
+    PeerSessionRegistry::CatalogScope::~CatalogScope()
+    {
+        finish();
+    }
+
+    void
+    PeerSessionRegistry::CatalogScope::finish() noexcept
+    {
+        if( registry_ != nullptr )
+        {
+            registry_->reap_diff( peer_, snapshot_ );
+            registry_ = nullptr;
+        }
+    }
+
+    PeerSessionRegistry::PeerSessionRegistry( Teardown teardown ) :
+        teardown_( std::move( teardown ) )
+    {
+    }
+
+    PeerSessionRegistry::~PeerSessionRegistry()
+    {
+        while( true )
+        {
+            std::string peer;
+            {
+                const std::scoped_lock lock( mutex_ );
+                if( active_peers_.empty() )
+                {
+                    break;
+                }
+                peer = active_peers_.begin()->first;
+            }
+            unexpected_disconnect( peer );
+        }
+    }
+
+    SessionCredentials
+    PeerSessionRegistry::open( std::string peer )
+    {
+        unexpected_disconnect( peer );
+
+        const std::scoped_lock lock( mutex_ );
+        const auto             sequence = next_session_++;
+        SessionCredentials     credentials{
+            .session = make_session_value( "session", sequence ),
+            .token   = make_session_value( "token", sequence ),
+        };
+        sessions_.emplace(
+            credentials.session,
+            Session{ .token = credentials.token, .peer = peer, .resources = {} }
+        );
+        active_peers_.insert_or_assign( std::move( peer ), credentials.session );
+        return credentials;
+    }
+
+    grpc::Status
+    PeerSessionRegistry::adopt( std::string      peer,
+                                std::string_view session,
+                                std::string_view token )
+    {
+        const std::scoped_lock lock( mutex_ );
+        const auto             entry = sessions_.find( std::string{ session } );
+        if( entry == sessions_.end() || !token_matches( entry->second.token, token ) )
+        {
+            return unauthenticated( "session adoption rejected: invalid credentials" );
+        }
+
+        const auto existing = active_peers_.find( peer );
+        if( existing != active_peers_.end() && existing->second != session )
+        {
+            return grpc::Status{
+                grpc::StatusCode::FAILED_PRECONDITION,
+                "peer already owns another session"
+            };
+        }
+
+        const auto previous = active_peers_.find( entry->second.peer );
+        if( previous != active_peers_.end() && previous->second == session )
+        {
+            active_peers_.erase( previous );
+        }
+        entry->second.peer = peer;
+        active_peers_.insert_or_assign( std::move( peer ), std::string{ session } );
+        return grpc::Status::OK;
+    }
+
+    grpc::Status
+    PeerSessionRegistry::add_resource( std::string_view peer,
+                                       std::string      resource )
+    {
+        const std::scoped_lock lock( mutex_ );
+        const auto             active = active_peers_.find( std::string{ peer } );
+        if( active == active_peers_.end() )
+        {
+            return grpc::Status{
+                grpc::StatusCode::NOT_FOUND,
+                "peer has no active session"
+            };
+        }
+        auto session = sessions_.find( active->second );
+        if( session == sessions_.end() )
+        {
+            return internal_error( "active peer session is missing" );
+        }
+        session->second.resources.insert_or_assign( std::move( resource ), Resource{} );
+        return grpc::Status::OK;
+    }
+
+    grpc::Status
+    PeerSessionRegistry::add_process( std::string_view   peer,
+                                      std::string        resource,
+                                      grab::OwnedProcess process )
+    {
+        const std::scoped_lock lock( mutex_ );
+        const auto             active = active_peers_.find( std::string{ peer } );
+        if( active == active_peers_.end() )
+        {
+            return grpc::Status{
+                grpc::StatusCode::NOT_FOUND,
+                "peer has no active session"
+            };
+        }
+        auto session = sessions_.find( active->second );
+        if( session == sessions_.end() )
+        {
+            return internal_error( "active peer session is missing" );
+        }
+        session->second.resources.insert_or_assign(
+            std::move( resource ),
+            Resource{ .process = std::move( process ) }
+        );
+        return grpc::Status::OK;
+    }
+
+    PeerSessionRegistry::CatalogScope
+    PeerSessionRegistry::scope( std::string_view peer )
+    {
+        return CatalogScope{ *this, std::string{ peer }, catalog_snapshot( peer ) };
+    }
+
+    void
+    PeerSessionRegistry::close( std::string_view peer,
+                                PeerCloseReason /*reason*/ ) noexcept
+    {
+        std::vector<std::string> resource_names;
+        std::vector<Resource>    resources;
+        {
+            const std::scoped_lock lock( mutex_ );
+            const auto             active = active_peers_.find( std::string{ peer } );
+            if( active == active_peers_.end() )
+            {
+                return;
+            }
+            const auto session = sessions_.find( active->second );
+            if( session != sessions_.end() )
+            {
+                resource_names.reserve( session->second.resources.size() );
+                resources.reserve( session->second.resources.size() );
+                for( auto& [name, resource] : session->second.resources )
+                {
+                    resource_names.push_back( name );
+                    resources.push_back( std::move( resource ) );
+                }
+                sessions_.erase( session );
+            }
+            active_peers_.erase( active );
+            ++close_count_;
+        }
+
+        terminate_owned( resources );
+        if( teardown_ )
+        {
+            teardown_( peer, resource_names );
+        }
+    }
+
+    void
+    PeerSessionRegistry::deliberate_close( std::string_view peer ) noexcept
+    {
+        close( peer, PeerCloseReason::Deliberate );
+    }
+
+    void
+    PeerSessionRegistry::unexpected_disconnect( std::string_view peer ) noexcept
+    {
+        close( peer, PeerCloseReason::UnexpectedDisconnect );
+    }
+
+    bool
+    PeerSessionRegistry::active( std::string_view peer ) const
+    {
+        const std::scoped_lock lock( mutex_ );
+        return active_peers_.contains( std::string{ peer } );
+    }
+
+    std::size_t
+    PeerSessionRegistry::close_count() const
+    {
+        const std::scoped_lock lock( mutex_ );
+        return close_count_;
+    }
+
+    std::unordered_set<std::string>
+    PeerSessionRegistry::catalog_snapshot( std::string_view peer ) const
+    {
+        std::unordered_set<std::string> snapshot;
+        const std::scoped_lock          lock( mutex_ );
+        const auto active = active_peers_.find( std::string{ peer } );
+        if( active == active_peers_.end() )
+        {
+            return snapshot;
+        }
+        const auto session = sessions_.find( active->second );
+        if( session == sessions_.end() )
+        {
+            return snapshot;
+        }
+        for( const auto& [name, resource] : session->second.resources )
+        {
+            static_cast<void>( resource );
+            snapshot.insert( name );
+        }
+        return snapshot;
+    }
+
+    void
+    PeerSessionRegistry::reap_diff(
+        std::string_view                       peer,
+        const std::unordered_set<std::string>& snapshot
+    ) noexcept
+    {
+        std::vector<std::string> resource_names;
+        std::vector<Resource>    resources;
+        {
+            const std::scoped_lock lock( mutex_ );
+            const auto             active = active_peers_.find( std::string{ peer } );
+            if( active == active_peers_.end() )
+            {
+                return;
+            }
+            const auto session = sessions_.find( active->second );
+            if( session == sessions_.end() )
+            {
+                return;
+            }
+            auto& catalog = session->second.resources;
+            for( auto entry = catalog.begin(); entry != catalog.end(); )
+            {
+                if( snapshot.contains( entry->first ) )
+                {
+                    ++entry;
+                    continue;
+                }
+                resource_names.push_back( entry->first );
+                resources.push_back( std::move( entry->second ) );
+                entry = catalog.erase( entry );
+            }
+        }
+
+        terminate_owned( resources );
+        if( teardown_ && !resource_names.empty() )
+        {
+            teardown_( peer, resource_names );
+        }
+    }
+
+    void
+    PeerSessionRegistry::terminate_owned( std::vector<Resource>& resources ) noexcept
+    {
+        resources.clear();
+    }
+
     EventService::EventService( grab::EventBus&              bus,
                                 const grab::ActiveKindProbe* probe,
                                 ServiceOptions               options ) noexcept :
         bus_( &bus ),
         probe_( probe ),
-        options_( options )
+        options_( options ),
+        admission_( std::make_unique<AdmissionController>( options_.admission ) )
     {
     }
 
+    EventService::~EventService() = default;
+
     grpc::Status
-    EventService::PushEvent( grpc::ServerContext* /*context*/,
+    EventService::PushEvent( grpc::ServerContext*                   context,
                              const eventgrab::v1::PushEventRequest* request,
                              eventgrab::v1::PushEventResponse* /*response*/ )
     {
-        if( request == nullptr )
-        {
-            return invalid_argument( "missing push request" );
-        }
+        return dispatch( "PushEvent",
+                         context,
+                         [&]( grab::OperationContext& )
+                         {
+                             if( request == nullptr )
+                             {
+                                 return invalid_argument( "missing push request" );
+                             }
 
-        auto event = grab::transport::from_wire( request->event() );
-        if( !event.has_value() )
-        {
-            return invalid_argument( event.error().message );
-        }
+                             auto event = grab::transport::from_wire( request->event() );
+                             if( !event.has_value() )
+                             {
+                                 return invalid_argument( event.error().message );
+                             }
 
-        bus_->publish( std::move( *event ) );
-        return grpc::Status::OK;
+                             bus_->publish( std::move( *event ) );
+                             return grpc::Status::OK;
+                         } );
     }
 
     grpc::Status
     EventService::ListEventTypes(
-        grpc::ServerContext* /*context*/,
+        grpc::ServerContext* context,
         const eventgrab::v1::ListEventTypesRequest* /*request*/,
         eventgrab::v1::ListEventTypesResponse* response
     )
     {
-        if( response == nullptr )
-        {
-            return internal_error( "missing list response" );
-        }
+        return dispatch(
+            "ListEventTypes",
+            context,
+            [&]( grab::OperationContext& )
+            {
+                if( response == nullptr )
+                {
+                    return internal_error( "missing list response" );
+                }
 
-        for( const auto& descriptor : grab::event_type_descriptors( probe_ ) )
-        {
-            auto* type = response->add_types();
-            type->set_kind( grab::transport::to_wire_kind( descriptor.kind ) );
-            type->set_category(
-                grab::transport::to_wire_category( descriptor.category )
-            );
-            type->set_name( descriptor.name );
-            type->set_active( descriptor.active );
-        }
+                for( const auto& descriptor : grab::event_type_descriptors( probe_ ) )
+                {
+                    auto* type = response->add_types();
+                    type->set_kind( grab::transport::to_wire_kind( descriptor.kind ) );
+                    type->set_category(
+                        grab::transport::to_wire_category( descriptor.category )
+                    );
+                    type->set_name( descriptor.name );
+                    type->set_active( descriptor.active );
+                }
 
-        return grpc::Status::OK;
+                return grpc::Status::OK;
+            }
+        );
     }
 
     grpc::Status
@@ -234,46 +770,128 @@ namespace grab::transport
                              const eventgrab::v1::EventFilter*         request,
                              grpc::ServerWriter<eventgrab::v1::Event>* writer )
     {
-        if( context == nullptr || request == nullptr || writer == nullptr )
-        {
-            return invalid_argument( "missing subscribe request" );
-        }
-
-        auto filter = from_wire_filter( *request );
-        if( !filter.has_value() )
-        {
-            return invalid_argument( filter.error().message );
-        }
-
-        auto subscription = bus_->subscribe( std::move( *filter ) );
-        auto notify_state = std::make_shared<NotifyState>();
-        subscription.set_notify(
-            [notify_state]
+        return dispatch(
+            "Subscribe",
+            context,
+            [&]( grab::OperationContext& )
             {
-                notify_waiter( notify_state );
-            }
-        );
+                if( context == nullptr || request == nullptr || writer == nullptr )
+                {
+                    return invalid_argument( "missing subscribe request" );
+                }
 
-        // The synchronous gRPC API runs one server thread per subscriber and
-        // permits exactly one blocking write here. Async CQ streaming is a
-        // future scale optimization, not needed for this correctness path.
-        writer->SendInitialMetadata();
-        while( !context->IsCancelled() )
-        {
-            auto status = write_available_events( *context, *writer, subscription );
-            if( !status.ok() )
-            {
+                auto filter = from_wire_filter( *request );
+                if( !filter.has_value() )
+                {
+                    return invalid_argument( filter.error().message );
+                }
+
+                auto subscription = bus_->subscribe( std::move( *filter ) );
+                auto notify_state = std::make_shared<NotifyState>();
+                subscription.set_notify(
+                    [notify_state]
+                    {
+                        notify_waiter( notify_state );
+                    }
+                );
+
+                // The synchronous gRPC API runs one server thread per subscriber and
+                // permits exactly one blocking write here. Async CQ streaming is a
+                // future scale optimization, not needed for this correctness path.
+                writer->SendInitialMetadata();
+                while( !context->IsCancelled() )
+                {
+                    auto status =
+                        write_available_events( *context, *writer, subscription );
+                    if( !status.ok() )
+                    {
+                        subscription.set_notify( {} );
+                        notify_waiter( notify_state );
+                        return status;
+                    }
+
+                    wait_for_data_or_poll_interval( notify_state,
+                                                    options_.poll_interval );
+                }
+
                 subscription.set_notify( {} );
                 notify_waiter( notify_state );
-                return status;
+                return grpc::Status::OK;
             }
+        );
+    }
 
-            wait_for_data_or_poll_interval( notify_state, options_.poll_interval );
+    grpc::Status
+    EventService::SetClientContext(
+        grpc::ServerContext*                          context,
+        const eventgrab::v1::SetClientContextRequest* request,
+        eventgrab::v1::SetClientContextResponse*      response
+    )
+    {
+        return dispatch(
+            "SetClientContext",
+            context,
+            [&]( grab::OperationContext& )
+            {
+                if( context == nullptr || request == nullptr || response == nullptr )
+                {
+                    return invalid_argument( "missing client context request" );
+                }
+
+                const auto sequence = request->sequence();
+                {
+                    const std::scoped_lock lock( client_context_mutex_ );
+                    auto& previous = client_context_sequence_[request->context()];
+                    if( sequence <= previous )
+                    {
+                        return invalid_argument(
+                            "client context sequence must increase monotonically"
+                        );
+                    }
+                    previous = sequence;
+                }
+                response->set_sequence( sequence );
+                auto* diagnostic = response->mutable_diagnostics()->add_log();
+                diagnostic->set_sequence( sequence );
+                diagnostic->set_message( std::string{ "client context accepted: " } +
+                                         request->context() );
+                return grpc::Status::OK;
+            }
+        );
+    }
+
+    grpc::Status
+    EventService::dispatch(
+        std::string_view                                              rpc_name,
+        grpc::ServerContext*                                          context,
+        const std::function<grpc::Status( grab::OperationContext& )>& work
+    )
+    {
+        if( wrapped_rpc_count( rpc_name ) != 1U )
+        {
+            return internal_error( "RPC is not registered with admission control" );
         }
 
-        subscription.set_notify( {} );
-        notify_waiter( notify_state );
-        return grpc::Status::OK;
+        grab::OperationContext operation;
+        return admission_->run( context,
+                                [&]
+                                {
+                                    return work( operation );
+                                } );
+    }
+
+    std::size_t
+    EventService::registered_rpc_count() const noexcept
+    {
+        return registeredRpcNames.size();
+    }
+
+    std::size_t
+    EventService::wrapped_rpc_count( std::string_view rpc_name ) const noexcept
+    {
+        return static_cast<std::size_t>(
+            std::count( registeredRpcNames.begin(), registeredRpcNames.end(), rpc_name )
+        );
     }
 
 }    // namespace grab::transport
