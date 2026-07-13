@@ -24,6 +24,7 @@ add_executable(grab_core_tests
     core/test_registry.cpp
     core/test_reactor.cpp
     core/test_resolver.cpp
+    core/test_phase0_gate.cpp
     core/test_result.cpp
     core/test_result_taxonomy.cpp
     core/test_session.cpp
