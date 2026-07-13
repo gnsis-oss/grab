@@ -2,6 +2,7 @@
 
 #include "grab/result.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <dbus/dbus.h>
 #include <memory>
@@ -9,6 +10,13 @@
 
 namespace grab::notify
 {
+
+    struct NotifyOptions
+    {
+            static constexpr auto defaultTimeout = std::chrono::milliseconds{ 2'000 };
+
+            std::chrono::milliseconds timeout    = defaultTimeout;
+    };
 
     struct Notification
     {
@@ -37,7 +45,7 @@ namespace grab::notify
 
             [[nodiscard]]
             static grab::Result<Notifier>
-            open();
+            open( NotifyOptions options = {} );
 
             ~Notifier();
 

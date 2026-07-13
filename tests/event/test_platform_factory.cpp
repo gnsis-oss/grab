@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <span>
@@ -127,6 +128,25 @@ namespace
     }
 
 }    // namespace
+
+TEST( SourceConfig,
+      PacingDefaultsAreVisibleAndOverridable )
+{
+    constexpr auto                  defaultWindowPoll = std::chrono::milliseconds{ 100 };
+    constexpr auto                  defaultStateInterval = std::chrono::seconds{ 60 };
+    constexpr auto                  customWindowPoll = std::chrono::milliseconds{ 25 };
+    constexpr auto                  customStateInterval = std::chrono::seconds{ 5 };
+
+    const grab::event::SourceConfig defaults;
+    EXPECT_EQ( defaults.window_poll, defaultWindowPoll );
+    EXPECT_EQ( defaults.state_interval, defaultStateInterval );
+
+    grab::event::SourceConfig customized;
+    customized.window_poll    = customWindowPoll;
+    customized.state_interval = customStateInterval;
+    EXPECT_EQ( customized.window_poll, customWindowPoll );
+    EXPECT_EQ( customized.state_interval, customStateInterval );
+}
 
 TEST( PlatformFactory,
       DefaultConfigProducesXinputWindowAtspi )

@@ -19,6 +19,22 @@ namespace grab::detail
 namespace grab
 {
 
+    enum class QueueOverflowPolicy : std::uint8_t
+    {
+        Coalesce,
+        NeverDrop,
+    };
+
+    struct QueueOptions
+    {
+            static constexpr std::size_t         defaultCapacity = 1'024U;
+            static constexpr QueueOverflowPolicy defaultOverflow =
+                QueueOverflowPolicy::Coalesce;
+
+            std::size_t         capacity = defaultCapacity;
+            QueueOverflowPolicy overflow = defaultOverflow;
+    };
+
     class EventBus;
 
     class Subscription
@@ -68,7 +84,8 @@ namespace grab
     {
         public:
 
-            static constexpr std::size_t defaultQueueDepth = 1'024U;
+            static constexpr std::size_t defaultQueueDepth =
+                QueueOptions::defaultCapacity;
 
             EventBus();
             ~EventBus();
@@ -85,8 +102,13 @@ namespace grab
 
             [[nodiscard]]
             Subscription
+            subscribe( EventFilter  filter,
+                       QueueOptions options = {} );
+
+            [[nodiscard]]
+            Subscription
             subscribe( EventFilter filter,
-                       std::size_t max_queue = defaultQueueDepth );
+                       std::size_t max_queue );
 
         private:
 

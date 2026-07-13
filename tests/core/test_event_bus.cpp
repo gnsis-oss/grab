@@ -28,6 +28,7 @@ namespace
     constexpr std::uint64_t    secondSequence        = 2U;
     constexpr std::uint64_t    thirdSequence         = 3U;
     constexpr std::uint64_t    noOverflows           = 0U;
+    constexpr std::uint64_t    oneOverflow           = 1U;
     constexpr std::uint32_t    keyCode               = 42U;
     constexpr std::string_view keyName               = "answer";
     constexpr std::size_t      smallQueueDepth       = 2U;
@@ -92,6 +93,25 @@ namespace
 
 }    // namespace
 
+TEST( QueueOptions,
+      DefaultsAreVisibleAndOverridable )
+{
+    constexpr std::size_t        customCapacity = 2U;
+
+    constexpr grab::QueueOptions defaults;
+    EXPECT_EQ( defaults.capacity, grab::QueueOptions::defaultCapacity );
+    EXPECT_EQ( defaults.capacity, 1'024U );
+    EXPECT_EQ( defaults.overflow, grab::QueueOptions::defaultOverflow );
+    EXPECT_EQ( defaults.overflow, grab::QueueOverflowPolicy::Coalesce );
+
+    constexpr grab::QueueOptions customized{
+        .capacity = customCapacity,
+        .overflow = grab::QueueOverflowPolicy::NeverDrop,
+    };
+    EXPECT_EQ( customized.capacity, customCapacity );
+    EXPECT_EQ( customized.overflow, grab::QueueOverflowPolicy::NeverDrop );
+}
+
 TEST( EventBus,
       PublishDeliversToMatchingSubscriberWithSequence )
 {
@@ -149,7 +169,7 @@ TEST( EventBus,
             .kinds      = { mouseMoveKind },
             .categories = {},
         },
-        smallQueueDepth
+        grab::QueueOptions{ .capacity = smallQueueDepth }
     );
 
     auto publish_future = std::async(
@@ -170,6 +190,32 @@ TEST( EventBus,
     EXPECT_FALSE( subscription.try_pop().has_value() );
     EXPECT_EQ( subscription.overflow_count(), noOverflows );
     EXPECT_FALSE( subscription.lagging() );
+}
+
+TEST( EventBus,
+      NeverDropSurfacesMotionOverflowWithoutCoalescing )
+{
+    grab::EventBus bus;
+    auto           subscription = bus.subscribe(
+        grab::EventFilter{
+            .kinds      = { mouseMoveKind },
+            .categories = {},
+        },
+        grab::QueueOptions{
+            .capacity = smallQueueDepth,
+            .overflow = grab::QueueOverflowPolicy::NeverDrop,
+        }
+    );
+
+    bus.publish( make_mouse_move_event( firstMoveAxis, firstMoveDelta ) );
+    bus.publish( make_mouse_move_event( secondMoveAxis, secondMoveDelta ) );
+    bus.publish( make_mouse_move_event( lastMoveAxis, lastMoveDelta ) );
+
+    expect_mouse_move( subscription.try_pop(), firstMoveAxis, firstMoveDelta );
+    expect_mouse_move( subscription.try_pop(), secondMoveAxis, secondMoveDelta );
+    EXPECT_FALSE( subscription.try_pop().has_value() );
+    EXPECT_EQ( subscription.overflow_count(), oneOverflow );
+    EXPECT_TRUE( subscription.lagging() );
 }
 
 TEST( EventBus,

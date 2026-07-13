@@ -38,10 +38,11 @@ namespace grab::detail
     {
         public:
 
-            SubscriptionState( EventFilter filter,
-                               std::size_t max_queue ) :
+            SubscriptionState( EventFilter  filter,
+                               QueueOptions options ) :
                 filter_( std::move( filter ) ),
-                buffer_( max_queue )
+                buffer_( options.capacity ),
+                overflow_policy_( options.overflow )
             {
             }
 
@@ -73,7 +74,9 @@ namespace grab::detail
                         return notify;
                     }
 
-                    if( coalescible_motion( event ) &&
+                    if( overflow_policy_ ==
+                        QueueOverflowPolicy::Coalesce &&
+                        coalescible_motion( event ) &&
                         buffer_.at( back_index() ).kind == EventKind::MouseMove )
                     {
                         buffer_.at( back_index() ) = event;
@@ -157,6 +160,7 @@ namespace grab::detail
             EventFilter                filter_;
             mutable std::mutex         mutex_;
             std::vector<Event>         buffer_;
+            QueueOverflowPolicy        overflow_policy_;
             std::size_t                head_ = 0U;
             std::size_t                size_ = 0U;
             std::function<void()>      notify_;
@@ -342,14 +346,20 @@ namespace grab
     }
 
     Subscription
+    EventBus::subscribe( EventFilter  filter,
+                         QueueOptions options )
+    {
+        auto subscription =
+            std::make_shared<detail::SubscriptionState>( std::move( filter ), options );
+        state_->add( subscription );
+        return Subscription{ state_, std::move( subscription ) };
+    }
+
+    Subscription
     EventBus::subscribe( EventFilter filter,
                          std::size_t max_queue )
     {
-        auto subscription =
-            std::make_shared<detail::SubscriptionState>( std::move( filter ),
-                                                         max_queue );
-        state_->add( subscription );
-        return Subscription{ state_, std::move( subscription ) };
+        return subscribe( std::move( filter ), QueueOptions{ .capacity = max_queue } );
     }
 
 }    // namespace grab

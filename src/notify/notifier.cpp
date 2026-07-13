@@ -1,6 +1,7 @@
 #include "grab/result.hpp"
 #include "notify/notifier.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <dbus/dbus.h>
 #include <expected>
@@ -14,7 +15,6 @@ namespace grab::notify
     namespace
     {
 
-        constexpr int           dbusCallTimeoutMs = 2'000;
         constexpr dbus_uint32_t noReplacementId   = 0U;
         constexpr int           dbusTypeArray     = static_cast<int>( 'a' );
         constexpr int           dbusTypeInt32     = static_cast<int>( 'i' );
@@ -27,6 +27,24 @@ namespace grab::notify
         constexpr const char*   closeNotificationMember = "CloseNotification";
         constexpr const char*   stringArraySignature    = "s";
         constexpr const char*   hintsSignature          = "{sv}";
+        constexpr auto          dbusTimeoutUseDefault =
+            std::chrono::milliseconds{ DBUS_TIMEOUT_USE_DEFAULT };
+        constexpr auto dbusTimeoutInfinite =
+            std::chrono::milliseconds{ DBUS_TIMEOUT_INFINITE };
+
+        [[nodiscard]]
+        constexpr bool
+        valid_dbus_timeout( std::chrono::milliseconds timeout ) noexcept
+        {
+            return timeout >= dbusTimeoutUseDefault && timeout <= dbusTimeoutInfinite;
+        }
+
+        [[nodiscard]]
+        constexpr int
+        dbus_timeout_milliseconds( std::chrono::milliseconds timeout ) noexcept
+        {
+            return static_cast<int>( timeout.count() );
+        }
 
         struct DbusError
         {
@@ -258,6 +276,7 @@ namespace grab::notify
     struct Notifier::State
     {
             DbusConnectionPtr connection;
+            NotifyOptions     options;
     };
 
     void
@@ -314,8 +333,14 @@ namespace grab::notify
     }
 
     grab::Result<Notifier>
-    Notifier::open()
+    Notifier::open( NotifyOptions options )
     {
+        if( !valid_dbus_timeout( options.timeout ) )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "notification D-Bus timeout is out of range" );
+        }
+
         if( dbus_threads_init_default() == 0 )
         {
             return grab::fail( grab::ErrorCode::InternalFault,
@@ -336,6 +361,7 @@ namespace grab::notify
 
         auto state        = std::make_unique<State>();
         state->connection = std::move( connection );
+        state->options    = options;
         return Notifier{ std::move( state ) };
     }
 
@@ -355,12 +381,12 @@ namespace grab::notify
         }
 
         DbusError            reply_error;
-        const DbusMessagePtr reply{
-            dbus_connection_send_with_reply_and_block( state_->connection.get(),
-                                                       request->get(),
-                                                       dbusCallTimeoutMs,
-                                                       &reply_error.value )
-        };
+        const DbusMessagePtr reply{ dbus_connection_send_with_reply_and_block(
+            state_->connection.get(),
+            request->get(),
+            dbus_timeout_milliseconds( state_->options.timeout ),
+            &reply_error.value
+        ) };
         if( reply == nullptr )
         {
             return std::unexpected( dbus_device_error( "D-Bus Notify", reply_error ) );
@@ -402,12 +428,12 @@ namespace grab::notify
         }
 
         DbusError            reply_error;
-        const DbusMessagePtr reply{
-            dbus_connection_send_with_reply_and_block( state_->connection.get(),
-                                                       request.get(),
-                                                       dbusCallTimeoutMs,
-                                                       &reply_error.value )
-        };
+        const DbusMessagePtr reply{ dbus_connection_send_with_reply_and_block(
+            state_->connection.get(),
+            request.get(),
+            dbus_timeout_milliseconds( state_->options.timeout ),
+            &reply_error.value
+        ) };
         if( reply == nullptr )
         {
             return std::unexpected( dbus_device_error( "D-Bus CloseNotification",

@@ -508,6 +508,22 @@ namespace
 
 }    // namespace
 
+TEST( ServiceOptions,
+      DefaultsAreVisibleAndOverridable )
+{
+    constexpr auto customPollInterval = std::chrono::milliseconds{ 20 };
+
+    constexpr grab::transport::ServiceOptions defaults;
+    EXPECT_EQ( defaults.poll_interval,
+               grab::transport::ServiceOptions::defaultPollInterval );
+    EXPECT_EQ( defaults.poll_interval, std::chrono::milliseconds{ 100 } );
+
+    constexpr grab::transport::ServiceOptions customized{
+        .poll_interval = customPollInterval,
+    };
+    EXPECT_EQ( customized.poll_interval, customPollInterval );
+}
+
 TEST( EventService,
       PushedEventReachesSubscriber )
 {

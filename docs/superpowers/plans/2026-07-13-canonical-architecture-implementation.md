@@ -571,12 +571,13 @@ plan's illustrative list are **already** configurable in the current tree —
 `src/event/platform_factory.hpp:14-25` (poll), `src/event/state_source.hpp:25-32`
 (snapshot interval), and `include/grab/event_bus.hpp:71,88-89` (queue depth) —
 so this task must not "fix" what already conforms. `include/grab/drag.hpp:10-19`
-has named `DragOptions` members but **not** the `easing` field the spec §3.8
-table names, and no `QueueOptions{capacity, overflow}` type exists yet.
+also conforms with the two options used by the current implementation; spec
+§3.8 explicitly declines to add an unused `easing` field. No
+`QueueOptions{capacity, overflow}` type exists yet.
 
 **Files (after re-inventory — the actual remaining work):**
-- Verify-only (already typed; add a defaults-visible test if none exists): `src/event/platform_factory.hpp`, `src/event/state_source.hpp`, `include/grab/event_bus.hpp`.
-- Modify (genuinely inline or incomplete): `src/notify/notifier.cpp` (timeout literal → `NotifyOptions`), `src/transport/service.cpp` (poll literal → `ServiceOptions`), `include/grab/drag.hpp` (add the `easing` member the spec names, or amend the spec to drop it — decide in this commit, no silent drift).
+- Verify-only (already typed; add a defaults-visible test if none exists): `src/event/platform_factory.hpp`, `src/event/state_source.hpp`, `include/grab/event_bus.hpp`, `include/grab/drag.hpp`.
+- Modify (genuinely inline): `src/notify/notifier.cpp` (timeout literal → `NotifyOptions`), `src/transport/service.cpp` (poll literal → `ServiceOptions`).
 - Introduce `QueueOptions{ capacity, overflow }` as the named type the EventBus and future subscription queues share (event_bus's existing depth field becomes `QueueOptions::capacity`).
 - Test: extend the nearest existing test file per area with one defaults-visible assertion each.
 

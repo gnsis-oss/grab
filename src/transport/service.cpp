@@ -28,8 +28,6 @@ namespace grab::transport
     namespace
     {
 
-        constexpr auto subscribePollInterval = std::chrono::milliseconds{ 100 };
-
         struct NotifyState
         {
                 std::mutex              mutex;
@@ -128,13 +126,14 @@ namespace grab::transport
         }
 
         void
-        wait_for_data_or_poll_interval( const std::shared_ptr<NotifyState>& state )
+        wait_for_data_or_poll_interval( const std::shared_ptr<NotifyState>& state,
+                                        std::chrono::milliseconds poll_interval )
         {
             std::unique_lock lock( state->mutex );
             if( !state->notified )
             {
                 state->data_ready.wait_for( lock,
-                                            subscribePollInterval,
+                                            poll_interval,
                                             [&]
                                             {
                                                 return state->notified;
@@ -176,9 +175,11 @@ namespace grab::transport
     }    // namespace
 
     EventService::EventService( grab::EventBus&              bus,
-                                const grab::ActiveKindProbe* probe ) noexcept :
+                                const grab::ActiveKindProbe* probe,
+                                ServiceOptions               options ) noexcept :
         bus_( &bus ),
-        probe_( probe )
+        probe_( probe ),
+        options_( options )
     {
     }
 
@@ -272,7 +273,7 @@ namespace grab::transport
                 return status;
             }
 
-            wait_for_data_or_poll_interval( notify_state );
+            wait_for_data_or_poll_interval( notify_state, options_.poll_interval );
         }
 
         subscription.set_notify( {} );

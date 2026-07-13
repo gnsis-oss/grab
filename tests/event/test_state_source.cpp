@@ -217,6 +217,12 @@ namespace
 }    // namespace
 
 TEST( StateSource,
+      DefaultIntervalIsVisible )
+{
+    EXPECT_EQ( grab::event::defaultStateSourceInterval, std::chrono::seconds{ 60 } );
+}
+
+TEST( StateSource,
       FeedbackLoopFilterExcludesStateSnapshot )
 {
     const auto filter = grab::event::detail::state_source_filter();

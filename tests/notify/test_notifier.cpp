@@ -3,6 +3,7 @@
 
 // clang-format off
 #include <gtest/gtest.h>
+#include <chrono>
 #include <cstdint>
 #include <string>
 // clang-format on
@@ -40,6 +41,32 @@ namespace
     }
 
 }    // namespace
+
+TEST( NotifyOptions,
+      DefaultsAreVisibleAndOverridable )
+{
+    constexpr auto customTimeout = std::chrono::milliseconds{ 250 };
+
+    constexpr grab::notify::NotifyOptions defaults;
+    EXPECT_EQ( defaults.timeout, grab::notify::NotifyOptions::defaultTimeout );
+    EXPECT_EQ( defaults.timeout, std::chrono::milliseconds{ 2'000 } );
+
+    constexpr grab::notify::NotifyOptions customized{
+        .timeout = customTimeout,
+    };
+    EXPECT_EQ( customized.timeout, customTimeout );
+}
+
+TEST( NotifyOptions,
+      RejectsTimeoutOutsideDbusRange )
+{
+    const auto notifier = grab::notify::Notifier::open( grab::notify::NotifyOptions{
+        .timeout = std::chrono::milliseconds::max(),
+    } );
+
+    ASSERT_FALSE( notifier.has_value() );
+    EXPECT_EQ( notifier.error().code, grab::ErrorCode::InvalidArgument );
+}
 
 TEST( Notifier,
       OpensSessionBusOrGracefullyFails )

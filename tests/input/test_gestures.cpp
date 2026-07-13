@@ -1,3 +1,4 @@
+#include "grab/drag.hpp"
 #include "grab/result.hpp"
 #include "input/gestures.hpp"
 #include "input/seat.hpp"
@@ -279,6 +280,27 @@ namespace
     }
 
 }    // namespace
+
+TEST( DragOptions,
+      DefaultsAreVisibleAndOverridable )
+{
+    constexpr std::int32_t             customInterpolationSteps = 4;
+    constexpr auto                     customStepDwell = std::chrono::milliseconds{ 3 };
+
+    constexpr grab::input::DragOptions defaults;
+    EXPECT_EQ( defaults.interpolation_steps,
+               grab::input::DragOptions::defaultInterpolationSteps );
+    EXPECT_EQ( defaults.step_dwell, grab::input::DragOptions::defaultStepDwell );
+    EXPECT_EQ( defaults.interpolation_steps, 16 );
+    EXPECT_EQ( defaults.step_dwell, std::chrono::milliseconds{ 8 } );
+
+    constexpr grab::input::DragOptions customized{
+        .interpolation_steps = customInterpolationSteps,
+        .step_dwell          = customStepDwell,
+    };
+    EXPECT_EQ( customized.interpolation_steps, customInterpolationSteps );
+    EXPECT_EQ( customized.step_dwell, customStepDwell );
+}
 
 TEST( Gestures,
       LinearDragEmitsPressMotionsRelease )
