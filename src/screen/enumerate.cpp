@@ -63,6 +63,7 @@ namespace grab::screen
         {
                 xcb_atom_t net_client_list = XCB_ATOM_NONE;
                 xcb_atom_t net_wm_name     = XCB_ATOM_NONE;
+                xcb_atom_t net_wm_pid      = XCB_ATOM_NONE;
                 xcb_atom_t utf8_string     = XCB_ATOM_NONE;
         };
 
@@ -198,6 +199,14 @@ namespace grab::screen
                 return std::unexpected( std::move( net_wm_name.error() ) );
             }
 
+            auto net_wm_pid = intern_atom( connection,
+                                           grab::platform::x11::atom_name::netWmPid,
+                                           true );
+            if( !net_wm_pid.has_value() )
+            {
+                return std::unexpected( std::move( net_wm_pid.error() ) );
+            }
+
             auto utf8_string = intern_atom( connection,
                                             grab::platform::x11::atom_name::utf8String,
                                             true );
@@ -209,6 +218,7 @@ namespace grab::screen
             return Atoms{
                 .net_client_list = *net_client_list,
                 .net_wm_name     = *net_wm_name,
+                .net_wm_pid      = *net_wm_pid,
                 .utf8_string     = *utf8_string,
             };
         }
@@ -401,6 +411,36 @@ namespace grab::screen
         }
 
         [[nodiscard]]
+        grab::Result<std::optional<std::uint32_t>>
+        read_u32_property( xcb_connection_t* connection,
+                           xcb_window_t      window,
+                           xcb_atom_t        property,
+                           xcb_atom_t        type )
+        {
+            auto property_data = read_property( connection, window, property, type );
+            if( !property_data.has_value() )
+            {
+                return std::unexpected( std::move( property_data.error() ) );
+            }
+            if( !property_data->has_value() ||
+                ( *property_data )->type !=
+                type ||
+                ( *property_data )->format !=
+                format32Bits ||
+                ( *property_data )->bytes.size() < sizeof( std::uint32_t ) )
+            {
+                return std::optional<std::uint32_t>{};
+            }
+
+            std::array<std::byte, sizeof( std::uint32_t )> raw_value{};
+            const std::span<const std::byte> bytes{ ( *property_data )->bytes };
+            std::ranges::copy( bytes.first( raw_value.size() ), raw_value.begin() );
+            return std::optional<std::uint32_t>{
+                std::bit_cast<std::uint32_t>( raw_value )
+            };
+        }
+
+        [[nodiscard]]
         grab::Result<std::string>
         read_wm_class( xcb_connection_t* connection,
                        xcb_window_t      window )
@@ -446,6 +486,18 @@ namespace grab::screen
                                        window,
                                        XCB_ATOM_WM_NAME,
                                        XCB_ATOM_STRING );
+        }
+
+        [[nodiscard]]
+        grab::Result<std::optional<std::uint32_t>>
+        read_pid( xcb_connection_t* connection,
+                  xcb_window_t      window,
+                  const Atoms&      atoms )
+        {
+            return read_u32_property( connection,
+                                      window,
+                                      atoms.net_wm_pid,
+                                      XCB_ATOM_CARDINAL );
         }
 
         [[nodiscard]]
@@ -717,15 +769,31 @@ namespace grab::screen
             return std::unexpected( std::move( connected.error() ) );
         }
 
-        auto atoms = intern_atoms( connected->connection.get() );
+        return list_windows( connected->connection.get(), connected->screen.root );
+    }
+
+    grab::Result<std::vector<WindowInfo>>
+    list_windows( xcb_connection_t* connection,
+                  xcb_window_t      root )
+    {
+        if( connection == nullptr || xcb_connection_has_error( connection ) != xcbOk )
+        {
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
+                               "XCB display connection is unavailable" );
+        }
+        if( root == XCB_WINDOW_NONE )
+        {
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
+                               "XCB root window is unavailable" );
+        }
+
+        auto atoms = intern_atoms( connection );
         if( !atoms.has_value() )
         {
             return std::unexpected( std::move( atoms.error() ) );
         }
 
-        auto windows = client_list_windows( connected->connection.get(),
-                                            connected->screen.root,
-                                            atoms->net_client_list );
+        auto windows = client_list_windows( connection, root, atoms->net_client_list );
         if( !windows.has_value() )
         {
             return std::unexpected( std::move( windows.error() ) );
@@ -735,9 +803,7 @@ namespace grab::screen
         result.reserve( windows->size() );
         for( const xcb_window_t window : *windows )
         {
-            auto geometry = read_geometry( connected->connection.get(),
-                                           connected->screen.root,
-                                           window );
+            auto geometry = read_geometry( connection, root, window );
             if( !geometry.has_value() )
             {
                 return std::unexpected( std::move( geometry.error() ) );
@@ -747,22 +813,29 @@ namespace grab::screen
                 continue;
             }
 
-            auto wm_class = read_wm_class( connected->connection.get(), window );
+            auto wm_class = read_wm_class( connection, window );
             if( !wm_class.has_value() )
             {
                 return std::unexpected( std::move( wm_class.error() ) );
             }
 
-            auto title = read_title( connected->connection.get(), window, *atoms );
+            auto title = read_title( connection, window, *atoms );
             if( !title.has_value() )
             {
                 return std::unexpected( std::move( title.error() ) );
+            }
+
+            auto pid = read_pid( connection, window, *atoms );
+            if( !pid.has_value() )
+            {
+                return std::unexpected( std::move( pid.error() ) );
             }
 
             result.push_back( WindowInfo{
                 .id       = static_cast<std::uint32_t>( window ),
                 .wm_class = std::move( *wm_class ),
                 .title    = std::move( *title ),
+                .pid      = *pid,
                 .bounds   = **geometry,
             } );
         }

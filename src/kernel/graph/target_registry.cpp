@@ -1,3 +1,4 @@
+#include "grab/presentation.hpp"
 #include "grab/result.hpp"
 #include "kernel/graph/target_registry.hpp"
 
@@ -179,6 +180,7 @@ namespace grab::kernel
                 .grade        = observation.grade,
                 .aliases      = {},
                 .observations = {},
+                .surfaces     = {},
             };
             if( observation.alias.has_value() )
             {
@@ -347,6 +349,143 @@ namespace grab::kernel
                 }
             }
             exact_active_aliases_.erase( alias_position );
+            return {};
+        }
+        catch( const std::exception& error )
+        {
+            return registry_failure<void>( error );
+        }
+        catch( ... )
+        {
+            return fail( ErrorCode::InternalFault,
+                         "target registry failed with an unknown error" );
+        }
+    }
+
+    Result<void>
+    TargetRegistry::register_surface( TargetId      target_id,
+                                      SurfaceRecord surface )
+    {
+        if( surface.id.value == 0U )
+        {
+            return fail( ErrorCode::InvalidArgument, "surface id must not be zero" );
+        }
+
+        try
+        {
+            const std::scoped_lock lock{ mutex_ };
+            auto                   target_record = targets_.find( target_id );
+            if( target_record == targets_.end() )
+            {
+                return fail( ErrorCode::TargetDetached,
+                             "target is not present in the registry" );
+            }
+
+            auto owner = surface_owners_.find( surface.id );
+            if( owner != surface_owners_.end() && owner->second != target_id )
+            {
+                return fail( ErrorCode::InvalidArgument,
+                             "surface already belongs to another target" );
+            }
+
+            auto existing =
+                std::ranges::find_if( target_record->second.surfaces,
+                                      [&surface]( const SurfaceRecord& record )
+                                      {
+                                          return record.id == surface.id;
+                                      } );
+            if( owner != surface_owners_.end() )
+            {
+                if( existing == target_record->second.surfaces.end() )
+                {
+                    return fail( ErrorCode::InternalFault,
+                                 "surface ownership index is inconsistent" );
+                }
+                *existing = surface;
+                return {};
+            }
+            if( existing != target_record->second.surfaces.end() )
+            {
+                return fail( ErrorCode::InternalFault,
+                             "target surface record is missing its ownership index" );
+            }
+
+            target_record->second.surfaces.push_back( surface );
+            try
+            {
+                const auto [position, inserted] =
+                    surface_owners_.emplace( surface.id, target_id );
+                static_cast<void>( position );
+                if( !inserted )
+                {
+                    target_record->second.surfaces.pop_back();
+                    return fail( ErrorCode::InternalFault,
+                                 "surface ownership index generated a duplicate id" );
+                }
+            }
+            catch( ... )
+            {
+                target_record->second.surfaces.pop_back();
+                throw;
+            }
+            return {};
+        }
+        catch( const std::exception& error )
+        {
+            return registry_failure<void>( error );
+        }
+        catch( ... )
+        {
+            return fail( ErrorCode::InternalFault,
+                         "target registry failed with an unknown error" );
+        }
+    }
+
+    Result<void>
+    TargetRegistry::remove_surface( TargetId  target_id,
+                                    SurfaceId surface_id )
+    {
+        if( surface_id.value == 0U )
+        {
+            return fail( ErrorCode::InvalidArgument, "surface id must not be zero" );
+        }
+
+        try
+        {
+            const std::scoped_lock lock{ mutex_ };
+            auto                   target_record = targets_.find( target_id );
+            if( target_record == targets_.end() )
+            {
+                return fail( ErrorCode::TargetDetached,
+                             "target is not present in the registry" );
+            }
+
+            auto owner = surface_owners_.find( surface_id );
+            if( owner == surface_owners_.end() )
+            {
+                return fail( ErrorCode::TargetDetached,
+                             "surface is not present in the registry" );
+            }
+            if( owner->second != target_id )
+            {
+                return fail( ErrorCode::InvalidArgument,
+                             "surface belongs to another target" );
+            }
+
+            const auto existing =
+                std::ranges::find_if( target_record->second.surfaces,
+                                      [surface_id]( const SurfaceRecord& record )
+                                      {
+                                          return record.id == surface_id;
+                                      } );
+            if( existing == target_record->second.surfaces.end() )
+            {
+                return fail( ErrorCode::InternalFault,
+                             "surface ownership index is inconsistent" );
+            }
+
+            target_record->second.surfaces.erase( existing );
+            surface_owners_.erase( owner );
             return {};
         }
         catch( const std::exception& error )

@@ -4,15 +4,28 @@
 #include "spi/runtime.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string_view>
+
+namespace grab::kernel
+{
+
+    class TargetRegistry;
+
+}
 
 namespace grab::drivers::desktop::x11
 {
 
+    class X11TreeSource;
+
     class X11Runtime final : public grab::spi::Runtime
     {
         public:
+
+            X11Runtime();
+            ~X11Runtime() override;
 
             [[nodiscard]]
             std::string_view
@@ -35,6 +48,10 @@ namespace grab::drivers::desktop::x11
             tree_source() override;
 
             [[nodiscard]]
+            const grab::kernel::TargetRegistry*
+            target_registry() const noexcept;
+
+            [[nodiscard]]
             grab::spi::TopologySource*
             topology_source() override;
 
@@ -51,6 +68,7 @@ namespace grab::drivers::desktop::x11
             static constexpr std::uint32_t     initialGeneration = 1U;
 
             grab::platform::x11::XcbConnection connection_;
+            std::unique_ptr<X11TreeSource>     tree_source_;
             std::uint32_t                      generation_{ initialGeneration };
             bool                               has_started_{};
     };

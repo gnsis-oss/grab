@@ -38,6 +38,7 @@ namespace
     constexpr std::size_t      createdWindowCount  = 2U;
     constexpr std::uint32_t    firstWindowColor    = 0X00'22'44'66U;
     constexpr std::uint32_t    secondWindowColor   = 0X00'66'44'22U;
+    constexpr std::uint32_t    firstWindowPid      = 42'424U;
 
     constexpr std::string_view firstInstance       = "grab-enumerate-one";
     constexpr std::string_view firstClass          = "GrabEnumerateOne";
@@ -47,6 +48,7 @@ namespace
     constexpr std::string_view secondTitle         = "grab enumerate second";
     constexpr std::string_view netClientListAtom   = "_NET_CLIENT_LIST";
     constexpr std::string_view netWmNameAtom       = "_NET_WM_NAME";
+    constexpr std::string_view netWmPidAtom        = "_NET_WM_PID";
     constexpr std::string_view utf8StringAtom      = "UTF8_STRING";
 
     template<typename T>
@@ -226,6 +228,28 @@ namespace
     }
 
     void
+    set_pid( xcb_connection_t* connection,
+             xcb_window_t      window,
+             std::uint32_t     pid )
+    {
+        xcb_atom_t net_wm_pid = XCB_ATOM_NONE;
+        ASSERT_TRUE( intern_atom( connection, netWmPidAtom, net_wm_pid ) );
+        EXPECT_TRUE( request_succeeded(
+            connection,
+            xcb_change_property_checked(    // NOLINT(readability-suspicious-call-argument)
+                connection,
+                propertyReplaceMode,
+                window,
+                net_wm_pid,
+                XCB_ATOM_CARDINAL,
+                format32Bits,
+                1U,
+                &pid
+            )
+        ) );
+    }
+
+    void
     set_client_list( xcb_connection_t* connection,
                      xcb_window_t      root,
                      xcb_window_t      first_window,
@@ -327,16 +351,19 @@ TEST( Enumerate,
                                                            secondInstance,
                                                            secondClass,
                                                            secondTitle );
+    set_pid( connection.get(), first_window, firstWindowPid );
     set_client_list( connection.get(), screen->root, first_window, second_window );
     ASSERT_TRUE( flush_succeeded( connection.get() ) );
 
-    auto listed = grab::screen::list_windows( xvfbDisplay );
+    auto listed = grab::screen::list_windows( connection.get(), screen->root );
 
     ASSERT_TRUE( listed.has_value() ) << listed.error().message;
     const auto first = find_by_class( *listed, firstClass );
     ASSERT_NE( first, listed->end() );
     EXPECT_EQ( first->id, static_cast<std::uint32_t>( first_window ) );
     EXPECT_EQ( first->title, firstTitle );
+    ASSERT_TRUE( first->pid.has_value() );
+    EXPECT_EQ( *first->pid, firstWindowPid );
     EXPECT_EQ( first->bounds.x, firstWindowX );
     EXPECT_EQ( first->bounds.y, firstWindowY );
     EXPECT_EQ( first->bounds.width, windowWidth );
@@ -346,10 +373,17 @@ TEST( Enumerate,
     ASSERT_NE( second, listed->end() );
     EXPECT_EQ( second->id, static_cast<std::uint32_t>( second_window ) );
     EXPECT_EQ( second->title, secondTitle );
+    EXPECT_FALSE( second->pid.has_value() );
     EXPECT_EQ( second->bounds.x, secondWindowX );
     EXPECT_EQ( second->bounds.y, secondWindowY );
     EXPECT_EQ( second->bounds.width, windowWidth );
     EXPECT_EQ( second->bounds.height, windowHeight );
+
+    auto separately_connected = grab::screen::list_windows( xvfbDisplay );
+    ASSERT_TRUE( separately_connected.has_value() )
+        << separately_connected.error().message;
+    EXPECT_NE( find_by_class( *separately_connected, firstClass ),
+               separately_connected->end() );
 }
 
 TEST( Enumerate,

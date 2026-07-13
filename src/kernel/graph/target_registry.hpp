@@ -1,7 +1,7 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "grab/presentation.hpp"
 #include "grab/result.hpp"
-#include "grab/space.hpp"
 
 #include <compare>
 #include <cstddef>
@@ -85,6 +85,7 @@ namespace grab::kernel
             TargetGrade                    grade{ TargetGrade::Window };
             std::vector<AliasEdge>         aliases;
             std::vector<TargetObservation> observations;
+            std::vector<SurfaceRecord>     surfaces;
     };
 
     class TargetRegistry final
@@ -122,6 +123,18 @@ namespace grab::kernel
             invalidate_alias( const AliasAuthority& authority,
                               const NativeAliasId&  native_id );
 
+            // A surface has exactly one durable target owner at a time.
+            // Re-registering its id for that owner replaces the value record.
+            [[nodiscard]]
+            Result<void>
+            register_surface( TargetId      target,
+                              SurfaceRecord surface );
+
+            [[nodiscard]]
+            Result<void>
+            remove_surface( TargetId  target,
+                            SurfaceId surface );
+
             [[nodiscard]]
             Result<TargetRecord>
             target( TargetId id ) const;
@@ -152,6 +165,7 @@ namespace grab::kernel
             mutable std::mutex mutex_;
             std::map<TargetId, TargetRecord> targets_;
             std::map<AliasKey, TargetId>     exact_active_aliases_;
+            std::map<SurfaceId, TargetId>    surface_owners_;
             std::uint64_t                    next_id_{ 1U };
     };
 

@@ -1,6 +1,9 @@
 #include "drivers/desktop/x11/x11_runtime.hpp"
+#include "drivers/desktop/x11/x11_tree_source.hpp"
 #include "grab/context.hpp"
+#include "grab/ids.hpp"
 #include "grab/result.hpp"
+#include "kernel/graph/target_registry.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "spi/event_source.hpp"
 #include "spi/route.hpp"
@@ -9,12 +12,17 @@
 
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <utility>
 
 namespace grab::drivers::desktop::x11
 {
+
+    X11Runtime::X11Runtime()  = default;
+
+    X11Runtime::~X11Runtime() = default;
 
     std::string_view
     X11Runtime::name() const
@@ -54,12 +62,18 @@ namespace grab::drivers::desktop::x11
             ++generation_;
         }
         has_started_ = true;
+        tree_source_ =
+            std::make_unique<X11TreeSource>( grab::RuntimeId{ generation_ },
+                                             grab::DisplayGeneration{ generation_ },
+                                             connection_.get(),
+                                             connection_.root() );
         return {};
     }
 
     grab::Result<void>
     X11Runtime::stop()
     {
+        tree_source_.reset();
         connection_ = grab::platform::x11::XcbConnection{};
         return {};
     }
@@ -67,7 +81,17 @@ namespace grab::drivers::desktop::x11
     grab::spi::TreeSource*
     X11Runtime::tree_source()
     {
-        return nullptr;
+        return tree_source_.get();
+    }
+
+    const grab::kernel::TargetRegistry*
+    X11Runtime::target_registry() const noexcept
+    {
+        if( tree_source_ == nullptr )
+        {
+            return nullptr;
+        }
+        return &tree_source_->target_registry();
     }
 
     grab::spi::TopologySource*
