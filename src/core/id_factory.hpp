@@ -32,6 +32,10 @@ namespace grab::detail
             SubscriptionId
             next_subscription_id();
 
+            [[nodiscard]]
+            FrameId
+            next_frame_id() noexcept;
+
         private:
 
             class Impl;
@@ -45,5 +49,9 @@ namespace grab::detail
     [[nodiscard]]
     SubscriptionId
     next_subscription_id();
+
+    [[nodiscard]]
+    FrameId
+    next_frame_id() noexcept;
 
 }    // namespace grab::detail

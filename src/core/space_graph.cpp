@@ -137,7 +137,7 @@ namespace grab::detail
     }    // namespace
 
     CoordinateSpaceId
-    SpaceGraph::add_space()
+    SpaceGraph::add_space( std::uint32_t generation )
     {
         const CoordinateSpaceId space{ .value = next_space_ };
         ++next_space_;
@@ -146,7 +146,7 @@ namespace grab::detail
         ( void )graph_.add( knot );
         knots_.emplace( space, knot );
         spaces_.emplace( knot, space );
-        generations_.emplace( space, 0U );
+        generations_.emplace( space, generation );
         return space;
     }
 

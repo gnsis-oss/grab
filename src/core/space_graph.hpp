@@ -16,7 +16,7 @@ namespace grab::detail
 
             [[nodiscard]]
             CoordinateSpaceId
-            add_space();
+            add_space( std::uint32_t generation = 0U );
 
             void
             add_transform( TransformRecord transform );

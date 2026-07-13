@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/capture.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 
@@ -42,6 +43,30 @@ namespace grab::screen
                             std::int16_t  y,
                             std::uint16_t width,
                             std::uint16_t height );
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture_window_frame( std::uint32_t           window,
+                                  grab::CoordinateSpaceId space,
+                                  grab::CaptureGeneration generation,
+                                  double                  scale = 1.0 );
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture_display_frame( grab::CoordinateSpaceId space,
+                                   grab::CaptureGeneration generation,
+                                   double                  scale = 1.0 );
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture_region_frame( std::int16_t            x,
+                                  std::int16_t            y,
+                                  std::uint16_t           width,
+                                  std::uint16_t           height,
+                                  grab::CoordinateSpaceId space,
+                                  grab::CaptureGeneration generation,
+                                  double                  scale,
+                                  grab::SpaceRect         content_rect );
 
         private:
 

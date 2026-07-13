@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <tag/gen.hpp>
@@ -71,6 +72,20 @@ namespace grab::detail
                 return result;
             }
 
+            [[nodiscard]]
+            FrameId
+            next_frame_id() noexcept
+            {
+                const std::scoped_lock lock{ mutex_ };
+                if( nextFrameId_ == std::numeric_limits<std::uint64_t>::max() )
+                {
+                    std::terminate();
+                }
+                const FrameId result{ .value = nextFrameId_ };
+                ++nextFrameId_;
+                return result;
+            }
+
         private:
 
             void
@@ -133,6 +148,7 @@ namespace grab::detail
             std::uint64_t lastMilliseconds_ = 0U;
             std::uint16_t counter_          = 0U;
             bool          hasLast_          = false;
+            std::uint64_t nextFrameId_      = 1U;
     };
 
     namespace
@@ -168,6 +184,12 @@ namespace grab::detail
         return SubscriptionId{ .value = impl_->next_uuid() };
     }
 
+    FrameId
+    IdFactory::next_frame_id() noexcept
+    {
+        return impl_->next_frame_id();
+    }
+
     OperationId
     next_operation_id()
     {
@@ -178,6 +200,12 @@ namespace grab::detail
     next_subscription_id()
     {
         return process_factory().next_subscription_id();
+    }
+
+    FrameId
+    next_frame_id() noexcept
+    {
+        return process_factory().next_frame_id();
     }
 
 }    // namespace grab::detail

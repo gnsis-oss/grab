@@ -264,10 +264,10 @@ namespace grab::platform::x11
             xcb_input_xi_query_pointer_reply( conn->get(), cookie, &error_raw )
         );
         const auto error = make_xcb_reply( error_raw );
-        if( !reply )
+        if( error || !reply )
         {
-            return grab::fail( grab::ErrorCode::ProviderFailed,
-                               "XIQueryPointer failed" );
+            return grab::fail( grab::ErrorCode::GeometryUntrusted,
+                               "XIQueryPointer position is unavailable" );
         }
         return PointerPos{
             .x = from_fp1616( reply->root_x ),

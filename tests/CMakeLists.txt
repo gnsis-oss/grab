@@ -5,6 +5,7 @@ add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/cli/input_command.cpp
     cli/input_command_test.cpp
     core/test_capability.cpp
+    core/test_capture.cpp
     core/test_context.cpp
     core/test_enum_table.cpp
     core/test_log.cpp
@@ -86,12 +87,15 @@ target_include_directories(grab_kernel_tests PRIVATE
 gtest_discover_tests(grab_kernel_tests)
 
 add_executable(grab_driver_x11_tests
+    drivers/x11/test_coordinate_authority.cpp
+    drivers/x11/test_x11_capture_route.cpp
     drivers/x11/test_x11_input_correctness.cpp
     drivers/x11/test_x11_runtime.cpp
     drivers/x11/test_x11_tree_source.cpp
 )
 target_link_libraries(grab_driver_x11_tests PRIVATE
     grab_driver_x11
+    grab_vendor_l0
     GTest::gtest_main
 )
 target_include_directories(grab_driver_x11_tests PRIVATE

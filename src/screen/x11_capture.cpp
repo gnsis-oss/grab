@@ -1,11 +1,16 @@
+#include "core/id_factory.hpp"
+#include "grab/capture.hpp"
 #include "grab/geometry/rectangle.hpp"
+#include "grab/ids.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
+#include "grab/space.hpp"
 #include "screen/x11_capture.hpp"
 
 #include <algorithm>
 #include <bit>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -31,6 +36,39 @@ namespace grab::screen
 {
     namespace
     {
+
+        [[nodiscard]]
+        std::int64_t
+        capture_timestamp_ns() noexcept
+        {
+            const auto elapsed = std::chrono::system_clock::now().time_since_epoch();
+            return std::chrono::duration_cast<std::chrono::nanoseconds>( elapsed )
+                .count();
+        }
+
+        [[nodiscard]]
+        grab::Result<grab::Frame>
+        frame_from( grab::Result<grab::Image> image,
+                    grab::CoordinateSpaceId   space,
+                    grab::CaptureGeneration   generation,
+                    grab::SpaceRect           content_rect,
+                    double                    scale )
+        {
+            if( !image.has_value() )
+            {
+                return std::unexpected( std::move( image.error() ) );
+            }
+
+            return grab::Frame{
+                .id             = grab::detail::next_frame_id(),
+                .image          = std::move( *image ),
+                .space          = space,
+                .generation     = generation,
+                .captured_at_ns = capture_timestamp_ns(),
+                .content_rect   = content_rect,
+                .scale          = scale,
+            };
+        }
 
         constexpr int              xcbOk                  = 0;
         constexpr int              xcbFlushFailed         = 0;
@@ -1184,6 +1222,79 @@ namespace grab::screen
                                      .bounds   = bounds,
                                      .depth    = root_depth_,
                                  } );
+    }
+
+    grab::Result<grab::Frame>
+    X11Capturer::capture_window_frame( std::uint32_t           window,
+                                       grab::CoordinateSpaceId space,
+                                       grab::CaptureGeneration generation,
+                                       double                  scale )
+    {
+        auto image = capture_window( window );
+        if( !image.has_value() )
+        {
+            return std::unexpected( std::move( image.error() ) );
+        }
+        const auto width  = static_cast<double>( image->width );
+        const auto height = static_cast<double>( image->height );
+        return frame_from( std::move( image ),
+                           space,
+                           generation,
+                           {
+                               .x     = 0.0,
+                               .y     = 0.0,
+                               .w     = width,
+                               .h     = height,
+                               .space = space,
+                           },
+                           scale );
+    }
+
+    grab::Result<grab::Frame>
+    X11Capturer::capture_display_frame( grab::CoordinateSpaceId space,
+                                        grab::CaptureGeneration generation,
+                                        double                  scale )
+    {
+        auto image = capture_display();
+        if( !image.has_value() )
+        {
+            return std::unexpected( std::move( image.error() ) );
+        }
+        const auto width  = static_cast<double>( image->width );
+        const auto height = static_cast<double>( image->height );
+        return frame_from( std::move( image ),
+                           space,
+                           generation,
+                           {
+                               .x     = 0.0,
+                               .y     = 0.0,
+                               .w     = width,
+                               .h     = height,
+                               .space = space,
+                           },
+                           scale );
+    }
+
+    grab::Result<grab::Frame>
+    X11Capturer::capture_region_frame( std::int16_t            x,
+                                       std::int16_t            y,
+                                       std::uint16_t           width,
+                                       std::uint16_t           height,
+                                       grab::CoordinateSpaceId space,
+                                       grab::CaptureGeneration generation,
+                                       double                  scale,
+                                       grab::SpaceRect         content_rect )
+    {
+        if( content_rect.space != space )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "X11 frame content rectangle uses a different space" );
+        }
+        return frame_from( capture_region( x, y, width, height ),
+                           space,
+                           generation,
+                           content_rect,
+                           scale );
     }
 
 }    // namespace grab::screen
