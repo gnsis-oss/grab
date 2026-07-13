@@ -1,3 +1,6 @@
+add_test(NAME grab_invariant_checks
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_invariants.sh)
+
 add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/cli/input_command.cpp
     cli/input_command_test.cpp

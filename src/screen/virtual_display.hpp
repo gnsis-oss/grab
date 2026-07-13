@@ -1,10 +1,11 @@
 #pragma once
 
+#include "grab/process_ref.hpp"
 #include "grab/result.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
-#include <sys/types.h>
 
 namespace grab::screen
 {
@@ -34,14 +35,14 @@ namespace grab::screen
 
         private:
 
-            VirtualDisplay( pid_t       child_pid,
-                            std::string display ) noexcept;
+            VirtualDisplay( grab::OwnedProcess child,
+                            std::string        display ) noexcept;
 
             auto
-                        stop() noexcept -> void;
+                                              stop() noexcept -> void;
 
-            pid_t       child_pid_ = -1;
-            std::string display_;
+            std::optional<grab::OwnedProcess> child_;
+            std::string                       display_;
     };
 
 }    // namespace grab::screen

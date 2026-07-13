@@ -1,6 +1,9 @@
+#include "grab/drag.hpp"
 #include "grab/input.hpp"
 #include "grab/keymap.hpp"
 #include "grab/result.hpp"
+#include "grab/space.hpp"
+#include "grab/window_match.hpp"
 #include "input/gestures.hpp"
 #include "input/locator.hpp"
 #include "input/seat.hpp"
@@ -14,6 +17,7 @@
 #include <cstdint>
 #include <expected>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -22,6 +26,38 @@
 
 namespace grab
 {
+
+    class Input::Impl
+    {
+        public:
+
+            Impl( grab::input::Seat           seat,
+                  std::optional<grab::Keymap> keymap,
+                  grab::input::WindowLocator  locator,
+                  std::string                 display,
+                  bool                        server_keymap ) noexcept :
+                seat_( std::move( seat ) ),
+                keymap_( std::move( keymap ) ),
+                locator_( std::move( locator ) ),
+                display_( std::move( display ) ),
+                server_keymap_( server_keymap )
+            {
+            }
+
+            [[nodiscard]]
+            grab::Result<grab::Keymap*>
+            ensure_keymap();
+
+        private:
+
+            friend class Input;
+
+            grab::input::Seat           seat_;
+            std::optional<grab::Keymap> keymap_;
+            grab::input::WindowLocator  locator_;
+            std::string                 display_;
+            bool                        server_keymap_ = false;
+    };
 
     namespace
     {
@@ -175,8 +211,8 @@ namespace grab
 
         [[nodiscard]]
         grab::Result<std::int16_t>
-        coordinate_from_fraction( std::int32_t     origin,
-                                  std::uint32_t    size,
+        coordinate_from_fraction( double           origin,
+                                  double           size,
                                   double           fraction,
                                   std::string_view axis )
         {
@@ -189,16 +225,21 @@ namespace grab
                                    std::string{ axis } +
                                        " fraction must be between 0 and 1" );
             }
-            if( size == 0U )
+            if( !std::isfinite( origin ) )
             {
                 return grab::fail( grab::ErrorCode::InvalidArgument,
                                    std::string{ axis } +
-                                       " window extent must be nonzero" );
+                                       " window origin must be finite" );
+            }
+            if( !std::isfinite( size ) || size < 1.0 )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   std::string{ axis } +
+                                       " window extent must be at least one" );
             }
 
-            const auto   maximum_offset = static_cast<double>( size - 1U );
-            const double absolute =
-                static_cast<double>( origin ) + std::round( fraction * maximum_offset );
+            const double maximum_offset = size - 1.0;
+            const double absolute = std::round( origin + ( fraction * maximum_offset ) );
             if( absolute <
                 static_cast<double>( std::numeric_limits<std::int16_t>::min() ) ||
                 absolute >
@@ -214,42 +255,26 @@ namespace grab
 
     }    // namespace
 
-    Input::Input( grab::input::Seat           seat,
-                  std::optional<grab::Keymap> keymap,
-                  grab::input::WindowLocator  locator,
-                  std::string                 display,
-                  bool                        server_keymap ) noexcept :
-        seat_( std::move( seat ) ),
-        keymap_( std::move( keymap ) ),
-        locator_( std::move( locator ) ),
-        display_( std::move( display ) ),
-        server_keymap_( server_keymap )
+    Input::Input( std::unique_ptr<Impl> impl ) noexcept :
+        impl_( std::move( impl ) )
     {
     }
 
-    Input::~Input() = default;
+    Input::~Input()                        = default;
 
-    Input::Input( Input&& other ) noexcept :
-        seat_( std::move( other.seat_ ) ),
-        keymap_( std::move( other.keymap_ ) ),
-        locator_( std::move( other.locator_ ) ),
-        display_( std::move( other.display_ ) ),
-        server_keymap_( other.server_keymap_ )
-    {
-    }
+    Input::Input( Input&& other ) noexcept = default;
 
     Input&
-    Input::operator=( Input&& other ) noexcept
+    Input::operator=( Input&& other ) noexcept = default;
+
+    grab::Result<Input::Impl*>
+    Input::require_impl() noexcept
     {
-        if( this != &other )
+        if( impl_ == nullptr )
         {
-            seat_          = std::move( other.seat_ );
-            keymap_        = std::move( other.keymap_ );
-            locator_       = std::move( other.locator_ );
-            display_       = std::move( other.display_ );
-            server_keymap_ = other.server_keymap_;
+            return grab::fail( grab::ErrorCode::InternalFault, "Input is not open" );
         }
-        return *this;
+        return impl_.get();
     }
 
     grab::Result<Input>
@@ -280,17 +305,17 @@ namespace grab
             return std::unexpected( std::move( locator.error() ) );
         }
 
-        return Input{
-            std::move( *seat ),
-            std::move( keymap ),
-            std::move( *locator ),
-            display == nullptr ? std::string{} : std::string{ display },
-            layout.empty(),
-        };
+        return Input{ std::make_unique<Impl>( std::move( *seat ),
+                                              std::move( keymap ),
+                                              std::move( *locator ),
+                                              display == nullptr
+                                                  ? std::string{}
+                                                  : std::string{ display },
+                                              layout.empty() ) };
     }
 
     grab::Result<grab::Keymap*>
-    Input::ensure_keymap()
+    Input::Impl::ensure_keymap()
     {
         if( keymap_.has_value() && !server_keymap_ )
         {
@@ -317,30 +342,42 @@ namespace grab
     Input::move( std::int16_t x,
                  std::int16_t y )
     {
-        auto move_result = seat_.move_pointer_absolute( x, y );
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        auto move_result = ( *state )->seat_.move_pointer_absolute( x, y );
         if( !move_result.has_value() )
         {
             return error_from( move_result );
         }
-        return seat_.flush();
+        return ( *state )->seat_.flush();
     }
 
     grab::Result<void>
     Input::click( std::uint8_t button )
     {
-        auto press_result = seat_.button( button, true );
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        auto press_result = ( *state )->seat_.button( button, true );
         if( !press_result.has_value() )
         {
             return error_from( press_result );
         }
 
-        auto release_result = seat_.button( button, false );
+        auto release_result = ( *state )->seat_.button( button, false );
         if( !release_result.has_value() )
         {
             return error_from( release_result );
         }
 
-        return seat_.flush();
+        return ( *state )->seat_.flush();
     }
 
     grab::Result<void>
@@ -348,13 +385,19 @@ namespace grab
                      std::int16_t y,
                      std::uint8_t button )
     {
-        auto move_result = seat_.move_pointer_absolute( x, y );
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        auto move_result = ( *state )->seat_.move_pointer_absolute( x, y );
         if( !move_result.has_value() )
         {
             return error_from( move_result );
         }
 
-        auto flush_result = seat_.flush();
+        auto flush_result = ( *state )->seat_.flush();
         if( !flush_result.has_value() )
         {
             return error_from( flush_result );
@@ -368,13 +411,24 @@ namespace grab
                  grab::input::Point              to,
                  const grab::input::DragOptions& options )
     {
-        return grab::input::linear_drag( seat_, from, to, options );
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+        return grab::input::linear_drag( ( *state )->seat_, from, to, options );
     }
 
     grab::Result<void>
     Input::type_text( std::string_view utf8 )
     {
-        auto keymap = ensure_keymap();
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        auto keymap = ( *state )->ensure_keymap();
         if( !keymap.has_value() )
         {
             return std::unexpected( std::move( keymap.error() ) );
@@ -425,21 +479,29 @@ namespace grab
 
         for( const grab::Keystroke& keystroke : *keystrokes )
         {
-            auto key_result =
-                synthesize_keystroke( seat_, keystroke, shift_keycode, altgr_keycode );
+            auto key_result = synthesize_keystroke( ( *state )->seat_,
+                                                    keystroke,
+                                                    shift_keycode,
+                                                    altgr_keycode );
             if( !key_result.has_value() )
             {
                 return key_result;
             }
         }
 
-        return seat_.flush();
+        return ( *state )->seat_.flush();
     }
 
     grab::Result<void>
     Input::press_key( std::string_view name )
     {
-        auto keymap = ensure_keymap();
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        auto keymap = ( *state )->ensure_keymap();
         if( !keymap.has_value() )
         {
             return std::unexpected( std::move( keymap.error() ) );
@@ -477,26 +539,38 @@ namespace grab
             altgr_keycode = *resolved;
         }
 
-        auto key_result =
-            synthesize_keystroke( seat_, *keystroke, shift_keycode, altgr_keycode );
+        auto key_result = synthesize_keystroke( ( *state )->seat_,
+                                                *keystroke,
+                                                shift_keycode,
+                                                altgr_keycode );
         if( !key_result.has_value() )
         {
             return key_result;
         }
-        return seat_.flush();
+        return ( *state )->seat_.flush();
     }
 
     grab::Result<void>
     Input::activate( const grab::input::LocatedWindow& win )
     {
-        return locator_.activate( win );
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+        return ( *state )->locator_.activate( win );
     }
 
     grab::Result<grab::input::LocatedWindow>
     Input::locate( const std::vector<std::string>& wm_class_candidates,
                    std::string_view                title )
     {
-        return locator_.locate( wm_class_candidates, title );
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+        return ( *state )->locator_.locate( wm_class_candidates, title );
     }
 
     grab::Result<void>
@@ -505,20 +579,25 @@ namespace grab
                             double                            frac_y,
                             std::uint8_t                      button )
     {
-        if( win.trust == grab::input::GeometryTrust::Unavailable )
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        if( win.trust == grab::TransformTrust::Untrusted )
         {
             return grab::fail( grab::ErrorCode::GeometryUntrusted,
                                "window geometry is unavailable" );
         }
 
-        auto x = coordinate_from_fraction( win.bounds.x, win.bounds.width, frac_x, "x" );
+        auto x = coordinate_from_fraction( win.bounds.x, win.bounds.w, frac_x, "x" );
         if( !x.has_value() )
         {
             return std::unexpected( std::move( x.error() ) );
         }
 
-        auto y =
-            coordinate_from_fraction( win.bounds.y, win.bounds.height, frac_y, "y" );
+        auto y = coordinate_from_fraction( win.bounds.y, win.bounds.h, frac_y, "y" );
         if( !y.has_value() )
         {
             return std::unexpected( std::move( y.error() ) );
@@ -535,30 +614,32 @@ namespace grab
                                  double                            destination_y,
                                  const grab::input::DragOptions&   options )
     {
-        if( win.trust == grab::input::GeometryTrust::Unavailable )
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        if( win.trust == grab::TransformTrust::Untrusted )
         {
             return grab::fail( grab::ErrorCode::GeometryUntrusted,
                                "window geometry is unavailable" );
         }
 
-        auto from_x = coordinate_from_fraction( win.bounds.x,
-                                                win.bounds.width,
-                                                source_x,
-                                                "source x" );
+        auto from_x =
+            coordinate_from_fraction( win.bounds.x, win.bounds.w, source_x, "source x" );
         if( !from_x.has_value() )
         {
             return std::unexpected( std::move( from_x.error() ) );
         }
-        auto from_y = coordinate_from_fraction( win.bounds.y,
-                                                win.bounds.height,
-                                                source_y,
-                                                "source y" );
+        auto from_y =
+            coordinate_from_fraction( win.bounds.y, win.bounds.h, source_y, "source y" );
         if( !from_y.has_value() )
         {
             return std::unexpected( std::move( from_y.error() ) );
         }
         auto to_x = coordinate_from_fraction( win.bounds.x,
-                                              win.bounds.width,
+                                              win.bounds.w,
                                               destination_x,
                                               "destination x" );
         if( !to_x.has_value() )
@@ -566,7 +647,7 @@ namespace grab
             return std::unexpected( std::move( to_x.error() ) );
         }
         auto to_y = coordinate_from_fraction( win.bounds.y,
-                                              win.bounds.height,
+                                              win.bounds.h,
                                               destination_y,
                                               "destination y" );
         if( !to_y.has_value() )
@@ -574,7 +655,7 @@ namespace grab
             return std::unexpected( std::move( to_y.error() ) );
         }
 
-        return grab::input::curve_drag( seat_,
+        return grab::input::curve_drag( ( *state )->seat_,
                                         grab::input::Point{ .x = *from_x, .y = *from_y },
                                         grab::input::Point{ .x = *to_x, .y = *to_y },
                                         options );

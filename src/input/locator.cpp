@@ -1,5 +1,7 @@
 #include "core/ascii.hpp"
 #include "grab/result.hpp"
+#include "grab/space.hpp"
+#include "grab/window_match.hpp"
 #include "input/locator.hpp"
 #include "platform/x11/protocol.hpp"
 
@@ -588,7 +590,7 @@ namespace grab::input
                           xcb_window_t      window )
         {
             LocatedWindow located{};
-            located.window                          = window;
+            located.window.xid                      = window;
 
             xcb_generic_error_t* raw_geometry_error = nullptr;
             const auto           geometry           = take_xcb_owned(
@@ -604,9 +606,9 @@ namespace grab::input
 
             located.bounds.x                         = geometry->x;
             located.bounds.y                         = geometry->y;
-            located.bounds.width                     = geometry->width;
-            located.bounds.height                    = geometry->height;
-            located.trust                            = GeometryTrust::Estimated;
+            located.bounds.w                         = geometry->width;
+            located.bounds.h                         = geometry->height;
+            located.trust                            = grab::TransformTrust::Heuristic;
 
             xcb_generic_error_t* raw_translate_error = nullptr;
             const auto translation     = take_xcb_owned( xcb_translate_coordinates_reply(
@@ -622,7 +624,7 @@ namespace grab::input
 
             located.bounds.x = translation->dst_x;
             located.bounds.y = translation->dst_y;
-            located.trust    = GeometryTrust::Trusted;
+            located.trust    = grab::TransformTrust::Exact;
             return located;
         }
 
@@ -876,7 +878,7 @@ namespace grab::input
         {
             return std::unexpected( std::move( open_result.error() ) );
         }
-        if( window.window == XCB_WINDOW_NONE )
+        if( window.window.xid == XCB_WINDOW_NONE )
         {
             return grab::fail( grab::ErrorCode::InvalidArgument,
                                "cannot activate an empty X11 window" );
@@ -894,7 +896,7 @@ namespace grab::input
             .response_type = XCB_CLIENT_MESSAGE,
             .format        = format32Bits,
             .sequence      = 0U,
-            .window        = window.window,
+            .window        = window.window.xid,
             .type          = *atom,
             .data          = xcb_client_message_data_t{
                                                        .data32 = {
@@ -920,7 +922,7 @@ namespace grab::input
         auto stack_result =
             check_request( connection_,
                            xcb_configure_window_checked( connection_,
-                                                         window.window,
+                                                         window.window.xid,
                                                          XCB_CONFIG_WINDOW_STACK_MODE,
                                                          &stackAbove ),
                            "X11 window raise request" );
@@ -935,7 +937,7 @@ namespace grab::input
                                "X11 window activation flush failed" );
         }
 
-        return wait_for_target_focus( connection_, window.window );
+        return wait_for_target_focus( connection_, window.window.xid );
     }
 
 }    // namespace grab::input

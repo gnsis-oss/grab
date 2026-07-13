@@ -2,7 +2,7 @@
 #include "cli/input_command.hpp"
 #include "grab/input.hpp"
 #include "grab/result.hpp"
-#include "input/locator.hpp"
+#include "grab/window_match.hpp"
 
 #include <charconv>
 #include <cmath>

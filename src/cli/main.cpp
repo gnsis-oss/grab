@@ -13,7 +13,6 @@
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
 #include "image/compare.hpp"
-#include "input/gestures.hpp"
 #include "notify/notifier.hpp"
 #include "screen/workflow.hpp"
 #include "service/daemon.hpp"

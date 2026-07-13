@@ -1,5 +1,7 @@
 #include "grab/input.hpp"
 #include "grab/result.hpp"
+#include "grab/space.hpp"
+#include "grab/window_match.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -524,10 +526,9 @@ TEST( Input,
     auto input = grab::Input::open( xvfbDisplay );
     ASSERT_TRUE( input.has_value() ) << input.error().message;
     const grab::input::LocatedWindow window{
-        .window = 0U,
-        .bounds =
-            { .x = windowX, .y = windowY, .width = windowWidth, .height = windowHeight },
-        .trust = grab::input::GeometryTrust::Trusted,
+        .window = { .xid = 0U },
+        .bounds = { .x = windowX, .y = windowY, .w = windowWidth, .h = windowHeight },
+        .trust  = grab::TransformTrust::Exact,
     };
 
     const auto click_result = input->click_in_window( window,

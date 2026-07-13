@@ -1,4 +1,6 @@
 #include "grab/result.hpp"
+#include "grab/space.hpp"
+#include "grab/window_match.hpp"
 #include "input/locator.hpp"
 #include "platform/x11/protocol.hpp"
 
@@ -499,12 +501,12 @@ TEST( Locator,
     auto located = locator->locate( { std::string{ knownClass } } );
 
     ASSERT_TRUE( located.has_value() ) << located.error().message;
-    EXPECT_EQ( located->window, window );
+    EXPECT_EQ( located->window.xid, window );
     EXPECT_EQ( located->bounds.x, firstWindowX );
     EXPECT_EQ( located->bounds.y, firstWindowY );
-    EXPECT_EQ( located->bounds.width, windowWidth );
-    EXPECT_EQ( located->bounds.height, windowHeight );
-    EXPECT_EQ( located->trust, grab::input::GeometryTrust::Trusted );
+    EXPECT_EQ( located->bounds.w, windowWidth );
+    EXPECT_EQ( located->bounds.h, windowHeight );
+    EXPECT_EQ( located->trust, grab::TransformTrust::Exact );
 }
 
 TEST( Locator,
@@ -541,12 +543,12 @@ TEST( Locator,
     auto located = locator->locate( { std::string{ sharedClass } }, targetNeedle );
 
     ASSERT_TRUE( located.has_value() ) << located.error().message;
-    EXPECT_EQ( located->window, target );
+    EXPECT_EQ( located->window.xid, target );
     EXPECT_EQ( located->bounds.x, secondWindowX );
     EXPECT_EQ( located->bounds.y, secondWindowY );
-    EXPECT_EQ( located->bounds.width, windowWidth );
-    EXPECT_EQ( located->bounds.height, windowHeight );
-    EXPECT_EQ( located->trust, grab::input::GeometryTrust::Trusted );
+    EXPECT_EQ( located->bounds.w, windowWidth );
+    EXPECT_EQ( located->bounds.h, windowHeight );
+    EXPECT_EQ( located->trust, grab::TransformTrust::Exact );
 }
 
 TEST( Locator,
@@ -607,7 +609,7 @@ TEST( Locator,
     auto located = locator->locate( { std::string{ stackingClass } } );
 
     ASSERT_TRUE( located.has_value() ) << located.error().message;
-    EXPECT_EQ( located->window, topmost );
+    EXPECT_EQ( located->window.xid, topmost );
 }
 
 TEST( Locator,
@@ -669,7 +671,7 @@ TEST( Locator,
     auto located = locator->locate( { std::string{ visibilityClass } } );
 
     ASSERT_TRUE( located.has_value() ) << located.error().message;
-    EXPECT_EQ( located->window, visible );
+    EXPECT_EQ( located->window.xid, visible );
 }
 
 TEST( Locator,
@@ -719,7 +721,7 @@ TEST( Locator,
     };
 
     grab::input::LocatedWindow target_window{};
-    target_window.window                       = target;
+    target_window.window.xid                   = target;
     const auto activation                      = locator->activate( target_window );
     const bool focus_was_applied_before_return = focus_applied.load();
     manager.join();

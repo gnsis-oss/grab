@@ -1,3 +1,4 @@
+#include "grab/process_ref.hpp"
 #include "grab/result.hpp"
 #include "screen/virtual_display.hpp"
 
@@ -9,8 +10,7 @@
 #include <expected>
 #include <fcntl.h>
 #include <memory>
-// NOLINTNEXTLINE(modernize-deprecated-headers,misc-include-cleaner): POSIX kill(2).
-#include <signal.h>
+#include <optional>
 #include <spawn.h>
 #include <string>
 #include <string_view>
@@ -27,17 +27,14 @@ namespace grab::screen
     namespace
     {
 
-        constexpr pid_t  invalidPid         = static_cast<pid_t>( -1 );
-        constexpr int    xcbOk              = 0;
-        constexpr int    spawnSuccess       = 0;
-        constexpr int    systemCallFailed   = -1;
-        constexpr int    pathExistsMode     = F_OK;
-        constexpr int    firstDisplayNumber = 100;
-        constexpr int    lastDisplayNumber  = 199;
-        constexpr int    noWaitOptions      = 0;
-        constexpr int    terminateSignal    = SIGTERM;    // NOLINT(misc-include-cleaner)
-        constexpr int    killSignal         = SIGKILL;    // NOLINT(misc-include-cleaner)
-        constexpr mode_t noFileMode         = 0;
+        // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <sys/types.h>.
+        constexpr pid_t       invalidPid          = static_cast<pid_t>( -1 );
+        constexpr int         xcbOk               = 0;
+        constexpr int         spawnSuccess        = 0;
+        constexpr int         pathExistsMode      = F_OK;
+        constexpr int         firstDisplayNumber  = 100;
+        constexpr int         lastDisplayNumber   = 199;
+        constexpr mode_t      noFileMode          = 0;
         constexpr std::size_t xvfbArgumentCount   = 6U;
         constexpr const char* devNullPath         = "/dev/null";
         constexpr const char* xvfbExecutable      = "Xvfb";
@@ -248,7 +245,7 @@ namespace grab::screen
         }
 
         [[nodiscard]]
-        grab::Result<pid_t>
+        grab::Result<grab::OwnedProcess>
         spawn_xvfb( const std::string& display,
                     const std::string& geometry )
         {
@@ -293,7 +290,12 @@ namespace grab::screen
                                    error_message( "posix_spawnp Xvfb", spawn_result ) );
             }
 
-            return child_pid;
+            auto child = grab::OwnedProcess::adopt_child( child_pid );
+            if( !child.has_value() )
+            {
+                return std::unexpected( std::move( child.error() ) );
+            }
+            return child;
         }
 
         [[nodiscard]]
@@ -389,79 +391,11 @@ namespace grab::screen
                                "Xvfb display did not become connectable" );
         }
 
-        void
-        wait_for_child_after_signal( pid_t child_pid ) noexcept
-        {
-            const auto deadline = std::chrono::steady_clock::now() + stopTimeout;
-            while( std::chrono::steady_clock::now() < deadline )
-            {
-                int         status      = 0;
-                const pid_t wait_result = waitpid(
-                    child_pid,
-                    &status,
-                    WNOHANG    // NOLINT(misc-include-cleaner)
-                );
-                if( wait_result == child_pid )
-                {
-                    return;
-                }
-                if( wait_result == systemCallFailed && errno == ECHILD )
-                {
-                    return;
-                }
-                if( wait_result == systemCallFailed && errno == EINTR )
-                {
-                    continue;
-                }
-                std::this_thread::sleep_for( pollInterval );
-            }
-
-            // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <signal.h>.
-            if( kill( child_pid, killSignal ) == systemCallFailed && errno == ESRCH )
-            {
-                return;
-            }
-
-            for( ;; )
-            {
-                int         status      = 0;
-                const pid_t wait_result = waitpid( child_pid, &status, noWaitOptions );
-                if( wait_result == child_pid )
-                {
-                    return;
-                }
-                if( wait_result == systemCallFailed && errno == EINTR )
-                {
-                    continue;
-                }
-                return;
-            }
-        }
-
-        void
-        terminate_child( pid_t child_pid ) noexcept
-        {
-            if( child_pid == invalidPid )
-            {
-                return;
-            }
-
-            // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <signal.h>.
-            if( kill( child_pid, terminateSignal ) ==
-                systemCallFailed &&
-                errno == ESRCH )
-            {
-                return;
-            }
-
-            wait_for_child_after_signal( child_pid );
-        }
-
     }    // namespace
 
-    VirtualDisplay::VirtualDisplay( pid_t       child_pid,
-                                    std::string display ) noexcept :
-        child_pid_( child_pid ),
+    VirtualDisplay::VirtualDisplay( grab::OwnedProcess child,
+                                    std::string        display ) noexcept :
+        child_( std::move( child ) ),
         display_( std::move( display ) )
     {
     }
@@ -472,8 +406,8 @@ namespace grab::screen
     }
 
     VirtualDisplay::VirtualDisplay( VirtualDisplay&& other ) noexcept :
-        child_pid_( std::exchange( other.child_pid_,
-                                   invalidPid ) ),
+        child_( std::exchange( other.child_,
+                               std::nullopt ) ),
         display_( std::move( other.display_ ) )
     {
     }
@@ -484,8 +418,8 @@ namespace grab::screen
         if( this != &other )
         {
             stop();
-            child_pid_ = std::exchange( other.child_pid_, invalidPid );
-            display_   = std::move( other.display_ );
+            child_   = std::exchange( other.child_, std::nullopt );
+            display_ = std::move( other.display_ );
         }
         return *this;
     }
@@ -507,20 +441,22 @@ namespace grab::screen
             return std::unexpected( std::move( display.error() ) );
         }
 
-        auto child_pid = spawn_xvfb( *display, screen_geometry( width, height, depth ) );
-        if( !child_pid.has_value() )
+        auto child = spawn_xvfb( *display, screen_geometry( width, height, depth ) );
+        if( !child.has_value() )
         {
-            return std::unexpected( std::move( child_pid.error() ) );
+            return std::unexpected( std::move( child.error() ) );
         }
 
-        auto ready = wait_until_ready( *child_pid, *display );
+        const auto child_pid = static_cast<pid_t>( child->id().value );
+        auto       ready     = wait_until_ready( child_pid, *display );
         if( !ready.has_value() )
         {
-            terminate_child( *child_pid );
+            auto terminate_result = child->terminate( stopTimeout );
+            static_cast<void>( terminate_result );
             return std::unexpected( std::move( ready.error() ) );
         }
 
-        return VirtualDisplay{ *child_pid, std::move( *display ) };
+        return VirtualDisplay{ std::move( *child ), std::move( *display ) };
     }
 
     const std::string&
@@ -532,8 +468,12 @@ namespace grab::screen
     void
     VirtualDisplay::stop() noexcept
     {
-        terminate_child( child_pid_ );
-        child_pid_ = invalidPid;
+        if( child_.has_value() )
+        {
+            auto terminate_result = child_->terminate( stopTimeout );
+            static_cast<void>( terminate_result );
+            child_.reset();
+        }
         display_.clear();
     }
 

@@ -1,18 +1,23 @@
 #pragma once
 
 #include "grab/drag.hpp"
-#include "grab/keymap.hpp"
+#include "grab/geometry.hpp"
 #include "grab/pointer_button.hpp"
 #include "grab/result.hpp"
-#include "input/gestures.hpp"
-#include "input/locator.hpp"
-#include "input/seat.hpp"
+#include "grab/window_match.hpp"
 
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace grab::input
+{
+
+    using grab::geometry::Point;
+
+}    // namespace grab::input
 
 namespace grab
 {
@@ -91,21 +96,15 @@ namespace grab
 
         private:
 
-            Input( grab::input::Seat           seat,
-                   std::optional<grab::Keymap> keymap,
-                   grab::input::WindowLocator  locator,
-                   std::string                 display,
-                   bool                        server_keymap ) noexcept;
+            class Impl;
+
+            explicit Input( std::unique_ptr<Impl> impl ) noexcept;
 
             [[nodiscard]]
-            grab::Result<grab::Keymap*>
-                                        ensure_keymap();
+            grab::Result<Impl*>
+                                  require_impl() noexcept;
 
-            grab::input::Seat           seat_;
-            std::optional<grab::Keymap> keymap_;
-            grab::input::WindowLocator  locator_;
-            std::string                 display_;
-            bool                        server_keymap_ = false;
+            std::unique_ptr<Impl> impl_;
     };
 
 }    // namespace grab

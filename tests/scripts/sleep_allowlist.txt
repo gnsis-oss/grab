@@ -1,0 +1,6 @@
+# format: <repo-relative path>=<max allowed sleep occurrences>
+# shrink-only: Phase-1 WP1.4/WP1.8 drive these to 0 and delete the lines.
+src/input/gestures.cpp=1
+src/input/locator.cpp=1
+src/screen/virtual_display.cpp=1
+src/screen/workflow.cpp=1
