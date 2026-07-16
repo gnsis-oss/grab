@@ -56,9 +56,10 @@ add_library(grab_core STATIC
 )
 target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
 target_link_libraries(grab_core PRIVATE grab_vendor_l0)
-# Composition root: SessionCore (grab_core) composes the X11 driver stack.
-# The static-library cycle grab_core <-> grab_kernel/grab_driver_x11 is intentional; CMake supports cycles among STATIC libraries.
+# Composition root: SessionCore (grab_core) composes the X11 and AT-SPI driver stacks.
+# The static-library cycles through grab_kernel and both drivers are intentional; CMake supports cycles among STATIC libraries.
 target_link_libraries(grab_core PRIVATE grab_driver_x11)
+target_link_libraries(grab_core PRIVATE grab_driver_atspi)
 target_include_directories(grab_core PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_core PUBLIC cxx_std_23)

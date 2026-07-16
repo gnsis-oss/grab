@@ -1,3 +1,4 @@
+#include "core/reactor.hpp"
 #include "drivers/desktop/x11/x11_runtime.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
 #include "grab/capture.hpp"
@@ -493,4 +494,41 @@ TEST( ExitGate,
     EXPECT_EQ( decoded_tab->prev_tab_title, "Phase zero" );
 
     EXPECT_TRUE( runtime.stop().has_value() );
+}
+
+TEST( ExitGate,
+      SessionCoreOpensWhenAtspiUnavailableAndRecordsDiagnostic )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    int            screen_number = 0;
+    XcbWindowGuard display_probe;
+    display_probe.connection = xcb_connect( display, &screen_number );
+    if( display_probe.connection ==
+        nullptr ||
+        xcb_connection_has_error( display_probe.connection ) != 0 )
+    {
+        GTEST_SKIP() << "requires Xvfb (cannot connect to DISPLAY=" << display << ')';
+    }
+
+    grab::core::Reactor reactor;
+    auto                core = grab::kernel::lifecycle::SessionCore::open(
+        grab::SessionOptions{ .display = std::string{ display }, .seat = {} },
+        &reactor
+    );
+    ASSERT_TRUE( core.has_value() ) << core.error().message;
+    EXPECT_TRUE( ( *core )->store().snapshot().has_value() );
+
+    const auto& diagnostics = ( *core )->runtime_diagnostics();
+    ASSERT_FALSE( diagnostics.empty() );
+    EXPECT_TRUE( std::ranges::any_of( diagnostics,
+                                      []( const auto& diagnostic )
+                                      {
+                                          return diagnostic.message.find( "atspi" ) !=
+                                                 std::string::npos;
+                                      } ) );
 }

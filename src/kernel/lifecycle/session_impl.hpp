@@ -20,6 +20,13 @@
 #include <utility>
 #include <vector>
 
+namespace grab::core
+{
+
+    class Reactor;
+
+}
+
 namespace grab::drivers::desktop::x11
 {
 
@@ -36,7 +43,8 @@ namespace grab::kernel::lifecycle
 
             [[nodiscard]]
             static Result<std::unique_ptr<SessionCore>>
-            open( const SessionOptions& options );
+            open( const SessionOptions& options,
+                  grab::core::Reactor*  reactor = nullptr );
 
             [[nodiscard]]
             static std::unique_ptr<SessionCore>
@@ -88,6 +96,10 @@ namespace grab::kernel::lifecycle
             TargetRegistry&
             registry() noexcept;
 
+            [[nodiscard]]
+            const std::vector<DiagnosticEntry>&
+            runtime_diagnostics() const noexcept;
+
             // Precondition: this core was created by open(), or a runtime was
             // attach()ed.
             [[nodiscard]]
@@ -105,6 +117,10 @@ namespace grab::kernel::lifecycle
             void
             publish_tree_event( const kernel::TreeEvent& event );
 
+            void
+            compose_atspi_best_effort( grab::core::Reactor*    reactor,
+                                       const OperationContext& context );
+
             [[nodiscard]]
             Result<std::size_t>
                             drain_source( spi::TreeSource&        source,
@@ -118,6 +134,7 @@ namespace grab::kernel::lifecycle
             spi::Runtime*                            primary_runtime_{};
             grab::drivers::desktop::x11::X11Runtime* x11_runtime_{};
             std::vector<spi::TreeSource*>            attached_;
+            std::vector<DiagnosticEntry>             runtime_diagnostics_;
             std::uint64_t                            sink_batch_revision_{};
             std::uint64_t                            sink_previous_revision_{};
             std::vector<std::pair<std::uint64_t, std::uint64_t>> pending_active_;

@@ -130,4 +130,12 @@ TEST( SessionCore,
     EXPECT_FALSE( watch.try_pop().has_value() );
 }
 
+TEST( SessionCore,
+      OpenForTestRecordsNoRuntimeDiagnostics )
+{
+    auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
+    ASSERT_NE( core, nullptr );
+    EXPECT_TRUE( core->runtime_diagnostics().empty() );
+}
+
 // NOLINTEND(readability-trailing-comma)

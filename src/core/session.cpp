@@ -132,7 +132,7 @@ namespace grab
         // Compose the live stack when a display is available; without one the
         // session stays reactor-only (composition diagnostics land with the
         // AT-SPI attach task).
-        if( auto core = kernel::lifecycle::SessionCore::open( options_ ) )
+        if( auto core = kernel::lifecycle::SessionCore::open( options_, &reactor_ ) )
         {
             core_ = std::move( *core );
         }

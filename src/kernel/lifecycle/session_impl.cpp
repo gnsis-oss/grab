@@ -1,5 +1,6 @@
 #include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "drivers/desktop/x11/x11_runtime.hpp"
+#include "drivers/semantic/atspi/atspi_runtime.hpp"
 #include "grab/capture.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
@@ -21,6 +22,7 @@
 #include "spi/tree_source.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -29,6 +31,7 @@
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace grab::kernel::lifecycle
 {
@@ -93,7 +96,8 @@ namespace grab::kernel::lifecycle
     }
 
     Result<std::unique_ptr<SessionCore>>
-    SessionCore::open( const SessionOptions& options )
+    SessionCore::open( const SessionOptions& options,
+                       grab::core::Reactor*  reactor )
     {
         // X11 currently connects through DISPLAY (XcbConnection::open( "" )).
         // options.display is an availability signal until the runtime accepts an
@@ -129,7 +133,56 @@ namespace grab::kernel::lifecycle
         {
             return std::unexpected( std::move( attached.error() ) );
         }
+
+        const auto* const capture_error = x11->capture_route_error();
+        if( capture_error != nullptr )
+        {
+            core->runtime_diagnostics_.push_back( DiagnosticEntry{
+                .at      = std::chrono::steady_clock::now(),
+                .message = std::string{ "x11 capture route unavailable: " } +
+                           capture_error->message,
+            } );
+        }
+        core->compose_atspi_best_effort( reactor, context );
         return core;
+    }
+
+    void
+    SessionCore::compose_atspi_best_effort( grab::core::Reactor*    reactor,
+                                            const OperationContext& context )
+    {
+        if( reactor == nullptr )
+        {
+            runtime_diagnostics_.push_back( DiagnosticEntry{
+                .at      = std::chrono::steady_clock::now(),
+                .message = "atspi runtime skipped: session has no reactor",
+            } );
+            return;
+        }
+
+        grab::drivers::semantic::atspi::AtspiRuntime runtime{
+            *reactor,
+            bus_,
+            *registry_,
+        };
+        auto started = runtime.start( context );
+        if( !started.has_value() )
+        {
+            runtime_diagnostics_.push_back( DiagnosticEntry{
+                .at      = std::chrono::steady_clock::now(),
+                .message = std::string{ "atspi runtime unavailable: " } +
+                           started.error().message,
+            } );
+            return;
+        }
+
+        // TreeStore is single-scope; attaching AT-SPI would retire X11
+        // (src/kernel/graph/tree_store.cpp:1283, 1358-1370).
+        runtime_diagnostics_.push_back( DiagnosticEntry{
+            .at      = std::chrono::steady_clock::now(),
+            .message = "atspi attach deferred: store is single-scope",
+        } );
+        static_cast<void>( runtime.stop() );    // NOLINT(bugprone-unused-return-value)
     }
 
     std::unique_ptr<SessionCore>
@@ -464,6 +517,12 @@ namespace grab::kernel::lifecycle
     SessionCore::registry() noexcept
     {
         return *registry_;
+    }
+
+    const std::vector<DiagnosticEntry>&
+    SessionCore::runtime_diagnostics() const noexcept
+    {
+        return runtime_diagnostics_;
     }
 
     spi::Runtime&
