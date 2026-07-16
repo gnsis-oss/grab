@@ -1,4 +1,5 @@
 #include "core/reactor.hpp"
+#include "grab/capture.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
@@ -278,6 +279,13 @@ namespace grab
                       const ActionOptions& options )
     {
         return kernel::lifecycle::perform_verb( impl_->core(), action, options );
+    }
+
+    grab::Result<Frame>
+    Session::capture( const CaptureTarget& target,
+                      CaptureOptions       options )
+    {
+        return kernel::lifecycle::capture_verb( impl_->core(), target, options );
     }
 
 }    // namespace grab

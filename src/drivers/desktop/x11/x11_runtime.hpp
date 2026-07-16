@@ -1,5 +1,8 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "drivers/desktop/x11/x11_capture_route.hpp"
+#include "grab/ids.hpp"
+#include "grab/result.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "spi/runtime.hpp"
@@ -7,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -42,8 +46,20 @@ namespace grab::drivers::desktop::x11
             stop() override;
 
             [[nodiscard]]
+            X11CaptureRoute*
+            capture_route() noexcept;
+
+            [[nodiscard]]
+            const grab::Error*
+            capture_route_error() const noexcept;
+
+            [[nodiscard]]
             grab::spi::TreeSource*
             tree_source() override;
+
+            [[nodiscard]]
+            grab::Result<std::uint32_t>
+            resolve_native_window( const grab::WidgetRef& widget ) const;
 
             [[nodiscard]]
             grab::kernel::TargetRegistry*
@@ -83,6 +99,8 @@ namespace grab::drivers::desktop::x11
             std::unique_ptr<X11InputSeat>      input_seat_;
             std::unique_ptr<X11PointerRoute>   pointer_route_;
             std::unique_ptr<X11KeyboardRoute>  keyboard_route_;
+            std::optional<X11CaptureRoute>     capture_route_;
+            std::optional<grab::Error>         capture_route_error_;
             std::uint32_t                      generation_{ initialGeneration };
             bool                               has_started_{};
     };

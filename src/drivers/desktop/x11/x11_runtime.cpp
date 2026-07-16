@@ -1,3 +1,4 @@
+#include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_runtime.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
@@ -92,14 +93,30 @@ namespace grab::drivers::desktop::x11
                                                               connection_.get(),
                                                               *input_seat_,
                                                               std::move( *keymap ) );
-        generation_     = next_generation;
-        has_started_    = true;
+
+        // Same display authority the runtime connects to (DISPLAY env for now);
+        // explicit display threading through the runtime is Task 8 scope.
+        capture_route_.reset();
+        capture_route_error_.reset();
+        auto capture_route = X11CaptureRoute::open();
+        if( capture_route.has_value() )
+        {
+            capture_route_.emplace( std::move( *capture_route ) );
+        }
+        else
+        {
+            capture_route_error_ = std::move( capture_route.error() );
+        }
+        generation_  = next_generation;
+        has_started_ = true;
         return {};
     }
 
     grab::Result<void>
     X11Runtime::stop()
     {
+        capture_route_.reset();
+        capture_route_error_.reset();
         keyboard_route_.reset();
         pointer_route_.reset();
         input_seat_.reset();
@@ -108,10 +125,33 @@ namespace grab::drivers::desktop::x11
         return {};
     }
 
+    X11CaptureRoute*
+    X11Runtime::capture_route() noexcept
+    {
+        return capture_route_.has_value() ? &*capture_route_ : nullptr;
+    }
+
+    const grab::Error*
+    X11Runtime::capture_route_error() const noexcept
+    {
+        return capture_route_error_.has_value() ? &*capture_route_error_ : nullptr;
+    }
+
     grab::spi::TreeSource*
     X11Runtime::tree_source()
     {
         return tree_source_.get();
+    }
+
+    grab::Result<std::uint32_t>
+    X11Runtime::resolve_native_window( const grab::WidgetRef& widget ) const
+    {
+        if( tree_source_ == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                               "X11 runtime has no tree source" );
+        }
+        return tree_source_->resolve_xid( widget );
     }
 
     grab::kernel::TargetRegistry*

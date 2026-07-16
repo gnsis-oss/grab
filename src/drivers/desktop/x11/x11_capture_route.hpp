@@ -6,8 +6,10 @@
 #include "grab/space.hpp"
 #include "screen/x11_capture.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace grab::drivers::desktop::x11
 {
@@ -30,6 +32,14 @@ namespace grab::drivers::desktop::x11
             [[nodiscard]]
             grab::Result<grab::Frame>
             capture_output( std::string_view name );
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture_window( std::uint32_t window );
+
+            [[nodiscard]]
+            grab::Result<std::vector<grab::TransformRecord>>
+            refresh_transforms();
 
             [[nodiscard]]
             const CoordinateAuthority&

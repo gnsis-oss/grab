@@ -1,12 +1,16 @@
 #include "drivers/desktop/x11/x11_runtime.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
+#include "grab/capture.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/ids.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/session.hpp"
+#include "grab/space.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
+#include "screen/enumerate.hpp"
 #include "transport/codec.hpp"
 
 // clang-format off
@@ -415,9 +419,30 @@ TEST( ExitGate,
     EXPECT_EQ( std::get<grab::Match>( click.target ).ref, resolved_ref );
     EXPECT_EQ( std::get<grab::Match>( type_text.target ).ref, resolved_ref );
 
-    // TODO(phase1): No public capture dispatcher produces Frame, and no public
-    // perform(Click/TypeText) returns Result<Receipt>.  Do not commit either route
-    // directly: every mutating verb must be mediated by a Receipt-producing API.
+    // Output-name capture through the public Session verb.
+    const auto outputs = grab::screen::list_outputs();
+    ASSERT_TRUE( outputs.has_value() );
+    ASSERT_FALSE( outputs->empty() );
+    auto output_frame =
+        ( *first_session )->capture( grab::CaptureTarget{ outputs->front().name } );
+    ASSERT_TRUE( output_frame.has_value() ) << output_frame.error().message;
+    EXPECT_NE( output_frame->id.value, 0U );
+    EXPECT_NE( output_frame->space, grab::CoordinateSpaceId{} );
+    EXPECT_NE( output_frame->generation, grab::CaptureGeneration{} );
+
+    // Match-target capture: resolve the test window through the session's own
+    // store, then capture that window's surface.
+    const auto session_match = ( *first_session )->resolve( locator );
+    ASSERT_TRUE( session_match.has_value() ) << session_match.error().message;
+    auto window_frame =
+        ( *first_session )->capture( grab::CaptureTarget{ *session_match } );
+    ASSERT_TRUE( window_frame.has_value() ) << window_frame.error().message;
+    EXPECT_NE( window_frame->id.value, 0U );
+    EXPECT_EQ( window_frame->image.width, windowWidth );
+    EXPECT_EQ( window_frame->image.height, windowHeight );
+
+    // TODO(phase1): the exit gate still exercises no public perform(); the
+    // Task-9 rewrite drives every verb through Session/client.
 
     ASSERT_TRUE( set_text_property( test_window.connection,
                                     test_window.window,

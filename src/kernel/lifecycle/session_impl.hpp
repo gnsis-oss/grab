@@ -1,5 +1,6 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "grab/capture.hpp"
 #include "grab/context.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/interaction.hpp"
@@ -18,6 +19,13 @@
 #include <memory>
 #include <utility>
 #include <vector>
+
+namespace grab::drivers::desktop::x11
+{
+
+    class X11Runtime;
+
+}
 
 namespace grab::kernel::lifecycle
 {
@@ -64,6 +72,11 @@ namespace grab::kernel::lifecycle
                      const ActionOptions& options = {} );
 
             [[nodiscard]]
+            Result<Frame>
+            capture( const CaptureTarget& target,
+                     CaptureOptions       options = {} );
+
+            [[nodiscard]]
             EventBus&
             bus() noexcept;
 
@@ -101,11 +114,12 @@ namespace grab::kernel::lifecycle
             TreeStore       store_;
             TargetRegistry  owned_registry_;
             TargetRegistry* registry_{ &owned_registry_ };
-            std::unique_ptr<spi::Runtime> owned_runtime_;
-            spi::Runtime*                 primary_runtime_{};
-            std::vector<spi::TreeSource*> attached_;
-            std::uint64_t                 sink_batch_revision_{};
-            std::uint64_t                 sink_previous_revision_{};
+            std::unique_ptr<spi::Runtime>            owned_runtime_;
+            spi::Runtime*                            primary_runtime_{};
+            grab::drivers::desktop::x11::X11Runtime* x11_runtime_{};
+            std::vector<spi::TreeSource*>            attached_;
+            std::uint64_t                            sink_batch_revision_{};
+            std::uint64_t                            sink_previous_revision_{};
             std::vector<std::pair<std::uint64_t, std::uint64_t>> pending_active_;
             std::vector<std::pair<std::uint64_t, std::uint64_t>> current_active_;
     };
@@ -127,5 +141,11 @@ namespace grab::kernel::lifecycle
     perform_verb( SessionCore*         core,
                   const Action&        action,
                   const ActionOptions& options );
+
+    [[nodiscard]]
+    Result<Frame>
+    capture_verb( SessionCore*         core,
+                  const CaptureTarget& target,
+                  CaptureOptions       options );
 
 }    // namespace grab::kernel::lifecycle

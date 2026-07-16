@@ -120,7 +120,6 @@ target_link_libraries(grab_driver_x11_tests PRIVATE
 target_include_directories(grab_driver_x11_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests)
-gtest_discover_tests(grab_driver_x11_tests DISCOVERY_MODE PRE_TEST)
 
 add_executable(grab_integration_tests
     integration/test_exit_gate.cpp
@@ -173,9 +172,13 @@ if(GRAB_TEST_PROVISION_XVFB)
     gtest_discover_tests(grab_integration_tests
         DISCOVERY_MODE PRE_TEST
         PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
+    gtest_discover_tests(grab_driver_x11_tests
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
 else()
     gtest_discover_tests(grab_core_tests)
     gtest_discover_tests(grab_integration_tests DISCOVERY_MODE PRE_TEST)
+    gtest_discover_tests(grab_driver_x11_tests DISCOVERY_MODE PRE_TEST)
 endif()
 
 add_executable(grab_session_tests

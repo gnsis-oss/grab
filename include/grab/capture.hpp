@@ -2,10 +2,13 @@
 
 #include "grab/ids.hpp"
 #include "grab/image.hpp"
+#include "grab/query.hpp"
 #include "grab/space.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <string>
+#include <variant>
 
 namespace grab
 {
@@ -31,6 +34,14 @@ namespace grab
             FrameId       source_frame{};
             std::uint32_t transform_generation{};
             std::int64_t  timestamp_ns{};
+    };
+
+    using CaptureTarget =
+        std::variant<std::string /* output name */, Match /* window-grade node */>;
+
+    struct CaptureOptions
+    {
+            std::chrono::nanoseconds deadline{ std::chrono::seconds{ 2 } };
     };
 
 }    // namespace grab

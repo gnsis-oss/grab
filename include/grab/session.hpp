@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/capture.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
@@ -75,6 +76,11 @@ namespace grab
             Result<Receipt>
             perform( const Action&        action,
                      const ActionOptions& options = {} );
+
+            [[nodiscard]]
+            Result<Frame>
+            capture( const CaptureTarget& target,
+                     CaptureOptions       options = {} );
 
         private:
 

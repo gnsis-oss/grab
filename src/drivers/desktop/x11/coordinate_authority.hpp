@@ -52,6 +52,10 @@ namespace grab::drivers::desktop::x11
             graph() const noexcept;
 
             [[nodiscard]]
+            std::span<const grab::TransformRecord>
+            transforms() const noexcept;
+
+            [[nodiscard]]
             grab::CoordinateSpaceId
             global_space() const noexcept;
 
@@ -83,6 +87,7 @@ namespace grab::drivers::desktop::x11
             grab::CoordinateSpaceId                   global_space_{};
             grab::DisplayGeneration                   generation_{};
             std::vector<OutputSpace>                  outputs_;
+            std::vector<grab::TransformRecord>        transforms_;
     };
 
 }    // namespace grab::drivers::desktop::x11

@@ -79,11 +79,13 @@ namespace grab::drivers::desktop::x11
 
         std::vector<OutputSpace> next_outputs;
         next_outputs.reserve( outputs.size() );
+        std::vector<grab::TransformRecord> next_transforms;
+        next_transforms.reserve( outputs.size() );
         std::uint64_t mapping_id = 1U;
         for( const auto& output : outputs )
         {
             const auto output_space = next_graph->add_space( next_generation.value );
-            next_graph->add_transform( grab::TransformRecord{
+            next_transforms.push_back( grab::TransformRecord{
                 .source      = output_space,
                 .destination = next_global,
                 .map =
@@ -95,6 +97,7 @@ namespace grab::drivers::desktop::x11
                 .generation = next_generation.value,
                 .trust      = grab::TransformTrust::Exact,
             } );
+            next_graph->add_transform( next_transforms.back() );
             ++mapping_id;
             next_outputs.push_back( OutputSpace{
                 .name       = output.name,
@@ -118,6 +121,7 @@ namespace grab::drivers::desktop::x11
         global_space_ = next_global;
         generation_   = next_generation;
         outputs_      = std::move( next_outputs );
+        transforms_   = std::move( next_transforms );
         return {};
     }
 
@@ -125,6 +129,12 @@ namespace grab::drivers::desktop::x11
     CoordinateAuthority::graph() const noexcept
     {
         return graph_;
+    }
+
+    std::span<const grab::TransformRecord>
+    CoordinateAuthority::transforms() const noexcept
+    {
+        return transforms_;
     }
 
     grab::CoordinateSpaceId

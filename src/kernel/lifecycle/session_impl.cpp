@@ -1,4 +1,6 @@
+#include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "drivers/desktop/x11/x11_runtime.hpp"
+#include "grab/capture.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -24,7 +26,9 @@
 #include <cstdlib>
 #include <expected>
 #include <memory>
+#include <string>
 #include <utility>
+#include <variant>
 
 namespace grab::kernel::lifecycle
 {
@@ -102,6 +106,7 @@ namespace grab::kernel::lifecycle
         }
 
         auto runtime = std::make_unique<grab::drivers::desktop::x11::X11Runtime>();
+        auto* const            x11 = runtime.get();
         const OperationContext context{};
         auto                   started = runtime->start( context );
         if( !started.has_value() )
@@ -116,6 +121,7 @@ namespace grab::kernel::lifecycle
         // divergent instance. Test cores own their own registry.
         core->registry_        = runtime->target_registry();
         core->owned_runtime_   = std::move( runtime );
+        core->x11_runtime_     = x11;
         core->primary_runtime_ = core->owned_runtime_.get();
 
         auto attached          = core->attach( *core->owned_runtime_, context );
@@ -164,12 +170,23 @@ namespace grab::kernel::lifecycle
             return fail( ErrorCode::CapabilityUnavailable,
                          "session has no primary runtime" );
         }
-        // mapping_refresh stays empty until Task 6 wires the capture
-        // route's SpaceGraph transforms into it.
+        kernel::action::MappingRefreshHook mapping_refresh{};
+        if( x11_runtime_ != nullptr )
+        {
+            if( auto* const route = x11_runtime_->capture_route(); route != nullptr )
+            {
+                // Export the capture authority's SpaceGraph transforms into the
+                // receipt; the route outlives the transaction (runtime-scoped).
+                mapping_refresh = [route]( const Match&, const OperationContext& )
+                {
+                    return route->refresh_transforms();
+                };
+            }
+        }
         const kernel::action::Transaction transaction{
             *primary_runtime_,
             primaryTree,
-            {}
+            std::move( mapping_refresh )
         };
         auto outcome = transaction.perform( action, options );
         if( outcome.error.has_value() )
@@ -177,6 +194,50 @@ namespace grab::kernel::lifecycle
             return std::unexpected( std::move( *outcome.error ) );
         }
         return std::move( outcome.receipt );
+    }
+
+    Result<Frame>
+    SessionCore::capture( const CaptureTarget& target,
+                          CaptureOptions       options )
+    {
+        // Admission-time deadline check; the synchronous XShm capture path
+        // does not observe mid-flight deadlines yet.
+        const OperationContext context{
+            .deadline = Deadline::after( options.deadline ),
+        };
+        if( auto admitted = context.check(); !admitted.has_value() )
+        {
+            return std::unexpected( std::move( admitted.error() ) );
+        }
+        if( x11_runtime_ == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no display runtime for capture" );
+        }
+        auto* const route = x11_runtime_->capture_route();
+        if( route == nullptr )
+        {
+            // Surface the recorded open failure detail when there is one.
+            const auto* const open_error = x11_runtime_->capture_route_error();
+            std::string       message    = "session has no capture route";
+            if( open_error != nullptr )
+            {
+                message += ": ";
+                message += open_error->message;
+            }
+            return fail( ErrorCode::CapabilityUnavailable, std::move( message ) );
+        }
+        if( const auto* const output = std::get_if<std::string>( &target ) )
+        {
+            return route->capture_output( *output );
+        }
+        const auto& match  = std::get<Match>( target );
+        auto        native = x11_runtime_->resolve_native_window( match.ref );
+        if( !native.has_value() )
+        {
+            return std::unexpected( std::move( native.error() ) );
+        }
+        return route->capture_window( *native );
     }
 
     Result<void>
@@ -448,6 +509,19 @@ namespace grab::kernel::lifecycle
                          "session has no composed display stack" );
         }
         return core->perform( action, options );
+    }
+
+    Result<Frame>
+    capture_verb( SessionCore*         core,
+                  const CaptureTarget& target,
+                  CaptureOptions       options )
+    {
+        if( core == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no composed display stack" );
+        }
+        return core->capture( target, options );
     }
 
 }    // namespace grab::kernel::lifecycle

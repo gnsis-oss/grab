@@ -1,4 +1,5 @@
 #include "fake/fake_runtime.hpp"
+#include "grab/capture.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -19,6 +20,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <stop_token>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 // clang-format on
@@ -33,9 +36,12 @@ namespace
     constexpr grab::NodeId         performNode{ 1U };
     constexpr grab::NodeGeneration performGeneration{ 1U };
     constexpr grab::TreeEpoch      performEpoch{ 1U };
-    constexpr std::uint64_t        performRevision = 17U;
-    constexpr std::size_t          noRouteCommits  = 0U;
-    constexpr std::size_t          oneRouteCommit  = 1U;
+    constexpr std::uint64_t        performRevision         = 17U;
+    constexpr std::size_t          noRouteCommits          = 0U;
+    constexpr std::size_t          oneRouteCommit          = 1U;
+    constexpr std::string_view     missingOutputName       = "eDP-1";
+    constexpr std::uint64_t        captureSnapshotRevision = 1U;
+    constexpr std::uint64_t        captureWindowNodeId     = 1U;
 
     [[nodiscard]]
     grab::UiSnapshot
@@ -114,6 +120,39 @@ TEST( SessionVerbs,
                                       grab::Cardinality::ExactlyOne );
     ASSERT_FALSE( match.has_value() );
     EXPECT_EQ( match.error().code, grab::ErrorCode::NoMatch );
+}
+
+TEST( SessionVerbs,
+      CaptureWithoutDisplayRuntimeReturnsCapabilityUnavailable )
+{
+    grab::testing::FakeRuntime fake;
+    fake.inject_snapshot( grab::testing::tree::snapshot(
+        captureSnapshotRevision,
+        { grab::testing::tree::node( captureWindowNodeId, grab::role::window ) }
+    ) );
+
+    auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
+    ASSERT_NE( core, nullptr );
+    const grab::OperationContext context{};
+    ASSERT_TRUE( core->attach( fake, context ).has_value() );
+
+    const auto frame =
+        core->capture( grab::CaptureTarget{ std::string{ missingOutputName } } );
+    ASSERT_FALSE( frame.has_value() );
+    EXPECT_EQ( frame.error().code, grab::ErrorCode::CapabilityUnavailable );
+}
+
+TEST( SessionVerbs,
+      CaptureVerbOnNullCoreReturnsCapabilityUnavailable )
+{
+    const auto frame = grab::kernel::lifecycle::capture_verb(
+        nullptr,
+        grab::CaptureTarget{ std::string{ missingOutputName } },
+        {}
+    );
+
+    ASSERT_FALSE( frame.has_value() );
+    EXPECT_EQ( frame.error().code, grab::ErrorCode::CapabilityUnavailable );
 }
 
 TEST( SessionVerbs,

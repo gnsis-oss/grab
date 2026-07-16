@@ -12,6 +12,7 @@
 #include <memory>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace grab::drivers::desktop::x11
 {
@@ -118,6 +119,37 @@ namespace grab::drivers::desktop::x11
                 .space = output->space,
             }
         );
+    }
+
+    grab::Result<grab::Frame>
+    X11CaptureRoute::capture_window( std::uint32_t window )
+    {
+        auto refreshed = authority_.refresh();
+        if( !refreshed.has_value() )
+        {
+            return std::unexpected( std::move( refreshed.error() ) );
+        }
+
+        // The frame's pixels are window-local while the stamped space is the
+        // display-global space; per-window coordinate spaces land with the Wave-3
+        // single-connection unification.
+        return capturer_.capture_window_frame( window,
+                                               authority_.global_space(),
+                                               authority_.capture_generation() );
+    }
+
+    grab::Result<std::vector<grab::TransformRecord>>
+    X11CaptureRoute::refresh_transforms()
+    {
+        auto refreshed = authority_.refresh();
+        if( !refreshed.has_value() )
+        {
+            return std::unexpected( std::move( refreshed.error() ) );
+        }
+        return std::vector<grab::TransformRecord>{
+            authority_.transforms().begin(),
+            authority_.transforms().end()
+        };
     }
 
     const CoordinateAuthority&
