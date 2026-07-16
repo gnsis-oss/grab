@@ -78,3 +78,45 @@ TEST( X11CaptureRoute,
     EXPECT_EQ( transform->destination, route->global_space() );
     EXPECT_EQ( transform->trust, grab::TransformTrust::Exact );
 }
+
+TEST( X11CaptureRoute,
+      CaptureDisplayProducesFrame )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    auto route = grab::drivers::desktop::x11::X11CaptureRoute::open();
+    ASSERT_TRUE( route.has_value() );
+
+    auto frame = route->capture_display();
+    ASSERT_TRUE( frame.has_value() );
+    EXPECT_NE( frame->id.value, 0U );
+    EXPECT_EQ( frame->space, route->global_space() );
+    EXPECT_EQ( frame->generation, route->coordinate_authority().capture_generation() );
+    EXPECT_GT( frame->image.width, 0U );
+    EXPECT_GT( frame->image.height, 0U );
+}
+
+TEST( X11CaptureRoute,
+      CaptureRegionProducesFrame )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    auto route = grab::drivers::desktop::x11::X11CaptureRoute::open();
+    ASSERT_TRUE( route.has_value() );
+
+    auto frame = route->capture_region( 0, 0, 64, 48 );
+    ASSERT_TRUE( frame.has_value() );
+    EXPECT_EQ( frame->image.width, 64U );
+    EXPECT_EQ( frame->image.height, 48U );
+    EXPECT_EQ( frame->space, route->global_space() );
+    EXPECT_EQ( frame->generation, route->coordinate_authority().capture_generation() );
+    EXPECT_EQ( frame->content_rect.space, route->global_space() );
+}

@@ -138,6 +138,46 @@ namespace grab::drivers::desktop::x11
                                                authority_.capture_generation() );
     }
 
+    grab::Result<grab::Frame>
+    X11CaptureRoute::capture_display()
+    {
+        auto refreshed = authority_.refresh();
+        if( !refreshed.has_value() )
+        {
+            return std::unexpected( std::move( refreshed.error() ) );
+        }
+        return capturer_.capture_display_frame( authority_.global_space(),
+                                                authority_.capture_generation() );
+    }
+
+    grab::Result<grab::Frame>
+    X11CaptureRoute::capture_region( std::int16_t  x,
+                                     std::int16_t  y,
+                                     std::uint16_t width,
+                                     std::uint16_t height )
+    {
+        auto refreshed = authority_.refresh();
+        if( !refreshed.has_value() )
+        {
+            return std::unexpected( std::move( refreshed.error() ) );
+        }
+        const auto space = authority_.global_space();
+        return capturer_.capture_region_frame( x,
+                                               y,
+                                               width,
+                                               height,
+                                               space,
+                                               authority_.capture_generation(),
+                                               1.0,
+                                               grab::SpaceRect{
+                                                   .x = 0.0,
+                                                   .y = 0.0,
+                                                   .w = static_cast<double>( width ),
+                                                   .h = static_cast<double>( height ),
+                                                   .space = space,
+                                               } );
+    }
+
     grab::Result<std::vector<grab::TransformRecord>>
     X11CaptureRoute::refresh_transforms()
     {

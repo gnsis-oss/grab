@@ -30,10 +30,6 @@ namespace grab
 
             [[nodiscard]]
             grab::Result<Image>
-            window( std::uint32_t id );
-
-            [[nodiscard]]
-            grab::Result<Image>
             window_by_class( const std::vector<std::string>& wm_class_candidates );
 
             [[nodiscard]]

@@ -38,6 +38,17 @@ namespace grab::drivers::desktop::x11
             capture_window( std::uint32_t window );
 
             [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture_display();
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture_region( std::int16_t  x,
+                            std::int16_t  y,
+                            std::uint16_t width,
+                            std::uint16_t height );
+
+            [[nodiscard]]
             grab::Result<std::vector<grab::TransformRecord>>
             refresh_transforms();
 
