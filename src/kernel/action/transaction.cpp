@@ -663,6 +663,7 @@ namespace grab::kernel::action
         DiagnosticLog    log;
         OperationContext context{
             .deadline  = Deadline::after( options.deadline ),
+            .stop      = options.stop,
             .operation = detail::next_operation_id(),
             .log       = &log,
         };

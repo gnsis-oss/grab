@@ -2,10 +2,12 @@
 
 #include "grab/context.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
+#include "grab/trace.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "kernel/graph/tree_store.hpp"
 #include "spi/runtime.hpp"
@@ -57,6 +59,11 @@ namespace grab::kernel::lifecycle
                    QueueOptions      options = {} );
 
             [[nodiscard]]
+            Result<Receipt>
+            perform( const Action&        action,
+                     const ActionOptions& options = {} );
+
+            [[nodiscard]]
             EventBus&
             bus() noexcept;
 
@@ -68,7 +75,8 @@ namespace grab::kernel::lifecycle
             TargetRegistry&
             registry() noexcept;
 
-            // Precondition: this core was created by open(), not open_for_test().
+            // Precondition: this core was created by open(), or a runtime was
+            // attach()ed.
             [[nodiscard]]
             spi::Runtime&
             primary_runtime() noexcept;
@@ -93,7 +101,8 @@ namespace grab::kernel::lifecycle
             TreeStore       store_;
             TargetRegistry  owned_registry_;
             TargetRegistry* registry_{ &owned_registry_ };
-            std::unique_ptr<spi::Runtime> primary_runtime_;
+            std::unique_ptr<spi::Runtime> owned_runtime_;
+            spi::Runtime*                 primary_runtime_{};
             std::vector<spi::TreeSource*> attached_;
             std::uint64_t                 sink_batch_revision_{};
             std::uint64_t                 sink_previous_revision_{};
@@ -112,5 +121,11 @@ namespace grab::kernel::lifecycle
     watch_verb( SessionCore*      core,
                 SubscriptionScope scope,
                 QueueOptions      options );
+
+    [[nodiscard]]
+    Result<Receipt>
+    perform_verb( SessionCore*         core,
+                  const Action&        action,
+                  const ActionOptions& options );
 
 }    // namespace grab::kernel::lifecycle

@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <stop_token>
 #include <string>
 #include <variant>
 
@@ -26,6 +27,7 @@ namespace grab
             RoutePolicy              routing{ RoutePolicy::PreferSemantic };
             RetryClass               retry{ RetryClass::ResolveOnly };
             bool                     force{};
+            std::stop_token stop{};    // NOLINT(readability-redundant-member-init)
     };
 
     using ActionTarget = std::variant<Locator, Match>;

@@ -4,6 +4,7 @@
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
+#include "kernel/lifecycle/session_errors.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/lifecycle/startup_signal.hpp"
 
@@ -13,63 +14,11 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 
 namespace grab
 {
-    namespace
-    {
-
-        constexpr std::string_view sessionClosedMessage = "session is closed";
-        constexpr std::string_view threadStartStep      = "session reactor thread start";
-        constexpr std::string_view reactorRunStep       = "session reactor run";
-
-        [[nodiscard]]
-        grab::Error
-        internal_error( std::string_view step,
-                        std::string_view message )
-        {
-            return grab::Error{
-                .code       = grab::ErrorCode::InternalFault,
-                .message    = std::string{ step } + ": " + std::string{ message },
-                .capability = {},
-                .target     = {},
-                .attempts   = {},
-            };
-        }
-
-        [[nodiscard]]
-        grab::Error
-        exception_error( std::string_view      step,
-                         const std::exception& exception )
-        {
-            return internal_error( step, exception.what() );
-        }
-
-        [[nodiscard]]
-        grab::Error
-        unknown_exception_error( std::string_view step )
-        {
-            return internal_error( step, "unknown exception" );
-        }
-
-        [[nodiscard]]
-        grab::Error
-        session_closed_error()
-        {
-            return grab::Error{
-                .code       = grab::ErrorCode::SessionClosed,
-                .message    = std::string{ sessionClosedMessage },
-                .capability = {},
-                .target     = {},
-                .attempts   = {},
-            };
-        }
-
-    }    // namespace
 
     class Session::Impl
     {
@@ -158,12 +107,17 @@ namespace grab
         catch( const std::exception& exception )
         {
             close();
-            return std::unexpected( exception_error( threadStartStep, exception ) );
+            return std::unexpected(
+                kernel::lifecycle::exception_error( kernel::lifecycle::threadStartStep,
+                                                    exception )
+            );
         }
         catch( ... )
         {
             close();
-            return std::unexpected( unknown_exception_error( threadStartStep ) );
+            return std::unexpected( kernel::lifecycle::unknown_exception_error(
+                kernel::lifecycle::threadStartStep
+            ) );
         }
 
         auto start_result = ready.get();
@@ -215,7 +169,7 @@ namespace grab
     {
         if( !is_open() )
         {
-            return std::unexpected( session_closed_error() );
+            return std::unexpected( kernel::lifecycle::session_closed_error() );
         }
 
         reactor_.post( std::move( fn ) );
@@ -231,11 +185,16 @@ namespace grab
         }
         catch( const std::exception& exception )
         {
-            return std::unexpected( exception_error( reactorRunStep, exception ) );
+            return std::unexpected(
+                kernel::lifecycle::exception_error( kernel::lifecycle::reactorRunStep,
+                                                    exception )
+            );
         }
         catch( ... )
         {
-            return std::unexpected( unknown_exception_error( reactorRunStep ) );
+            return std::unexpected( kernel::lifecycle::unknown_exception_error(
+                kernel::lifecycle::reactorRunStep
+            ) );
         }
     }
 
@@ -312,6 +271,13 @@ namespace grab
         return kernel::lifecycle::watch_verb( impl_->core(),
                                               std::move( scope ),
                                               options );
+    }
+
+    grab::Result<Receipt>
+    Session::perform( const Action&        action,
+                      const ActionOptions& options )
+    {
+        return kernel::lifecycle::perform_verb( impl_->core(), action, options );
     }
 
 }    // namespace grab

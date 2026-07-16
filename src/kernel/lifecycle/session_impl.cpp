@@ -2,11 +2,14 @@
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
 #include "grab/relation.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
+#include "grab/trace.hpp"
+#include "kernel/action/transaction.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "kernel/graph/tree_store.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
@@ -27,6 +30,11 @@ namespace grab::kernel::lifecycle
 {
     namespace
     {
+
+        // Mirrors X11TreeSource::firstTree
+        // (src/drivers/desktop/x11/x11_tree_source.hpp): the single tree id every
+        // runtime tree source publishes today. Keep in sync.
+        constexpr std::uint32_t primaryTree = 1U;
 
         [[nodiscard]]
         EventKind
@@ -62,7 +70,7 @@ namespace grab::kernel::lifecycle
 
     SessionCore::~SessionCore()
     {
-        if( primary_runtime_ == nullptr )
+        if( owned_runtime_ == nullptr )
         {
             return;
         }
@@ -70,7 +78,7 @@ namespace grab::kernel::lifecycle
         try
         {
             static_cast<void>(
-                primary_runtime_->stop()
+                owned_runtime_->stop()
             );    // NOLINT(bugprone-unused-return-value)
         }
         catch( ... )
@@ -107,9 +115,10 @@ namespace grab::kernel::lifecycle
         // aliases into; expose that registry instead of owning a second,
         // divergent instance. Test cores own their own registry.
         core->registry_        = runtime->target_registry();
-        core->primary_runtime_ = std::move( runtime );
+        core->owned_runtime_   = std::move( runtime );
+        core->primary_runtime_ = core->owned_runtime_.get();
 
-        auto attached          = core->attach( *core->primary_runtime_, context );
+        auto attached          = core->attach( *core->owned_runtime_, context );
         if( !attached.has_value() )
         {
             return std::unexpected( std::move( attached.error() ) );
@@ -146,6 +155,30 @@ namespace grab::kernel::lifecycle
         return bus_.subscribe( std::move( scope ), options );
     }
 
+    Result<Receipt>
+    SessionCore::perform( const Action&        action,
+                          const ActionOptions& options )
+    {
+        if( primary_runtime_ == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no primary runtime" );
+        }
+        // mapping_refresh stays empty until Task 6 wires the capture
+        // route's SpaceGraph transforms into it.
+        const kernel::action::Transaction transaction{
+            *primary_runtime_,
+            primaryTree,
+            {}
+        };
+        auto outcome = transaction.perform( action, options );
+        if( outcome.error.has_value() )
+        {
+            return std::unexpected( std::move( *outcome.error ) );
+        }
+        return std::move( outcome.receipt );
+    }
+
     Result<void>
     SessionCore::attach( spi::Runtime&           runtime,
                          const OperationContext& context )
@@ -165,8 +198,6 @@ namespace grab::kernel::lifecycle
 
         if( *drained == 0U )
         {
-            static constexpr std::uint32_t primaryTree = 1U;
-
             // The X11 tree source has no update stream yet (Task 8), so prime it
             // with an explicit snapshot. Fake/test sources queue their initial
             // snapshot as an update.
@@ -187,6 +218,12 @@ namespace grab::kernel::lifecycle
         }
 
         attached_.push_back( source );
+        // Test cores gain their primary runtime from the first attach; open()
+        // cores already set the owned runtime.
+        if( primary_runtime_ == nullptr )
+        {
+            primary_runtime_ = &runtime;
+        }
         return {};
     }
 
@@ -398,6 +435,19 @@ namespace grab::kernel::lifecycle
                          "session has no composed display stack" );
         }
         return core->watch( std::move( scope ), options );
+    }
+
+    Result<Receipt>
+    perform_verb( SessionCore*         core,
+                  const Action&        action,
+                  const ActionOptions& options )
+    {
+        if( core == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no composed display stack" );
+        }
+        return core->perform( action, options );
     }
 
 }    // namespace grab::kernel::lifecycle

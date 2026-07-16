@@ -1,8 +1,10 @@
 #pragma once
 
+#include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
 #include "grab/result.hpp"
+#include "grab/trace.hpp"
 #include "grab/watch.hpp"
 #include "grab/workspace.hpp"
 
@@ -68,6 +70,11 @@ namespace grab
             Result<Subscription>
             watch( SubscriptionScope scope,
                    QueueOptions      options = {} );
+
+            [[nodiscard]]
+            Result<Receipt>
+            perform( const Action&        action,
+                     const ActionOptions& options = {} );
 
         private:
 
