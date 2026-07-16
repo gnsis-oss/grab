@@ -50,6 +50,12 @@ namespace grab
         AppContextUpdate   = 401U,
         BrowserTabSwitched = 500U,
         StateSnapshot      = 600U,
+        NodeAdded          = 700U,
+        NodeRemoved        = 701U,
+        NodeChanged        = 702U,
+        RelationAdded      = 703U,
+        RelationRemoved    = 704U,
+        ActiveChildChanged = 705U,
     };
 
     struct InputKey
@@ -118,6 +124,14 @@ namespace grab
             std::string json;
     };
 
+    struct GraphChange
+    {
+            std::uint64_t node            = 0U;
+            std::uint64_t related         = 0U;
+            std::uint32_t relation        = 0U;
+            std::uint64_t previous_active = 0U;
+    };
+
     using Payload = std::variant<InputKey,
                                  KeyCombo,
                                  MouseClick,
@@ -127,7 +141,8 @@ namespace grab
                                  A11yEvent,
                                  IntegrationEvent,
                                  BrowserTab,
-                                 StateSnapshot>;
+                                 StateSnapshot,
+                                 GraphChange>;
 
     // Snapshot-scoped value identity for the affected UI node; unlike WidgetRef,
     // this is not a live handle. The subject is distinct from the event's

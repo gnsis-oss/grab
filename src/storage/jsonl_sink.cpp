@@ -300,6 +300,23 @@ namespace grab::storage
 
         [[nodiscard]]
         grab::Result<OrderedJson>
+        serialize_payload( grab::EventKind,
+                           const grab::GraphChange& payload )
+        {
+            return OrderedJson{
+                {          std::string{ grab::field_name( grab::PayloadField::Node ) },
+                 payload.node           },
+                {       std::string{ grab::field_name( grab::PayloadField::Related ) },
+                 payload.related        },
+                {      std::string{ grab::field_name( grab::PayloadField::Relation ) },
+                 payload.relation       },
+                {std::string{ grab::field_name( grab::PayloadField::PreviousActive ) },
+                 payload.previous_active},
+            };
+        }
+
+        [[nodiscard]]
+        grab::Result<OrderedJson>
         serialize_payload( grab::EventKind      kind,
                            const grab::Payload& payload )
         {

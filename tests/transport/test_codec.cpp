@@ -45,6 +45,12 @@ namespace
     constexpr std::uint64_t    subjectRevision      = 11U;
     constexpr std::uint64_t    beforeRevision       = 12U;
     constexpr std::uint64_t    afterRevision        = 13U;
+    constexpr std::uint64_t    graphNode            = 7U;
+    constexpr std::uint64_t    graphRelated         = 9U;
+    constexpr std::uint32_t    graphRelation        = 5U;
+    constexpr std::uint64_t    graphPreviousActive  = 3U;
+    constexpr std::uint64_t    graphBeforeRevision  = 41U;
+    constexpr std::uint64_t    graphAfterRevision   = 42U;
     constexpr std::uint8_t     causeMarker          = 0XA5U;
     constexpr int              unknownKindNumber    = 9'999;
     constexpr int              oversizedEntryPad    = 1;
@@ -155,6 +161,18 @@ namespace
     }
 
     [[nodiscard]]
+    grab::GraphChange
+    graph_change()
+    {
+        return grab::GraphChange{
+            .node            = graphNode,
+            .related         = graphRelated,
+            .relation        = graphRelation,
+            .previous_active = graphPreviousActive,
+        };
+    }
+
+    [[nodiscard]]
     grab::A11yEvent
     a11y_event()
     {
@@ -234,6 +252,16 @@ namespace
                         windowCategory,
                         window_change() ),
             make_event( grab::EventKind::WindowClosed, windowCategory, window_change() ),
+            make_event( grab::EventKind::NodeAdded, windowCategory, graph_change() ),
+            make_event( grab::EventKind::NodeRemoved, windowCategory, graph_change() ),
+            make_event( grab::EventKind::NodeChanged, windowCategory, graph_change() ),
+            make_event( grab::EventKind::RelationAdded, windowCategory, graph_change() ),
+            make_event( grab::EventKind::RelationRemoved,
+                        windowCategory,
+                        graph_change() ),
+            make_event( grab::EventKind::ActiveChildChanged,
+                        windowCategory,
+                        graph_change() ),
             make_event( grab::EventKind::A11yButtonClicked, a11yCategory, a11y_event() ),
             make_event( grab::EventKind::A11yMenuOpened, a11yCategory, a11y_event() ),
             make_event( grab::EventKind::A11yMenuClosed, a11yCategory, a11y_event() ),
@@ -302,6 +330,16 @@ namespace
         EXPECT_EQ( actual.title, expected.title );
         EXPECT_EQ( actual.prev_title, expected.prev_title );
         EXPECT_DOUBLE_EQ( actual.duration_s, expected.duration_s );
+    }
+
+    void
+    expect_payload_value_eq( const grab::GraphChange& expected,
+                             const grab::GraphChange& actual )
+    {
+        EXPECT_EQ( actual.node, expected.node );
+        EXPECT_EQ( actual.related, expected.related );
+        EXPECT_EQ( actual.relation, expected.relation );
+        EXPECT_EQ( actual.previous_active, expected.previous_active );
     }
 
     void
@@ -475,6 +513,26 @@ TEST( Codec,
         ASSERT_TRUE( decoded.has_value() );
         expect_event_eq_after_wire( event, *decoded );
     }
+}
+
+TEST( Codec,
+      GraphChangeRoundTripsWithSubjectAndRevisions )
+{
+    grab::Event event;
+    event.kind            = grab::EventKind::ActiveChildChanged;
+    event.category        = windowCategory;
+    event.before_revision = graphBeforeRevision;
+    event.after_revision  = graphAfterRevision;
+    event.payload         = graph_change();
+
+    const auto wire       = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() );
+
+    const auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() );
+    EXPECT_EQ( decoded->after_revision, graphAfterRevision );
+    EXPECT_EQ( std::get<grab::GraphChange>( decoded->payload ).previous_active,
+               graphPreviousActive );
 }
 
 TEST( Codec,

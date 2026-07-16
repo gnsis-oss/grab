@@ -736,6 +736,22 @@ namespace grab::transport
                     return decode_browser_tab( wire );
                 case grab::EventKind::StateSnapshot :
                     return decode_state_snapshot( wire );
+                case grab::EventKind::NodeAdded :
+                case grab::EventKind::NodeRemoved :
+                case grab::EventKind::NodeChanged :
+                case grab::EventKind::RelationAdded :
+                case grab::EventKind::RelationRemoved :
+                case grab::EventKind::ActiveChildChanged :
+                    if( !wire.has_graph_change() )
+                    {
+                        return protocol_error( "missing graph_change payload" );
+                    }
+                    return grab::GraphChange{
+                        .node            = wire.graph_change().node(),
+                        .related         = wire.graph_change().related(),
+                        .relation        = wire.graph_change().relation(),
+                        .previous_active = wire.graph_change().previous_active(),
+                    };
                 case grab::EventKind::Unspecified :
                     return protocol_error( "unknown event kind" );
             }
@@ -830,6 +846,21 @@ namespace grab::transport
                 encode_state_snapshot( wire,
                                        std::get<grab::StateSnapshot>( event.payload ) );
                 break;
+            case grab::EventKind::NodeAdded :
+            case grab::EventKind::NodeRemoved :
+            case grab::EventKind::NodeChanged :
+            case grab::EventKind::RelationAdded :
+            case grab::EventKind::RelationRemoved :
+            case grab::EventKind::ActiveChildChanged :
+                {
+                    const auto& payload = std::get<grab::GraphChange>( event.payload );
+                    auto* const graph_change = wire.mutable_graph_change();
+                    graph_change->set_node( payload.node );
+                    graph_change->set_related( payload.related );
+                    graph_change->set_relation( payload.relation );
+                    graph_change->set_previous_active( payload.previous_active );
+                    break;
+                }
             case grab::EventKind::Unspecified :
                 return protocol_error( "unknown event kind" );
         }

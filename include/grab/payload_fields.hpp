@@ -31,6 +31,10 @@ namespace grab
         Json,
         TabTitle,
         PrevTabTitle,
+        Node,
+        Related,
+        Relation,
+        PreviousActive,
         Count,
     };
 
@@ -59,6 +63,10 @@ namespace grab
                 enum_entry( PayloadField::Json, "json" ),
                 enum_entry( PayloadField::TabTitle, "tab_title" ),
                 enum_entry( PayloadField::PrevTabTitle, "prev_tab_title" ),
+                enum_entry( PayloadField::Node, "node" ),
+                enum_entry( PayloadField::Related, "related" ),
+                enum_entry( PayloadField::Relation, "relation" ),
+                enum_entry( PayloadField::PreviousActive, "previous_active" ),
             } ),
         };
         static_assert( enum_table_has_count( payloadFieldNames,

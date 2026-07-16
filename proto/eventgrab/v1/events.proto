@@ -42,6 +42,13 @@ enum EventKind {
   BROWSER_TAB_SWITCHED        = 500;
   // State (tier 3)
   STATE_SNAPSHOT              = 600;
+  // Graph (tier 1)
+  NODE_ADDED                  = 700;
+  NODE_REMOVED                = 701;
+  NODE_CHANGED                = 702;
+  RELATION_ADDED              = 703;
+  RELATION_REMOVED            = 704;
+  ACTIVE_CHILD_CHANGED        = 705;
 }
 
 enum EventOrigin {
@@ -59,6 +66,13 @@ message EventSubject {
   uint64 revision              = 5;
 }
 
+message GraphChange {
+  uint64 node                  = 1;
+  uint64 related               = 2;
+  uint32 relation              = 3;
+  uint64 previous_active       = 4;
+}
+
 message Event {
   EventKind kind              = 1;
   EventCategory category      = 2;
@@ -69,6 +83,7 @@ message Event {
   optional bytes cause         = 7;
   optional uint64 before_revision = 8;
   optional uint64 after_revision = 9;
+  GraphChange graph_change     = 10;
 }
 
 message EventFilter {

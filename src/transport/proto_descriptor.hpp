@@ -62,6 +62,14 @@ namespace grab::transport
         proto_kind_row( grab::EventKind::BrowserTabSwitched,
                         eventgrab::v1::BROWSER_TAB_SWITCHED ),
         proto_kind_row( grab::EventKind::StateSnapshot, eventgrab::v1::STATE_SNAPSHOT ),
+        proto_kind_row( grab::EventKind::NodeAdded, eventgrab::v1::NODE_ADDED ),
+        proto_kind_row( grab::EventKind::NodeRemoved, eventgrab::v1::NODE_REMOVED ),
+        proto_kind_row( grab::EventKind::NodeChanged, eventgrab::v1::NODE_CHANGED ),
+        proto_kind_row( grab::EventKind::RelationAdded, eventgrab::v1::RELATION_ADDED ),
+        proto_kind_row( grab::EventKind::RelationRemoved,
+                        eventgrab::v1::RELATION_REMOVED ),
+        proto_kind_row( grab::EventKind::ActiveChildChanged,
+                        eventgrab::v1::ACTIVE_CHILD_CHANGED ),
     } );
 
     struct ProtoCategoryRow
