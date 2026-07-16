@@ -7,20 +7,32 @@
 #include "codec/png.hpp"
 #include "core/doctor.hpp"
 #include "core/prober.hpp"
+#include "core/reactor.hpp"
 #include "core/registry.hpp"
-#include "grab/enum_table.hpp"
+#include "event/window_x11.hpp"
+#include "grab/capture.hpp"
+#include "grab/command_descriptor.hpp"
+#include "grab/event.hpp"
+#include "grab/event_bus.hpp"
 #include "grab/geometry/rectangle.hpp"
 #include "grab/image.hpp"
 #include "grab/input.hpp"
+#include "grab/interaction.hpp"
+#include "grab/locator.hpp"
 #include "grab/pointer_button.hpp"
+#include "grab/query.hpp"
 #include "grab/result.hpp"
+#include "grab/role.hpp"
 #include "grab/screen.hpp"
+#include "grab/session.hpp"
+#include "grab/trace.hpp"
+#include "grab/ui.hpp"
 #include "image/compare.hpp"
 #include "notify/notifier.hpp"
+#include "screen/window_match.hpp"
 #include "screen/workflow.hpp"
 #include "service/daemon.hpp"
 
-#include <array>
 #include <charconv>
 #include <condition_variable>
 #include <cstddef>
@@ -45,6 +57,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -58,51 +71,16 @@ namespace
     constexpr char          upperDimensionSeparator = 'X';
     constexpr std::uint64_t noDiffPixels            = 0U;
     constexpr std::time_t   signalPollSeconds       = 0;
-    constexpr auto          signalPollNanoseconds = decltype( timespec{}.tv_nsec ){ 0 };
+    constexpr auto signalPollNanoseconds = decltype( timespec{}.tv_nsec ){ 100'000'000 };
 
     enum class CaptureTarget : std::uint8_t
     {
         None,
         Window,
+        Output,
         Display,
         Region,
     };
-
-    enum class Command : std::uint8_t
-    {
-        Doctor,
-        Daemon,
-        Type,
-        Click,
-        Drag,
-        DragCurve,
-        Capture,
-        Batch,
-        Compare,
-        Watch,
-        Key,
-        Session,
-        Count,
-    };
-
-    constexpr auto commandNames = grab::EnumTable{
-        std::to_array( {
-            grab::enum_entry( Command::Doctor, "doctor" ),
-            grab::enum_entry( Command::Daemon, "daemon" ),
-            grab::enum_entry( Command::Type, "type" ),
-            grab::enum_entry( Command::Click, "click" ),
-            grab::enum_entry( Command::Drag, "drag" ),
-            grab::enum_entry( Command::DragCurve, "drag-curve" ),
-            grab::enum_entry( Command::Capture, "capture" ),
-            grab::enum_entry( Command::Batch, "batch" ),
-            grab::enum_entry( Command::Compare, "compare" ),
-            grab::enum_entry( Command::Watch, "watch" ),
-            grab::enum_entry( Command::Key, "key" ),
-            grab::enum_entry( Command::Session, "session" ),
-        } ),
-    };
-    static_assert( grab::enum_table_has_count( commandNames,
-                                               Command::Count ) );
 
     using CaptureRegion = grab::geometry::Rectangle;
 
@@ -110,6 +88,8 @@ namespace
     {
             CaptureTarget         target = CaptureTarget::None;
             std::string           wm_class;
+            std::string           output_name;
+            std::string           endpoint;
             CaptureRegion         region;
             std::filesystem::path output;
             bool                  has_output = false;
@@ -132,6 +112,7 @@ namespace
     struct WatchOptions
     {
             std::string           wm_class;
+            std::string           endpoint;
             std::filesystem::path output;
             bool                  has_window = false;
             bool                  has_output = false;
@@ -140,17 +121,24 @@ namespace
     struct TypeOptions
     {
             std::string text;
+            std::string locator;
+            std::string endpoint;
             const char* display = nullptr;
             std::string layout;
-            bool        has_text = false;
+            bool        has_text    = false;
+            bool        has_locator = false;
     };
 
     struct ClickOptions
     {
             grab::input::Point at;
-            const char*        display = nullptr;
-            std::uint8_t       button  = grab::input::primaryButton;
-            bool               has_at  = false;
+            std::string        locator;
+            std::string        endpoint;
+            const char*        display      = nullptr;
+            std::uint8_t       button       = grab::input::primaryButton;
+            bool               has_at       = false;
+            bool               has_locator  = false;
+            bool               has_endpoint = false;
     };
 
     struct DragOptions
@@ -161,6 +149,26 @@ namespace
             bool               has_from = false;
             bool               has_to   = false;
     };
+
+    [[nodiscard]]
+    grab::Result<grab::client::Client>
+    make_verb_client( const std::string& endpoint )
+    {
+        if( !endpoint.empty() )
+        {
+            return grab::client::Client{
+                std::make_unique<grab::client::UnixSocketTransport>( endpoint )
+            };
+        }
+        auto session = grab::Session::open( grab::SessionOptions{} );
+        if( !session.has_value() )
+        {
+            return std::unexpected( std::move( session.error() ) );
+        }
+        return grab::client::Client{
+            std::make_unique<grab::client::LoopbackTransport>( std::move( *session ) )
+        };
+    }
 
     struct SignalState
     {
@@ -192,8 +200,10 @@ namespace
         ( void )std::fputs( "usage: grab doctor [--json]\n"
                             "       grab daemon [--endpoint ENDPOINT] [--store DIR]\n",
                             stderr );
-        ( void )std::fputs( "       grab type --text TEXT [--display D] [--layout L]\n"
+        ( void )std::fputs( "       grab type --text TEXT [--display D] [--layout L] "
+                            "[--locator LOCATOR [--endpoint ENDPOINT]]\n"
                             "       grab click --at X,Y [--button N] [--display D]\n"
+                            "       grab click --locator LOCATOR [--endpoint ENDPOINT]\n"
                             "       grab drag --from X,Y --to X,Y [--display D]\n"
                             "       grab key --window APP --keysym NAME [--display D] "
                             "[--layout L]\n",
@@ -202,6 +212,8 @@ namespace
                             "[--display D]\n",
                             stderr );
         ( void )std::fputs( "       grab capture --window WMCLASS --out FILE.png\n"
+                            "       grab capture --output NAME --out FILE.png "
+                            "[--endpoint ENDPOINT]\n"
                             "       grab capture --display --out FILE.png\n"
                             "       grab capture --region X,Y,WxH --out FILE.png\n",
                             stderr );
@@ -555,9 +567,13 @@ namespace
         constexpr std::string_view textFlag{ "--text" };
         constexpr std::string_view displayFlag{ "--display" };
         constexpr std::string_view layoutFlag{ "--layout" };
+        constexpr std::string_view locatorFlag{ "--locator" };
+        constexpr std::string_view endpointFlag{ "--endpoint" };
 
         TypeOptions                options;
-        auto                       current = args.begin();
+        bool                       has_layout   = false;
+        bool                       has_endpoint = false;
+        auto                       current      = args.begin();
         while( current != args.end() )
         {
             const std::string_view arg = *current;
@@ -595,6 +611,43 @@ namespace
                                        "--layout requires a value" );
                 }
                 options.layout = *current;
+                has_layout     = true;
+                ++current;
+                continue;
+            }
+
+            if( arg == locatorFlag )
+            {
+                if( options.has_locator )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "type accepts one --locator" );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--locator requires a value" );
+                }
+                options.locator     = *current;
+                options.has_locator = true;
+                ++current;
+                continue;
+            }
+
+            if( arg == endpointFlag )
+            {
+                if( has_endpoint )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "type accepts one --endpoint" );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--endpoint requires a value" );
+                }
+                options.endpoint = *current;
+                has_endpoint     = true;
                 ++current;
                 continue;
             }
@@ -608,6 +661,16 @@ namespace
             return grab::fail( grab::ErrorCode::InvalidArgument,
                                "type requires --text" );
         }
+        if( options.has_locator && ( options.display != nullptr || has_layout ) )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "--display/--layout are not supported with --locator" );
+        }
+        if( has_endpoint && !options.has_locator )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "--endpoint requires --locator" );
+        }
         return options;
     }
 
@@ -618,9 +681,12 @@ namespace
         constexpr std::string_view atFlag{ "--at" };
         constexpr std::string_view buttonFlag{ "--button" };
         constexpr std::string_view displayFlag{ "--display" };
+        constexpr std::string_view locatorFlag{ "--locator" };
+        constexpr std::string_view endpointFlag{ "--endpoint" };
 
         ClickOptions               options;
-        auto                       current = args.begin();
+        bool                       has_button = false;
+        auto                       current    = args.begin();
         while( current != args.end() )
         {
             const std::string_view arg = *current;
@@ -656,6 +722,7 @@ namespace
                     return std::unexpected( std::move( button.error() ) );
                 }
                 options.button = *button;
+                has_button     = true;
                 ++current;
                 continue;
             }
@@ -672,13 +739,60 @@ namespace
                 continue;
             }
 
+            if( arg == locatorFlag )
+            {
+                if( options.has_locator )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "click accepts one --locator" );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--locator requires a value" );
+                }
+                options.locator     = *current;
+                options.has_locator = true;
+                ++current;
+                continue;
+            }
+
+            if( arg == endpointFlag )
+            {
+                if( options.has_endpoint )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "click accepts one --endpoint" );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--endpoint requires a value" );
+                }
+                options.endpoint     = *current;
+                options.has_endpoint = true;
+                ++current;
+                continue;
+            }
+
             return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown option for click: " + std::string{ arg } );
         }
 
-        if( !options.has_at )
+        if( options.has_at == options.has_locator )
         {
-            return grab::fail( grab::ErrorCode::InvalidArgument, "click requires --at" );
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "click requires exactly one of --at or --locator" );
+        }
+        if( !options.has_at && ( has_button || options.display != nullptr ) )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "--button/--display require --at" );
+        }
+        if( options.has_endpoint && !options.has_locator )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "--endpoint requires --locator" );
         }
         return options;
     }
@@ -774,12 +888,15 @@ namespace
     parse_capture_options( std::span<char*> args )
     {
         constexpr std::string_view windowFlag{ "--window" };
+        constexpr std::string_view outputFlag{ "--output" };
         constexpr std::string_view displayFlag{ "--display" };
         constexpr std::string_view regionFlag{ "--region" };
         constexpr std::string_view outFlag{ "--out" };
+        constexpr std::string_view endpointFlag{ "--endpoint" };
 
         CaptureOptions             options;
-        auto                       current = args.begin();
+        bool                       has_endpoint = false;
+        auto                       current      = args.begin();
         while( current != args.end() )
         {
             const std::string_view arg = *current;
@@ -798,6 +915,24 @@ namespace
                 }
                 options.target   = CaptureTarget::Window;
                 options.wm_class = *current;
+                ++current;
+                continue;
+            }
+
+            if( arg == outputFlag )
+            {
+                auto target = require_no_capture_target( options );
+                if( !target.has_value() )
+                {
+                    return std::unexpected( std::move( target.error() ) );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--output requires a value" );
+                }
+                options.target      = CaptureTarget::Output;
+                options.output_name = *current;
                 ++current;
                 continue;
             }
@@ -849,6 +984,24 @@ namespace
                 continue;
             }
 
+            if( arg == endpointFlag )
+            {
+                if( has_endpoint )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "capture accepts one --endpoint" );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--endpoint requires a value" );
+                }
+                options.endpoint = *current;
+                has_endpoint     = true;
+                ++current;
+                continue;
+            }
+
             return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown option for capture: " + std::string{ arg } );
         }
@@ -856,12 +1009,21 @@ namespace
         if( options.target == CaptureTarget::None )
         {
             return grab::fail( grab::ErrorCode::InvalidArgument,
-                               "capture requires --window, --display, or --region" );
+                               "capture requires --window, --output, --display, or "
+                               "--region" );
         }
         if( !options.has_output || options.output.empty() )
         {
             return grab::fail( grab::ErrorCode::InvalidArgument,
                                "capture requires --out" );
+        }
+        if( has_endpoint &&
+            options.target !=
+            CaptureTarget::Output &&
+            options.target != CaptureTarget::Window )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "--endpoint requires --output or --window" );
         }
         return options;
     }
@@ -969,9 +1131,11 @@ namespace
     {
         constexpr std::string_view windowFlag{ "--window" };
         constexpr std::string_view outFlag{ "--out" };
+        constexpr std::string_view endpointFlag{ "--endpoint" };
 
         WatchOptions               options;
-        auto                       current = args.begin();
+        bool                       has_endpoint = false;
+        auto                       current      = args.begin();
         while( current != args.end() )
         {
             const std::string_view arg = *current;
@@ -1012,6 +1176,24 @@ namespace
                 continue;
             }
 
+            if( arg == endpointFlag )
+            {
+                if( has_endpoint )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "watch accepts one --endpoint" );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--endpoint requires a value" );
+                }
+                options.endpoint = *current;
+                has_endpoint     = true;
+                ++current;
+                continue;
+            }
+
             return grab::fail( grab::ErrorCode::InvalidArgument,
                                "unknown option for watch: " + std::string{ arg } );
         }
@@ -1031,8 +1213,6 @@ namespace
     {
         switch( options.target )
         {
-            case CaptureTarget::Window :
-                return screen.window_by_class( { options.wm_class } );
             case CaptureTarget::Display :
                 return screen.display();
             case CaptureTarget::Region :
@@ -1042,6 +1222,8 @@ namespace
                     static_cast<std::uint16_t>( options.region.width ),
                     static_cast<std::uint16_t>( options.region.height )
                 );
+            case CaptureTarget::Window :
+            case CaptureTarget::Output :
             case CaptureTarget::None :
                 return grab::fail( grab::ErrorCode::InvalidArgument,
                                    "capture target is missing" );
@@ -1089,6 +1271,73 @@ namespace
         }
 
         return {};
+    }
+
+    [[nodiscard]]
+    bool
+    drain_watch_events( grab::client::SubscriptionStream& stream,
+                        grab::client::Client&             capture_client,
+                        const std::vector<std::string>&   candidates,
+                        const std::filesystem::path&      output,
+                        std::uint32_t&                    captured,
+                        std::string&                      failure )
+    {
+        while( true )
+        {
+            auto next = stream.try_next();
+            if( !next.has_value() )
+            {
+                failure = next.error().message;
+                return false;
+            }
+            if( !next->has_value() )
+            {
+                return true;
+            }
+            const auto* event = std::get_if<grab::Event>( &**next );
+            if( event == nullptr || event->kind != grab::EventKind::WindowTitleChanged )
+            {
+                continue;
+            }
+            const auto* change = std::get_if<grab::WindowChange>( &event->payload );
+            if( change ==
+                nullptr ||
+                !grab::screen::wm_class_matches_any( change->app, candidates ) )
+            {
+                continue;
+            }
+            const auto locator = grab::sel::all(
+                { grab::sel::role( grab::role::window ),
+                  grab::sel::property( grab::property::window_class, change->app ) }
+            );
+            auto match = capture_client.resolve( locator );
+            if( !match.has_value() )
+            {
+                failure = match.error().message;
+                return false;
+            }
+            auto frame =
+                capture_client.capture( grab::CaptureTarget{ std::move( *match ) },
+                                        grab::CaptureOptions{} );
+            if( !frame.has_value() )
+            {
+                failure = frame.error().message;
+                return false;
+            }
+            auto encoded = grab::codec::encode_png( frame->image );
+            if( !encoded.has_value() )
+            {
+                failure = encoded.error().message;
+                return false;
+            }
+            auto written = write_png_file( output, *encoded );
+            if( !written.has_value() )
+            {
+                failure = written.error().message;
+                return false;
+            }
+            ++captured;
+        }
     }
 
     void
@@ -1167,6 +1416,36 @@ namespace
             return usageError;
         }
 
+        if( options->has_locator )
+        {
+            auto locator = grab::Locator::from_string( options->locator );
+            if( !locator.has_value() )
+            {
+                print_error( locator.error().message );
+                print_usage();
+                return usageError;
+            }
+            auto client = make_verb_client( options->endpoint );
+            if( !client.has_value() )
+            {
+                print_fatal( client.error().message.c_str() );
+                return runtimeError;
+            }
+            auto receipt = client->perform(
+                grab::TypeText{
+                    .target = std::move( *locator ),
+                    .text   = options->text,
+                },
+                grab::ActionOptions{}
+            );
+            if( !receipt.has_value() )
+            {
+                print_fatal( receipt.error().message.c_str() );
+                return runtimeError;
+            }
+            return 0;
+        }
+
         auto input = grab::Input::open( options->display, options->layout );
         if( !input.has_value() )
         {
@@ -1192,6 +1471,32 @@ namespace
             print_error( options.error().message );
             print_usage();
             return usageError;
+        }
+
+        if( options->has_locator )
+        {
+            auto locator = grab::Locator::from_string( options->locator );
+            if( !locator.has_value() )
+            {
+                print_error( locator.error().message );
+                print_usage();
+                return usageError;
+            }
+            auto client = make_verb_client( options->endpoint );
+            if( !client.has_value() )
+            {
+                print_fatal( client.error().message.c_str() );
+                return runtimeError;
+            }
+            auto receipt =
+                client->perform( grab::Click{ .target = std::move( *locator ) },
+                                 grab::ActionOptions{} );
+            if( !receipt.has_value() )
+            {
+                print_fatal( receipt.error().message.c_str() );
+                return runtimeError;
+            }
+            return 0;
         }
 
         auto input = grab::Input::open( options->display );
@@ -1248,6 +1553,61 @@ namespace
             print_error( options.error().message );
             print_usage();
             return usageError;
+        }
+
+        if( options->target ==
+            CaptureTarget::Output ||
+            options->target == CaptureTarget::Window )
+        {
+            auto client = make_verb_client( options->endpoint );
+            if( !client.has_value() )
+            {
+                print_fatal( client.error().message.c_str() );
+                return runtimeError;
+            }
+            grab::Result<grab::Frame> frame =
+                grab::fail( grab::ErrorCode::InvalidArgument,
+                            "capture target is missing" );
+            if( options->target == CaptureTarget::Output )
+            {
+                frame = client->capture( grab::CaptureTarget{ options->output_name },
+                                         grab::CaptureOptions{} );
+            }
+            else
+            {
+                const auto locator = grab::sel::all(
+                    { grab::sel::role( grab::role::window ),
+                      grab::sel::property( grab::property::window_class,
+                                           options->wm_class ) }
+                );
+                auto match = client->resolve( locator );
+                if( !match.has_value() )
+                {
+                    print_fatal( match.error().message.c_str() );
+                    return runtimeError;
+                }
+                frame = client->capture( grab::CaptureTarget{ std::move( *match ) },
+                                         grab::CaptureOptions{} );
+            }
+            if( !frame.has_value() )
+            {
+                print_fatal( frame.error().message.c_str() );
+                return runtimeError;
+            }
+            auto encoded = grab::codec::encode_png( frame->image );
+            if( !encoded.has_value() )
+            {
+                print_fatal( encoded.error().message.c_str() );
+                return runtimeError;
+            }
+            auto written = write_png_file( options->output, *encoded );
+            if( !written.has_value() )
+            {
+                print_fatal( written.error().message.c_str() );
+                return runtimeError;
+            }
+            print_capture_success( options->output, frame->image );
+            return 0;
         }
 
         auto screen = grab::Screen::open();
@@ -1358,6 +1718,11 @@ namespace
             print_usage();
             return usageError;
         }
+        if( !options->endpoint.empty() )
+        {
+            print_fatal( "watch over a remote endpoint is not yet supported" );
+            return runtimeError;
+        }
 
         sigset_t signals{};
         if( !configure_daemon_signal_mask( signals ) )
@@ -1366,33 +1731,90 @@ namespace
             return runtimeError;
         }
 
-        auto screen = grab::Screen::open();
-        if( !screen.has_value() )
+        // Title-change detection: a local WindowTracker feeds a bus that the
+        // client subscribes to over the loopback transport.
+        grab::EventBus      bus;
+
+        grab::core::Reactor reactor;
+        std::thread         reactor_thread(
+            [&reactor]
+            {
+                auto result = reactor.run();
+                static_cast<void>( result );
+            }
+        );
+
+        auto tracker = grab::event::WindowTracker::start( nullptr, reactor, bus );
+        if( !tracker.has_value() )
         {
+            reactor.stop();
+            reactor_thread.join();
             restore_daemon_signal_mask( signals );
-            print_fatal( screen.error().message.c_str() );
+            print_fatal( tracker.error().message.c_str() );
+            return runtimeError;
+        }
+
+        grab::client::LoopbackTransport event_transport{ bus };
+        grab::client::Client            event_client{ event_transport };
+        auto stream         = event_client.subscribe( grab::EventFilter{
+            .kinds      = { grab::EventKind::WindowTitleChanged },
+            .categories = {},
+        } );
+        auto capture_client = make_verb_client( std::string{} );
+        if( !stream.has_value() || !capture_client.has_value() )
+        {
+            const std::string failure = !stream.has_value()
+                                          ? stream.error().message
+                                          : capture_client.error().message;
+            tracker->stop();
+            reactor.stop();
+            reactor_thread.join();
+            restore_daemon_signal_mask( signals );
+            print_fatal( failure.c_str() );
             return runtimeError;
         }
 
         ( void )std::fputs( "watching for title changes; press Ctrl-C to stop\n",
                             stdout );
-        auto captured =
-            grab::screen::watch_capture( *screen,
-                                         std::vector<std::string>{ options->wm_class },
-                                         options->output.string(),
-                                         [&signals]
-                                         {
-                                             return watch_signal_pending( signals );
-                                         } );
-
-        restore_daemon_signal_mask( signals );
-        if( !captured.has_value() )
+        const std::vector<std::string> candidates =
+            grab::screen::normalized_wm_class_candidates( { options->wm_class } );
+        std::uint32_t captured = 0U;
+        bool          failed   = false;
+        std::string   failure;
+        while( !watch_signal_pending( signals ) )
         {
-            print_fatal( captured.error().message.c_str() );
+            if( !drain_watch_events( **stream,
+                                     *capture_client,
+                                     candidates,
+                                     options->output,
+                                     captured,
+                                     failure ) )
+            {
+                failed = true;
+                break;
+            }
+        }
+        if( !failed )
+        {
+            failed = !drain_watch_events( **stream,
+                                          *capture_client,
+                                          candidates,
+                                          options->output,
+                                          captured,
+                                          failure );
+        }
+
+        tracker->stop();
+        reactor.stop();
+        reactor_thread.join();
+        restore_daemon_signal_mask( signals );
+        if( failed )
+        {
+            print_fatal( failure.c_str() );
             return runtimeError;
         }
 
-        print_watch_success( *captured );
+        print_watch_success( captured );
         return 0;
     }
 
@@ -1470,20 +1892,20 @@ namespace
             return usageError;
         }
 
-        const std::span<char*>     args( argv, static_cast<std::size_t>( argc ) );
-        const auto                 cli_args = args.subspan( 1 );
-        const auto                 command  = commandNames.value_of( cli_args.front() );
+        const std::span<char*> args( argv, static_cast<std::size_t>( argc ) );
+        const auto             cli_args = args.subspan( 1 );
+        const auto* const command = grab::cli::find_command_by_verb( cli_args.front() );
         constexpr std::string_view jsonFlag{ "--json" };
 
-        if( !command.has_value() )
+        if( command == nullptr )
         {
             print_usage();
             return usageError;
         }
 
-        switch( *command )
+        switch( command->kind )
         {
-            case Command::Doctor :
+            case grab::CommandKind::Doctor :
                 {
                     bool as_json = false;
                     for( const char* arg : cli_args.subspan( 1 ) )
@@ -1500,27 +1922,27 @@ namespace
                     }
                     return run_doctor_command( as_json );
                 }
-            case Command::Daemon :
+            case grab::CommandKind::Daemon :
                 return run_daemon_command( cli_args.subspan( 1 ) );
-            case Command::Type :
+            case grab::CommandKind::Type :
                 return run_type_command( cli_args.subspan( 1 ) );
-            case Command::Click :
+            case grab::CommandKind::Click :
                 return run_click_command( cli_args.subspan( 1 ) );
-            case Command::Drag :
+            case grab::CommandKind::Drag :
                 return run_drag_command( cli_args.subspan( 1 ) );
-            case Command::DragCurve :
+            case grab::CommandKind::DragCurve :
                 return grab::cli::run_drag_curve_command( cli_args.subspan( 1 ) );
-            case Command::Capture :
+            case grab::CommandKind::Capture :
                 return run_capture_command( cli_args.subspan( 1 ) );
-            case Command::Batch :
+            case grab::CommandKind::Batch :
                 return run_batch_command( cli_args.subspan( 1 ) );
-            case Command::Compare :
+            case grab::CommandKind::Compare :
                 return run_compare_command( cli_args.subspan( 1 ) );
-            case Command::Watch :
+            case grab::CommandKind::Watch :
                 return run_watch_command( cli_args.subspan( 1 ) );
-            case Command::Key :
+            case grab::CommandKind::Key :
                 return grab::cli::run_key_command( cli_args.subspan( 1 ) );
-            case Command::Session :
+            case grab::CommandKind::Session :
                 {
                     std::vector<std::string_view> session_args;
                     session_args.reserve( cli_args.size() - 1U );
@@ -1530,7 +1952,7 @@ namespace
                     }
                     return grab::cli::run_session_command( session_args );
                 }
-            case Command::Count :
+            case grab::CommandKind::Count :
                 break;
         }
 
