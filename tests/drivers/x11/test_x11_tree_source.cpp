@@ -111,9 +111,11 @@ TEST( X11TreeSource,
         window_info( firstXid, firstTitle, firstClass, firstPid, firstBounds ),
         window_info( secondXid, secondTitle, secondClass, std::nullopt, secondBounds ),
     };
+    grab::kernel::TargetRegistry               registry;
     grab::drivers::desktop::x11::X11TreeSource source{
         runtimeId,
         displayGeneration,
+        registry,
         [&windows]() -> grab::Result<std::vector<grab::screen::WindowInfo>>
         {
             return windows;
@@ -209,9 +211,11 @@ TEST( X11TreeSource,
     std::vector<grab::screen::WindowInfo> windows{
         window_info( firstXid, firstTitle, firstClass, firstPid, firstBounds ),
     };
+    grab::kernel::TargetRegistry               registry;
     grab::drivers::desktop::x11::X11TreeSource source{
         runtimeId,
         displayGeneration,
+        registry,
         [&windows]() -> grab::Result<std::vector<grab::screen::WindowInfo>>
         {
             return windows;
@@ -292,9 +296,11 @@ TEST( X11TreeSource,
     std::vector<grab::screen::WindowInfo> windows{
         window_info( firstXid, firstTitle, firstClass, firstPid, firstBounds ),
     };
+    grab::kernel::TargetRegistry               registry;
     grab::drivers::desktop::x11::X11TreeSource source{
         runtimeId,
         displayGeneration,
+        registry,
         [&windows]() -> grab::Result<std::vector<grab::screen::WindowInfo>>
         {
             return windows;
@@ -340,10 +346,12 @@ TEST( X11TreeSource,
         window_info( firstXid, firstTitle, firstClass, firstPid, firstBounds ),
         window_info( firstXid, secondTitle, secondClass, std::nullopt, secondBounds ),
     };
+    grab::kernel::TargetRegistry               registry;
     std::size_t                                enumerate_count = 0U;
     grab::drivers::desktop::x11::X11TreeSource source{
         runtimeId,
         displayGeneration,
+        registry,
         [&windows,
          &enumerate_count]() -> grab::Result<std::vector<grab::screen::WindowInfo>>
         {

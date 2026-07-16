@@ -83,12 +83,14 @@ namespace grab::drivers::desktop::x11
 
     }    // namespace
 
-    X11TreeSource::X11TreeSource( grab::RuntimeId         runtime,
-                                  grab::DisplayGeneration display_generation,
-                                  xcb_connection_t*       connection,
-                                  xcb_window_t            root ) :
+    X11TreeSource::X11TreeSource( grab::RuntimeId               runtime,
+                                  grab::DisplayGeneration       display_generation,
+                                  grab::kernel::TargetRegistry& targets,
+                                  xcb_connection_t*             connection,
+                                  xcb_window_t                  root ) :
         X11TreeSource( runtime,
                        display_generation,
+                       targets,
                        [connection,
                         root]()
                        {
@@ -97,12 +99,14 @@ namespace grab::drivers::desktop::x11
     {
     }
 
-    X11TreeSource::X11TreeSource( grab::RuntimeId         runtime,
-                                  grab::DisplayGeneration display_generation,
-                                  WindowEnumerator        enumerate_windows ) :
+    X11TreeSource::X11TreeSource( grab::RuntimeId               runtime,
+                                  grab::DisplayGeneration       display_generation,
+                                  grab::kernel::TargetRegistry& targets,
+                                  WindowEnumerator              enumerate_windows ) :
         runtime_( runtime ),
         display_generation_( display_generation ),
         enumerate_windows_( std::move( enumerate_windows ) ),
+        targets_( &targets ),
         alias_authority_( std::string{ "x11.window.runtime." } +
                           std::to_string( runtime.value ) )
     {
@@ -199,7 +203,7 @@ namespace grab::drivers::desktop::x11
     const grab::kernel::TargetRegistry&
     X11TreeSource::target_registry() const noexcept
     {
-        return targets_;
+        return *targets_;
     }
 
     grab::Result<xcb_window_t>
@@ -234,7 +238,7 @@ namespace grab::drivers::desktop::x11
                                    const grab::SpaceRect&          bounds )
     {
         const auto existing = bindings_.find( window.id );
-        const auto target   = targets_.observe( grab::kernel::TargetObservation{
+        const auto target   = targets_->observe( grab::kernel::TargetObservation{
             .grade  = grab::kernel::TargetGrade::Window,
             .alias  = alias_for( window.id ),
             .title  = window.title,
@@ -254,14 +258,14 @@ namespace grab::drivers::desktop::x11
                                    "X11 target identity changed while active" );
             }
             auto registered =
-                targets_.register_surface( *target,
-                                           grab::SurfaceRecord{
-                                               .id         = existing->second.surface,
-                                               .generation = display_generation_,
-                                               .space =
-                                                   grab::CoordinateSpaceId{ rootSpace },
-                                               .bounds = bounds,
-                                           } );
+                targets_->register_surface( *target,
+                                            grab::SurfaceRecord{
+                                                .id         = existing->second.surface,
+                                                .generation = display_generation_,
+                                                .space =
+                                                    grab::CoordinateSpaceId{ rootSpace },
+                                                .bounds = bounds,
+                                            } );
             if( !registered.has_value() )
             {
                 return std::unexpected( std::move( registered.error() ) );
@@ -283,13 +287,14 @@ namespace grab::drivers::desktop::x11
             .surface = grab::SurfaceId{ next_surface_ },
         };
         auto registered =
-            targets_.register_surface( binding.target,
-                                       grab::SurfaceRecord{
-                                           .id         = binding.surface,
-                                           .generation = display_generation_,
-                                           .space = grab::CoordinateSpaceId{ rootSpace },
-                                           .bounds = bounds,
-                                       } );
+            targets_->register_surface( binding.target,
+                                        grab::SurfaceRecord{
+                                            .id         = binding.surface,
+                                            .generation = display_generation_,
+                                            .space =
+                                                grab::CoordinateSpaceId{ rootSpace },
+                                            .bounds = bounds,
+                                        } );
         if( !registered.has_value() )
         {
             return std::unexpected( std::move( registered.error() ) );
@@ -318,8 +323,8 @@ namespace grab::drivers::desktop::x11
                 continue;
             }
 
-            auto removed = targets_.remove_surface( binding->second.target,
-                                                    binding->second.surface );
+            auto removed = targets_->remove_surface( binding->second.target,
+                                                     binding->second.surface );
             if( !removed.has_value() )
             {
                 return std::unexpected( std::move( removed.error() ) );
@@ -327,7 +332,7 @@ namespace grab::drivers::desktop::x11
 
             const auto alias = alias_for( binding->first );
             auto       invalidated =
-                targets_.invalidate_alias( alias.authority, alias.native_id );
+                targets_->invalidate_alias( alias.authority, alias.native_id );
             if( !invalidated.has_value() )
             {
                 return std::unexpected( std::move( invalidated.error() ) );

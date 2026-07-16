@@ -28,14 +28,16 @@ namespace grab::drivers::desktop::x11
             using WindowEnumerator =
                 std::function<grab::Result<std::vector<grab::screen::WindowInfo>>()>;
 
-            X11TreeSource( grab::RuntimeId         runtime,
-                           grab::DisplayGeneration display_generation,
-                           xcb_connection_t*       connection,
-                           xcb_window_t            root );
+            X11TreeSource( grab::RuntimeId               runtime,
+                           grab::DisplayGeneration       display_generation,
+                           grab::kernel::TargetRegistry& targets,
+                           xcb_connection_t*             connection,
+                           xcb_window_t                  root );
 
-            X11TreeSource( grab::RuntimeId         runtime,
-                           grab::DisplayGeneration display_generation,
-                           WindowEnumerator        enumerate_windows );
+            X11TreeSource( grab::RuntimeId               runtime,
+                           grab::DisplayGeneration       display_generation,
+                           grab::kernel::TargetRegistry& targets,
+                           WindowEnumerator              enumerate_windows );
 
             [[nodiscard]]
             grab::Result<grab::UiSnapshot>
@@ -92,7 +94,7 @@ namespace grab::drivers::desktop::x11
             grab::RuntimeId                        runtime_{};
             grab::DisplayGeneration                display_generation_{};
             WindowEnumerator                       enumerate_windows_;
-            grab::kernel::TargetRegistry           targets_;
+            grab::kernel::TargetRegistry*          targets_{};
             std::map<std::uint32_t, WindowBinding> bindings_;
             std::uint64_t                          next_node_{ firstNode };
             std::uint64_t                          next_surface_{ firstSurface };

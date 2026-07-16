@@ -1,5 +1,6 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "kernel/graph/target_registry.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "spi/runtime.hpp"
 
@@ -8,13 +9,6 @@
 #include <memory>
 #include <span>
 #include <string_view>
-
-namespace grab::kernel
-{
-
-    class TargetRegistry;
-
-}
 
 namespace grab::drivers::desktop::x11
 {
@@ -80,6 +74,7 @@ namespace grab::drivers::desktop::x11
             static constexpr std::uint32_t     initialGeneration = 1U;
 
             grab::platform::x11::XcbConnection connection_;
+            grab::kernel::TargetRegistry       targets_;
             std::unique_ptr<X11TreeSource>     tree_source_;
             std::unique_ptr<X11InputSeat>      input_seat_;
             std::unique_ptr<X11PointerRoute>   pointer_route_;

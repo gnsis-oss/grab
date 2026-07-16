@@ -141,6 +141,7 @@ add_executable(grab_driver_atspi_tests
 )
 target_link_libraries(grab_driver_atspi_tests PRIVATE
     grab_driver_atspi
+    grab_driver_x11
     grab_vendor_l0
     GTest::gtest_main
 )

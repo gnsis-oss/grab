@@ -80,6 +80,7 @@ namespace grab::drivers::desktop::x11
         tree_source_ =
             std::make_unique<X11TreeSource>( grab::RuntimeId{ next_generation },
                                              grab::DisplayGeneration{ next_generation },
+                                             targets_,
                                              connection_.get(),
                                              connection_.root() );
         input_seat_     = std::make_unique<X11InputSeat>( std::move( *opened_seat ) );
@@ -116,11 +117,7 @@ namespace grab::drivers::desktop::x11
     const grab::kernel::TargetRegistry*
     X11Runtime::target_registry() const noexcept
     {
-        if( tree_source_ == nullptr )
-        {
-            return nullptr;
-        }
-        return &tree_source_->target_registry();
+        return &targets_;
     }
 
     grab::spi::TopologySource*
