@@ -1,3 +1,4 @@
+#include "drivers/desktop/x11/x11_drag_recipe.hpp"
 #include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
 #include "grab/drag.hpp"
@@ -530,38 +531,6 @@ namespace grab::drivers::desktop::x11
                 std::string   text_;
         };
 
-        [[nodiscard]]
-        bool
-        in_int16_range( grab::geometry::Point point ) noexcept
-        {
-            return point.x >=
-                   std::numeric_limits<std::int16_t>::min() &&
-                   point.x <=
-                   std::numeric_limits<std::int16_t>::max() &&
-                   point.y >=
-                   std::numeric_limits<std::int16_t>::min() &&
-                   point.y <= std::numeric_limits<std::int16_t>::max();
-        }
-
-        [[nodiscard]]
-        grab::geometry::Point
-        interpolated_point( grab::geometry::Point from,
-                            grab::geometry::Point to,
-                            std::int32_t          step,
-                            std::int32_t          step_count ) noexcept
-        {
-            const auto start_x = static_cast<std::int64_t>( from.x );
-            const auto start_y = static_cast<std::int64_t>( from.y );
-            const auto dx      = static_cast<std::int64_t>( to.x ) - start_x;
-            const auto dy      = static_cast<std::int64_t>( to.y ) - start_y;
-            const auto count   = static_cast<std::int64_t>( step_count );
-            const auto current = static_cast<std::int64_t>( step );
-            return grab::geometry::Point{
-                .x = static_cast<std::int32_t>( start_x + ( ( dx * current ) / count ) ),
-                .y = static_cast<std::int32_t>( start_y + ( ( dy * current ) / count ) ),
-            };
-        }
-
         class PointerDragReservation final : public ReservationBase
         {
             public:
@@ -581,80 +550,7 @@ namespace grab::drivers::desktop::x11
                 grab::Result<void>
                 commit( const grab::OperationContext& ) final
                 {
-                    if( options_.interpolation_steps <
-                        grab::input::DragOptions::minimumInterpolationSteps ||
-                        options_.interpolation_steps >
-                        grab::input::DragOptions::maximumInterpolationSteps )
-                    {
-                        return failure<void>(
-                            grab::ErrorCode::InvalidArgument,
-                            "drag interpolation-step count is out of range"
-                        );
-                    }
-                    if( !in_int16_range( from_ ) || !in_int16_range( to_ ) )
-                    {
-                        return failure<void>( grab::ErrorCode::InvalidArgument,
-                                              "drag coordinate is outside int16 range" );
-                    }
-
-                    auto result = seat_->move_pointer_absolute(
-                        static_cast<std::int16_t>( from_.x ),
-                        static_cast<std::int16_t>( from_.y )
-                    );
-                    if( !result )
-                    {
-                        return result;
-                    }
-                    result = seat_->flush();
-                    if( !result )
-                    {
-                        return result;
-                    }
-
-                    result = seat_->button( 1U, true );
-                    if( !result )
-                    {
-                        return possibly_committed();
-                    }
-
-                    for( std::int32_t step = 1; step <= options_.interpolation_steps;
-                         ++step )
-                    {
-                        const auto point =
-                            interpolated_point( from_,
-                                                to_,
-                                                step,
-                                                options_.interpolation_steps );
-                        if( !in_int16_range( point ) )
-                        {
-                            return possibly_committed();
-                        }
-                        result = seat_->move_pointer_absolute(
-                            static_cast<std::int16_t>( point.x ),
-                            static_cast<std::int16_t>( point.y )
-                        );
-                        if( !result )
-                        {
-                            return possibly_committed();
-                        }
-                        result = seat_->flush();
-                        if( !result )
-                        {
-                            return possibly_committed();
-                        }
-                    }
-
-                    result = seat_->button( 1U, false );
-                    if( !result )
-                    {
-                        return possibly_committed();
-                    }
-                    result = seat_->flush();
-                    if( !result )
-                    {
-                        return possibly_committed();
-                    }
-                    return {};
+                    return execute_drag( *seat_, from_, to_, options_ );
                 }
 
             private:

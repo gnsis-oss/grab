@@ -126,7 +126,6 @@ target_include_directories(grab_image PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_compile_features(grab_image PUBLIC cxx_std_23)
 
 add_library(grab_input STATIC
-    src/input/gestures.cpp
     src/input/input.cpp
     src/input/locator.cpp
 )
