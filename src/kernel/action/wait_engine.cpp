@@ -149,6 +149,30 @@ namespace grab::kernel::action
     }
 
     NamedPredicate
+    window_mapped( NodeObserver observer )
+    {
+        return NamedPredicate{
+            .name    = "window_mapped",
+            .observe = [observer =
+                            std::move( observer )]() -> Result<PredicateObservation>
+            {
+                auto observed = observer();
+                if( !observed.has_value() )
+                {
+                    return std::unexpected( std::move( observed.error() ) );
+                }
+                const bool mapped = observed->present &&
+                                    has_state( observed->states, NodeState::Visible );
+                return PredicateObservation{
+                    .satisfied = mapped,
+                    .detail    = mapped ? "window is mapped"
+                                        : "window is not mapped: " + observed->detail,
+                };
+            },
+        };
+    }
+
+    NamedPredicate
     state_stable( NodeObserver observer,
                   std::size_t  required_observations )
     {

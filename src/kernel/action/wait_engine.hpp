@@ -58,6 +58,10 @@ namespace grab::kernel::action
 
     [[nodiscard]]
     NamedPredicate
+    window_mapped( NodeObserver observer );
+
+    [[nodiscard]]
+    NamedPredicate
     state_stable( NodeObserver observer,
                   std::size_t  required_observations );
 
