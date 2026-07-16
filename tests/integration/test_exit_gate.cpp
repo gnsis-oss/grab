@@ -450,7 +450,7 @@ TEST( ExitGate,
 }
 
 TEST( ExitGate,
-      SessionCoreOpensWhenAtspiUnavailableAndRecordsDiagnostic )
+      SessionCoreOpensAndAtspiAttachesOrRecordsUnavailability )
 {
     const char* const display = std::getenv( "DISPLAY" );
     if( display == nullptr || std::string_view{ display }.empty() )
@@ -476,12 +476,51 @@ TEST( ExitGate,
     ASSERT_TRUE( core.has_value() ) << core.error().message;
     EXPECT_TRUE( ( *core )->store().snapshot().has_value() );
 
-    const auto& diagnostics = ( *core )->runtime_diagnostics();
-    ASSERT_FALSE( diagnostics.empty() );
-    EXPECT_TRUE( std::ranges::any_of( diagnostics,
-                                      []( const auto& diagnostic )
-                                      {
-                                          return diagnostic.message.find( "atspi" ) !=
-                                                 std::string::npos;
-                                      } ) );
+    constexpr std::size_t primaryStoreCount   = 1U;
+    constexpr std::size_t attachedStoreCount  = 2U;
+    constexpr std::size_t secondaryStoreIndex = 1U;
+
+    const auto&           diagnostics         = ( *core )->runtime_diagnostics();
+    const bool            hasAtspiDiagnostic =
+        std::ranges::any_of( diagnostics,
+                             []( const auto& diagnostic )
+                             {
+                                 return diagnostic.message.find( "atspi" ) !=
+                                        std::string::npos;
+                             } );
+
+    EXPECT_TRUE( std::ranges::none_of( diagnostics,
+                                       []( const auto& diagnostic )
+                                       {
+                                           return diagnostic.message.find(
+                                                      "deferred"
+                                                  ) != std::string::npos;
+                                       } ) );
+
+    if( !hasAtspiDiagnostic )
+    {
+        EXPECT_EQ( ( *core )->store_count(), attachedStoreCount );
+        auto* const atspi_store = ( *core )->store_at( secondaryStoreIndex );
+        ASSERT_NE( atspi_store, nullptr );
+
+        const auto atspi_snapshot = atspi_store->snapshot();
+        ASSERT_TRUE( atspi_snapshot.has_value() );
+        const auto primary_snapshot = ( *core )->store().snapshot();
+        ASSERT_TRUE( primary_snapshot.has_value() );
+        EXPECT_NE( atspi_snapshot->runtime, primary_snapshot->runtime );
+        return;
+    }
+
+    EXPECT_TRUE( std::ranges::none_of( diagnostics,
+                                       []( const auto& diagnostic )
+                                       {
+                                           const auto& message = diagnostic.message;
+                                           return message.find( "atspi" ) !=
+                                                  std::string::npos &&
+                                                  message.find( "unavailable" ) ==
+                                                  std::string::npos &&
+                                                  message.find( "skipped" ) ==
+                                                  std::string::npos;
+                                       } ) );
+    EXPECT_EQ( ( *core )->store_count(), primaryStoreCount );
 }

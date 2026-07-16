@@ -6,6 +6,7 @@
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/ids.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
@@ -30,6 +31,7 @@
 #include <cstdlib>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -67,14 +69,24 @@ namespace grab::kernel::lifecycle
 
     }    // namespace
 
-    SessionCore::SessionCore() :
-        store_(
-            [this]( const kernel::TreeEvent& event )
-            {
-                publish_tree_event( event );
-            }
-        )
+    SessionCore::SessionCore()
     {
+        make_binding();
+    }
+
+    SessionCore::RuntimeBinding&
+    SessionCore::make_binding()
+    {
+        auto        binding         = std::make_unique<RuntimeBinding>();
+        auto* const binding_pointer = binding.get();
+        binding->store              = std::make_unique<TreeStore>(
+            [this, binding_pointer]( const kernel::TreeEvent& event )
+            {
+                publish_tree_event( *binding_pointer, event );
+            }
+        );
+        bindings_.push_back( std::move( binding ) );
+        return *binding_pointer;
     }
 
     SessionCore::~SessionCore()
@@ -84,14 +96,19 @@ namespace grab::kernel::lifecycle
             // User-held subscriptions may outlive this core; their teardown must
             // not re-enter a destroyed runtime.
             bus_.set_demand_callback( {} );
-            if( owned_runtime_ == nullptr )
+            if( atspi_runtime_ != nullptr )
             {
-                return;
+                static_cast<void>(
+                    atspi_runtime_->stop()
+                );    // NOLINT(bugprone-unused-return-value)
             }
 
-            static_cast<void>(
-                owned_runtime_->stop()
-            );    // NOLINT(bugprone-unused-return-value)
+            if( owned_runtime_ != nullptr )
+            {
+                static_cast<void>(
+                    owned_runtime_->stop()
+                );    // NOLINT(bugprone-unused-return-value)
+            }
         }
         catch( ... )
         {
@@ -150,7 +167,7 @@ namespace grab::kernel::lifecycle
         }
         core->compose_atspi_best_effort( reactor, context );
 
-        // bus_ is declared before owned_runtime_, so it outlives the runtime and
+        // bus_ is declared before both runtime owners, so it outlives them and
         // remains valid for every event-source callback.
         x11->set_event_sink(
             [&bus = core->bus_]( Event&& event )
@@ -205,12 +222,15 @@ namespace grab::kernel::lifecycle
             return;
         }
 
-        grab::drivers::semantic::atspi::AtspiRuntime runtime{
+        auto runtime = std::make_unique<grab::drivers::semantic::atspi::AtspiRuntime>(
             *reactor,
             bus_,
             *registry_,
-        };
-        auto started = runtime.start( context );
+            grab::drivers::semantic::atspi::AtspiTreeSource::AccessibleEnumerator{},
+            std::nullopt,
+            grab::RuntimeId{ ++next_runtime_id_ }
+        );
+        auto started = runtime->start( context );
         if( !started.has_value() )
         {
             runtime_diagnostics_.push_back( DiagnosticEntry{
@@ -221,13 +241,20 @@ namespace grab::kernel::lifecycle
             return;
         }
 
-        // TreeStore is single-scope; attaching AT-SPI would retire X11
-        // (src/kernel/graph/tree_store.cpp:1283, 1358-1370).
-        runtime_diagnostics_.push_back( DiagnosticEntry{
-            .at      = std::chrono::steady_clock::now(),
-            .message = "atspi attach deferred: store is single-scope",
-        } );
-        static_cast<void>( runtime.stop() );    // NOLINT(bugprone-unused-return-value)
+        auto attached = attach( *runtime, context );
+        if( !attached.has_value() )
+        {
+            runtime_diagnostics_.push_back( DiagnosticEntry{
+                .at = std::chrono::steady_clock::now(),
+                .message =
+                    std::string{ "atspi attach failed: " } + attached.error().message,
+            } );
+            static_cast<void>(
+                runtime->stop()
+            );    // NOLINT(bugprone-unused-return-value)
+            return;
+        }
+        atspi_runtime_ = std::move( runtime );
     }
 
     std::unique_ptr<SessionCore>
@@ -240,7 +267,7 @@ namespace grab::kernel::lifecycle
     SessionCore::resolve( const Locator& locator,
                           Cardinality    cardinality )
     {
-        auto snapshot = store_.snapshot();
+        auto snapshot = bindings_.front()->store->snapshot();
         if( !snapshot.has_value() )
         {
             return fail( ErrorCode::CapabilityUnavailable,
@@ -349,9 +376,21 @@ namespace grab::kernel::lifecycle
                          "runtime has no tree source" );
         }
 
-        auto drained = drain_source( *source, context );
+        auto* binding = bindings_.front().get();
+        bool  binding_is_new{};
+        if( binding->source != nullptr )
+        {
+            binding        = &make_binding();
+            binding_is_new = true;
+        }
+
+        auto drained = drain_source( *source, *binding->store, context );
         if( !drained.has_value() )
         {
+            if( binding_is_new )
+            {
+                bindings_.pop_back();
+            }
             return std::unexpected( std::move( drained.error() ) );
         }
 
@@ -363,20 +402,29 @@ namespace grab::kernel::lifecycle
             auto snapshot_result = source->snapshot( primaryTree, context );
             if( !snapshot_result.has_value() )
             {
+                if( binding_is_new )
+                {
+                    bindings_.pop_back();
+                }
                 return std::unexpected( std::move( snapshot_result.error() ) );
             }
 
-            auto applied = store_.apply( spi::UiUpdate{
+            auto applied = binding->store->apply( spi::UiUpdate{
                 .source_sequence = 0U,
                 .payload         = std::move( *snapshot_result ),
             } );
             if( !applied.has_value() )
             {
+                if( binding_is_new )
+                {
+                    bindings_.pop_back();
+                }
                 return std::unexpected( std::move( applied.error() ) );
             }
         }
 
-        attached_.push_back( source );
+        binding->runtime = &runtime;
+        binding->source  = source;
         // Test cores gain their primary runtime from the first attach; open()
         // cores already set the owned runtime.
         if( primary_runtime_ == nullptr )
@@ -388,6 +436,7 @@ namespace grab::kernel::lifecycle
 
     Result<std::size_t>
     SessionCore::drain_source( spi::TreeSource&        source,
+                               TreeStore&              store,
                                const OperationContext& context )
     {
         std::size_t applied_updates{};
@@ -403,7 +452,7 @@ namespace grab::kernel::lifecycle
                 return applied_updates;
             }
 
-            auto applied = store_.apply( **update );
+            auto applied = store.apply( **update );
             if( !applied.has_value() )
             {
                 return std::unexpected( std::move( applied.error() ) );
@@ -415,9 +464,13 @@ namespace grab::kernel::lifecycle
     Result<void>
     SessionCore::pump_once( const OperationContext& context )
     {
-        for( auto* const source : attached_ )
+        for( const auto& binding : bindings_ )
         {
-            auto drained = drain_source( *source, context );
+            if( binding->source == nullptr )
+            {
+                continue;
+            }
+            auto drained = drain_source( *binding->source, *binding->store, context );
             if( !drained.has_value() )
             {
                 return std::unexpected( std::move( drained.error() ) );
@@ -427,20 +480,22 @@ namespace grab::kernel::lifecycle
     }
 
     void
-    SessionCore::publish_tree_event( const kernel::TreeEvent& event )
+    SessionCore::publish_tree_event( RuntimeBinding&          binding,
+                                     const kernel::TreeEvent& event )
     {
-        // TreeStore calls this outside its lock from exactly one drainer at a
-        // time, so the translation state needs no extra locking.
-        const auto batch_revision = store_.revision();
-        if( batch_revision != sink_batch_revision_ )
+        // Each TreeStore invokes its sink outside its lock from exactly one
+        // drainer at a time. Bindings do not share translation state; bus_ is
+        // thread-safe.
+        const auto batch_revision = binding.store->revision();
+        if( batch_revision != binding.sink_batch_revision )
         {
-            sink_previous_revision_ = sink_batch_revision_;
-            sink_batch_revision_    = batch_revision;
-            pending_active_.clear();
+            binding.sink_previous_revision = binding.sink_batch_revision;
+            binding.sink_batch_revision    = batch_revision;
+            binding.pending_active.clear();
         }
 
         const auto make_event =
-            [&event, this]( EventKind kind, std::uint64_t previous_active )
+            [&binding, &event]( EventKind kind, std::uint64_t previous_active )
         {
             return Event{
                 .kind     = kind,
@@ -460,7 +515,7 @@ namespace grab::kernel::lifecycle
                                 .node     = event.node.value,
                                 .revision = event.revision,
                                 },
-                .before_revision = sink_previous_revision_,
+                .before_revision = binding.sink_previous_revision,
                 .after_revision  = event.revision,
             };
         };
@@ -469,7 +524,7 @@ namespace grab::kernel::lifecycle
 
         if( event.kind == kernel::TreeEventKind::NodeRemoved )
         {
-            std::erase_if( current_active_,
+            std::erase_if( binding.current_active,
                            [&event]( const auto& entry )
                            {
                                return entry.first == event.node.value;
@@ -492,24 +547,25 @@ namespace grab::kernel::lifecycle
                                          } );
         };
 
-        const auto pending = find_parent( pending_active_ );
+        const auto pending = find_parent( binding.pending_active );
         if( event.kind == kernel::TreeEventKind::RelationRemoved )
         {
-            if( pending == pending_active_.end() )
+            if( pending == binding.pending_active.end() )
             {
-                pending_active_.emplace_back( event.node.value, event.related.value );
+                binding.pending_active.emplace_back( event.node.value,
+                                                     event.related.value );
             }
             else
             {
                 pending->second = event.related.value;
             }
 
-            const auto current = find_parent( current_active_ );
+            const auto current = find_parent( binding.current_active );
             if( current !=
-                current_active_.end() &&
+                binding.current_active.end() &&
                 current->second == event.related.value )
             {
-                current_active_.erase( current );
+                binding.current_active.erase( current );
             }
             return;
         }
@@ -520,25 +576,25 @@ namespace grab::kernel::lifecycle
         }
 
         std::uint64_t previous_active{};
-        if( pending != pending_active_.end() )
+        if( pending != binding.pending_active.end() )
         {
             previous_active = pending->second;
-            pending_active_.erase( pending );
+            binding.pending_active.erase( pending );
         }
         else
         {
-            const auto current = find_parent( current_active_ );
-            if( current != current_active_.end() )
+            const auto current = find_parent( binding.current_active );
+            if( current != binding.current_active.end() )
             {
                 previous_active = current->second;
             }
         }
         bus_.publish( make_event( EventKind::ActiveChildChanged, previous_active ) );
 
-        const auto current = find_parent( current_active_ );
-        if( current == current_active_.end() )
+        const auto current = find_parent( binding.current_active );
+        if( current == binding.current_active.end() )
         {
-            current_active_.emplace_back( event.node.value, event.related.value );
+            binding.current_active.emplace_back( event.node.value, event.related.value );
         }
         else
         {
@@ -555,7 +611,23 @@ namespace grab::kernel::lifecycle
     TreeStore&
     SessionCore::store() noexcept
     {
-        return store_;
+        return *bindings_.front()->store;
+    }
+
+    std::size_t
+    SessionCore::store_count() const noexcept
+    {
+        return bindings_.size();
+    }
+
+    TreeStore*
+    SessionCore::store_at( std::size_t index ) noexcept
+    {
+        if( index >= bindings_.size() )
+        {
+            return nullptr;
+        }
+        return bindings_[index]->store.get();
     }
 
     TargetRegistry&

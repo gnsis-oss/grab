@@ -4,6 +4,7 @@
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/event_descriptor.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
 #include "kernel/graph/target_registry.hpp"
@@ -26,11 +27,28 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace grab::drivers::semantic::atspi
 {
     namespace
     {
+
+        [[nodiscard]]
+        std::vector<grab::EventKind>
+        accessibility_kinds()
+        {
+            std::vector<grab::EventKind> kinds;
+            kinds.reserve( grab::detail::eventDescriptors.size() );
+            for( const auto& descriptor : grab::detail::eventDescriptors )
+            {
+                if( descriptor.category == grab::EventCategory::Accessibility )
+                {
+                    kinds.push_back( descriptor.kind );
+                }
+            }
+            return kinds;
+        }
 
         constexpr auto routeDescriptors = std::to_array<grab::spi::RouteDescriptor>( {
             {
@@ -67,7 +85,11 @@ namespace grab::drivers::semantic::atspi
 
             explicit AtspiEventSource( grab::EventBus& bus ) :
                 subscription_( bus.subscribe( grab::EventFilter{
-                    .kinds      = {},
+                    // EventBus::subscribe expands empty kinds to every kind. For
+                    // this long-lived source that would saturate per-kind demand
+                    // refcounts and suppress XI2 mask-arming transitions for
+                    // unrelated input subscribers.
+                    .kinds      = accessibility_kinds(),
                     .categories = { grab::EventCategory::Accessibility },
                 } ) )
             {
@@ -205,13 +227,15 @@ namespace grab::drivers::semantic::atspi
         grab::EventBus&                       event_bus,
         grab::kernel::TargetRegistry&         targets,
         AtspiTreeSource::AccessibleEnumerator enumerate_accessibles,
-        std::optional<std::string>            x11_alias_authority
+        std::optional<std::string>            x11_alias_authority,
+        grab::RuntimeId                       initial_runtime_id
     ) :
         reactor_( &reactor ),
         event_bus_( &event_bus ),
         targets_( &targets ),
         enumerate_accessibles_( std::move( enumerate_accessibles ) ),
-        x11_alias_authority_( std::move( x11_alias_authority ) )
+        x11_alias_authority_( std::move( x11_alias_authority ) ),
+        runtime_id_( initial_runtime_id )
     {
     }
 
@@ -259,13 +283,15 @@ namespace grab::drivers::semantic::atspi
         }
 
         const auto next_generation = has_started_ ? generation_ + 1U : generation_;
-        tree_source_ =
-            std::make_unique<AtspiTreeSource>( grab::RuntimeId{ next_generation },
-                                               *targets_,
-                                               enumerate_accessibles_,
-                                               x11_alias_authority_ );
+        const auto next_runtime_id =
+            has_started_ ? grab::RuntimeId{ runtime_id_.value + 1U } : runtime_id_;
+        tree_source_ = std::make_unique<AtspiTreeSource>( next_runtime_id,
+                                                          *targets_,
+                                                          enumerate_accessibles_,
+                                                          x11_alias_authority_ );
         monitor_ = std::make_unique<grab::event::AtspiMonitor>( std::move( *monitor ) );
         generation_  = next_generation;
+        runtime_id_  = next_runtime_id;
         has_started_ = true;
         return {};
     }

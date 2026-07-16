@@ -3,6 +3,8 @@
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/ids.hpp"
+#include "grab/locator.hpp"
+#include "grab/query.hpp"
 #include "grab/relation.hpp"
 #include "grab/role.hpp"
 #include "grab/ui.hpp"
@@ -12,6 +14,8 @@
 
 // clang-format off
 #include <gtest/gtest.h>
+#include <cstddef>
+#include <cstdint>
 #include <variant>
 // clang-format on
 
@@ -136,6 +140,130 @@ TEST( SessionCore,
     auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
     ASSERT_NE( core, nullptr );
     EXPECT_TRUE( core->runtime_diagnostics().empty() );
+}
+
+TEST( SessionCore,
+      TwoAttachedRuntimesKeepIndependentStoresAndShareOneBus )
+{
+    constexpr grab::RuntimeId      secondRuntime{ 9U };
+    constexpr std::uint32_t        secondTree = 1U;
+    constexpr grab::TreeEpoch      secondEpoch{ 1U };
+    constexpr std::uint64_t        initialRevision = 1U;
+    constexpr std::uint64_t        updatedRevision = 2U;
+    constexpr grab::NodeId         firstNode{ 1U };
+    constexpr grab::NodeId         secondNode{ 2U };
+    constexpr grab::NodeGeneration nodeGeneration{ 1U };
+    constexpr std::uint32_t        noStates = 0U;
+    constexpr std::uint32_t visibleState = grab::state_mask( grab::NodeState::Visible );
+    constexpr std::size_t   primaryStoreIndex    = 0U;
+    constexpr std::size_t   secondaryStoreIndex  = 1U;
+    constexpr std::size_t   outOfRangeStoreIndex = 2U;
+    constexpr std::size_t   attachedStoreCount   = 2U;
+
+    grab::testing::FakeRuntime fake_a;
+    grab::testing::FakeRuntime fake_b;
+    fake_a.inject_snapshot( grab::testing::tree::snapshot(
+        initialRevision,
+        { grab::testing::tree::node( firstNode.value, grab::role::window ) }
+    ) );
+    fake_b.inject_snapshot( grab::UiSnapshot::from_records(
+        grab::UiSnapshotMetadata{
+            .runtime  = secondRuntime,
+            .tree     = secondTree,
+            .epoch    = secondEpoch,
+            .revision = initialRevision,
+            .complete = true,
+    },
+        {
+            grab::UiNodeRecord{
+                secondNode,
+                nodeGeneration,
+                grab::role::button,
+                noStates,
+                {},
+                grab::UiProvenance{
+                    .runtime  = secondRuntime,
+                    .revision = initialRevision,
+                },
+            },
+        },
+        { secondNode },
+        {}
+    ) );
+
+    auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
+    ASSERT_NE( core, nullptr );
+
+    auto                         watch = core->bus().subscribe( grab::SubscriptionScope{
+        .kinds  = { grab::EventKind::NodeAdded },
+        .filter = {},
+    } );
+
+    const grab::OperationContext context{};
+    ASSERT_TRUE( core->attach( fake_a, context ).has_value() );
+    ASSERT_TRUE( core->attach( fake_b, context ).has_value() );
+
+    EXPECT_EQ( core->store_count(), attachedStoreCount );
+
+    const auto primary_snapshot = core->store().snapshot();
+    ASSERT_TRUE( primary_snapshot.has_value() );
+    EXPECT_EQ( primary_snapshot->runtime, grab::testing::tree::fixtureRuntime );
+
+    EXPECT_EQ( core->store_at( primaryStoreIndex ), &core->store() );
+    auto* const secondary_store = core->store_at( secondaryStoreIndex );
+    ASSERT_NE( secondary_store, nullptr );
+    const auto secondary_snapshot = secondary_store->snapshot();
+    ASSERT_TRUE( secondary_snapshot.has_value() );
+    EXPECT_EQ( secondary_snapshot->runtime, secondRuntime );
+    EXPECT_EQ( core->store_at( outOfRangeStoreIndex ), nullptr );
+
+    const auto first_event = watch.try_pop();
+    ASSERT_TRUE( first_event.has_value() );
+    ASSERT_TRUE( first_event->subject.has_value() );
+    EXPECT_EQ( first_event->subject->runtime, grab::testing::tree::fixtureRuntime );
+
+    const auto second_event = watch.try_pop();
+    ASSERT_TRUE( second_event.has_value() );
+    ASSERT_TRUE( second_event->subject.has_value() );
+    EXPECT_EQ( second_event->subject->runtime, secondRuntime );
+    EXPECT_NE( first_event->subject->runtime, second_event->subject->runtime );
+    EXPECT_FALSE( watch.try_pop().has_value() );
+
+    const auto primary_match = core->resolve( grab::sel::role( grab::role::window ) );
+    ASSERT_TRUE( primary_match.has_value() );
+    EXPECT_EQ( primary_match->ref.node, firstNode.value );
+
+    const auto secondary_match = core->resolve( grab::sel::role( grab::role::button ) );
+    EXPECT_FALSE( secondary_match.has_value() );
+
+    fake_b.inject_delta( grab::spi::UiDelta{
+        .runtime       = secondRuntime,
+        .tree          = secondTree,
+        .epoch         = secondEpoch,
+        .base_revision = initialRevision,
+        .revision      = updatedRevision,
+        .complete      = true,
+        .added_nodes   = {},
+        .changed_nodes =
+            {
+                          grab::UiNodeRecord{
+                    secondNode,
+                    nodeGeneration,
+                    grab::role::button,
+                    visibleState,
+                    {},
+                    grab::UiProvenance{
+                        .runtime  = secondRuntime,
+                        .revision = updatedRevision,
+                    },
+                }, },
+        .removed_nodes    = {},
+        .relation_changes = {},
+    } );
+    ASSERT_TRUE( core->pump_once( context ).has_value() );
+
+    EXPECT_EQ( secondary_store->revision(), updatedRevision );
+    EXPECT_EQ( core->store().revision(), initialRevision );
 }
 
 // NOLINTEND(readability-trailing-comma)

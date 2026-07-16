@@ -1,6 +1,7 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "drivers/semantic/atspi/atspi_tree_source.hpp"
+#include "grab/ids.hpp"
 #include "spi/runtime.hpp"
 
 #include <cstddef>
@@ -64,7 +65,8 @@ namespace grab::drivers::semantic::atspi
                 grab::EventBus&                       event_bus,
                 grab::kernel::TargetRegistry&         targets,
                 AtspiTreeSource::AccessibleEnumerator enumerate_accessibles = {},
-                std::optional<std::string>            x11_alias_authority = std::nullopt
+                std::optional<std::string>            x11_alias_authority = std::nullopt,
+                grab::RuntimeId initial_runtime_id = grab::RuntimeId{ initialGeneration }
             );
 
             ~AtspiRuntime() override;
@@ -114,8 +116,9 @@ namespace grab::drivers::semantic::atspi
             std::unique_ptr<grab::event::AtspiMonitor>    monitor_;
             std::unique_ptr<AtspiTreeSource>              tree_source_;
             std::unique_ptr<AtspiEventSource>             event_source_;
-            std::uint32_t generation_{ initialGeneration };
-            bool          has_started_{};
+            std::uint32_t   generation_{ initialGeneration };
+            grab::RuntimeId runtime_id_{ initialGeneration };
+            bool            has_started_{};
     };
 
 }    // namespace grab::drivers::semantic::atspi

@@ -93,6 +93,14 @@ namespace grab::kernel::lifecycle
             store() noexcept;
 
             [[nodiscard]]
+            std::size_t
+            store_count() const noexcept;
+
+            [[nodiscard]]
+            TreeStore*
+            store_at( std::size_t index ) noexcept;
+
+            [[nodiscard]]
             TargetRegistry&
             registry() noexcept;
 
@@ -112,10 +120,27 @@ namespace grab::kernel::lifecycle
 
         private:
 
+            static constexpr std::uint32_t x11RuntimeIdSeed = 1U;
+
+            struct RuntimeBinding
+            {
+                    spi::Runtime*              runtime{};
+                    spi::TreeSource*           source{};
+                    std::unique_ptr<TreeStore> store;
+                    std::uint64_t              sink_batch_revision{};
+                    std::uint64_t              sink_previous_revision{};
+                    std::vector<std::pair<std::uint64_t, std::uint64_t>> pending_active;
+                    std::vector<std::pair<std::uint64_t, std::uint64_t>> current_active;
+            };
+
             SessionCore();
 
+            RuntimeBinding&
+            make_binding();
+
             void
-            publish_tree_event( const kernel::TreeEvent& event );
+            publish_tree_event( RuntimeBinding&          binding,
+                                const kernel::TreeEvent& event );
 
             void
             compose_atspi_best_effort( grab::core::Reactor*    reactor,
@@ -123,22 +148,30 @@ namespace grab::kernel::lifecycle
 
             [[nodiscard]]
             Result<std::size_t>
-                            drain_source( spi::TreeSource&        source,
-                                          const OperationContext& context );
+                     drain_source( spi::TreeSource&        source,
+                                   TreeStore&              store,
+                                   const OperationContext& context );
 
-            EventBus        bus_;
-            TreeStore       store_;
-            TargetRegistry  owned_registry_;
-            TargetRegistry* registry_{ &owned_registry_ };
-            std::unique_ptr<spi::Runtime>            owned_runtime_;
-            spi::Runtime*                            primary_runtime_{};
-            grab::drivers::desktop::x11::X11Runtime* x11_runtime_{};
-            std::vector<spi::TreeSource*>            attached_;
-            std::vector<DiagnosticEntry>             runtime_diagnostics_;
-            std::uint64_t                            sink_batch_revision_{};
-            std::uint64_t                            sink_previous_revision_{};
-            std::vector<std::pair<std::uint64_t, std::uint64_t>> pending_active_;
-            std::vector<std::pair<std::uint64_t, std::uint64_t>> current_active_;
+            EventBus bus_;
+            std::vector<std::unique_ptr<RuntimeBinding>> bindings_;
+            TargetRegistry                               owned_registry_;
+            TargetRegistry*                              registry_{ &owned_registry_ };
+            std::unique_ptr<spi::Runtime>                owned_runtime_;
+            std::unique_ptr<spi::Runtime>                atspi_runtime_;
+            spi::Runtime*                                primary_runtime_{};
+            grab::drivers::desktop::x11::X11Runtime*     x11_runtime_{};
+            std::vector<DiagnosticEntry>                 runtime_diagnostics_;
+
+            // X11Runtime mints RuntimeId{1} internally from its initial
+            // generation, so this seed accounts for it;
+            // compose_atspi_best_effort() increments the counter to allocate the
+            // next ID. IDs are distinct only for runtimes this session composes
+            // at open. A runtime restart re-mints IDs from its own counter and
+            // can still collide across runtimes; a session-level RuntimeId
+            // authority is deferred to Wave-4 semantic composition. Separate
+            // stores prevent storage collisions; only bus-event subject.runtime
+            // remains ambiguous after such restarts.
+            std::uint32_t next_runtime_id_{ x11RuntimeIdSeed };
     };
 
     [[nodiscard]]
