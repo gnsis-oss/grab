@@ -59,6 +59,11 @@ namespace grab
             std::string  key_name;
     };
 
-    using Action = std::variant<Click, TypeText, Drag, PressKey>;
+    struct Activate
+    {
+            ActionTarget target;
+    };
+
+    using Action = std::variant<Click, TypeText, Drag, PressKey, Activate>;
 
 }    // namespace grab

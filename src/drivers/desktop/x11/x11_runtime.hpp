@@ -26,6 +26,7 @@ namespace grab::drivers::desktop::x11
     class X11InputSeat;
     class X11KeyboardRoute;
     class X11PointerRoute;
+    class X11ActivationRoute;
 
     class X11Runtime final : public grab::spi::Runtime
     {
@@ -111,6 +112,7 @@ namespace grab::drivers::desktop::x11
             std::unique_ptr<X11InputSeat>        input_seat_;
             std::unique_ptr<X11PointerRoute>     pointer_route_;
             std::unique_ptr<X11KeyboardRoute>    keyboard_route_;
+            std::unique_ptr<X11ActivationRoute>  activation_route_;
             std::optional<X11CaptureRoute>       capture_route_;
             std::optional<grab::Error>           capture_route_error_;
             InjectionLedger                      ledger_;

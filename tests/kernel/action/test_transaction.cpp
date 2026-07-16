@@ -78,6 +78,35 @@ namespace
     }
 
     [[nodiscard]]
+    grab::UiSnapshot
+    window_snapshot( grab::RuntimeId runtime )
+    {
+        std::vector<grab::UiNodeRecord> nodes;
+        nodes.push_back( grab::UiNodeRecord{
+            grab::NodeId{1U                          },
+            grab::NodeGeneration{                1U },
+            grab::role::window,
+            grab::state_mask( grab::NodeState::Visible ) | grab::NodeState::Enabled,
+            {                  },
+            grab::UiProvenance{
+                         .runtime  = runtime,.revision = snapshotRevision,
+                         },
+        } );
+        return grab::UiSnapshot::from_records(
+            grab::UiSnapshotMetadata{
+                .runtime  = runtime,
+                .tree     = treeId,
+                .epoch    = grab::TreeEpoch{ 1U },
+                .revision = snapshotRevision,
+                .complete = true,
+            },
+            std::move( nodes ),
+            std::vector<grab::NodeId>{ grab::NodeId{ 1U } },
+            {}
+        );
+    }
+
+    [[nodiscard]]
     grab::Action
     click_control()
     {
@@ -263,4 +292,23 @@ TEST( ActionTransaction,
     EXPECT_EQ( outcome.receipt.commit, grab::CommitStatus::Verified );
     EXPECT_EQ( route.commit_count(), 1U );
     EXPECT_EQ( runtime.seat().neutralize_count(), 1U );
+}
+
+TEST( ActionTransaction,
+      ActivateVerbReservesRouteAndReturnsVerifiedReceipt )
+{
+    grab::testing::FakeRuntime runtime;
+    runtime.inject_snapshot( window_snapshot( runtime.runtime_id() ) );
+    auto& route =
+        runtime.add_route( "physical.activate", grab::spi::RouteKind::Physical );
+    grab::kernel::action::Transaction transaction{ runtime, treeId };
+
+    const grab::Action                activate = grab::Activate{
+        .target = grab::sel::role( grab::role::window ),
+    };
+    const auto outcome = transaction.perform( activate, forced_options() );
+
+    ASSERT_FALSE( outcome.error.has_value() ) << outcome.error->message;
+    EXPECT_EQ( outcome.receipt.commit, grab::CommitStatus::Verified );
+    EXPECT_EQ( route.commit_count(), 1U );
 }

@@ -4,6 +4,7 @@
 #include "drivers/desktop/x11/x11_input_correctness.hpp"
 #include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/keymap.hpp"
+#include "spi/event_source.hpp"
 #include "spi/route.hpp"
 
 #include <array>
@@ -117,6 +118,28 @@ namespace grab::drivers::desktop::x11
             ScratchKeycodePool scratch_pool_;
     };
 
+    class X11ActivationRoute final : public grab::spi::ActionRoute
+    {
+        public:
+
+            X11ActivationRoute( X11TreeSource&          source,
+                                xcb_connection_t*       connection,
+                                xcb_window_t            root,
+                                grab::spi::EventSource& events ) noexcept;
+
+            [[nodiscard]]
+            grab::Result<std::unique_ptr<grab::spi::RouteReservation>>
+            reserve( const grab::spi::ActionRequest& action,
+                     const grab::OperationContext&   context ) override;
+
+        private:
+
+            X11TreeSource*          source_{};
+            xcb_connection_t*       connection_{};
+            xcb_window_t            root_{};
+            grab::spi::EventSource* events_{};
+    };
+
     [[nodiscard]]
     inline std::span<const grab::spi::RouteDescriptor>
     x11_route_descriptors() noexcept
@@ -129,6 +152,9 @@ namespace grab::drivers::desktop::x11
         };
         static constexpr std::array capture_constraints{
             grab::spi::RouteConstraint{ "display", "mapped X11 window" },
+        };
+        static constexpr std::array activation_constraints{
+            grab::spi::RouteConstraint{ "display", "EWMH _NET_ACTIVE_WINDOW" },
         };
         static constexpr std::array descriptors{
             grab::spi::RouteDescriptor{
@@ -146,6 +172,11 @@ namespace grab::drivers::desktop::x11
                                        grab::spi::RouteFidelity::Exact,
                                        grab::spi::RouteLatencyClass::Interactive,
                                        capture_constraints, },
+            grab::spi::RouteDescriptor{
+                                       "x11.activate", grab::spi::RouteKind::Physical,
+                                       grab::spi::RouteFidelity::Exact,
+                                       grab::spi::RouteLatencyClass::Interactive,
+                                       activation_constraints, },
         };
         return descriptors;
     }

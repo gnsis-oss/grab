@@ -476,12 +476,19 @@ namespace grab::kernel::action
                                     .drag_options = verb.options,
                                 };
                             }
-                            else
+                            else if constexpr( std::is_same_v<Verb, PressKey> )
                             {
                                 return spi::ActionRequest{
                                     .verb     = spi::ActionVerb::PressKey,
                                     .target   = *target_,
                                     .key_name = verb.key_name,
+                                };
+                            }
+                            else
+                            {
+                                return spi::ActionRequest{
+                                    .verb   = spi::ActionVerb::Activate,
+                                    .target = *target_,
                                 };
                             }
                         },

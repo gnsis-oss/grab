@@ -436,12 +436,13 @@ namespace grab::client
         context.set_deadline( rpc_deadline() );
 
         if( std::holds_alternative<grab::Drag>( action ) ||
-            std::holds_alternative<grab::PressKey>( action ) )
+            std::holds_alternative<grab::PressKey>( action ) ||
+            std::holds_alternative<grab::Activate>( action ) )
         {
             return grab::fail(
                 grab::ErrorCode::InvalidArgument,
-                "drag and press-key actions are not yet expressible over the socket "
-                "wire; use the in-process (loopback) transport"
+                "drag, press-key, and activate actions are not yet expressible over the "
+                "socket wire; use the in-process (loopback) transport"
             );
         }
 
@@ -479,7 +480,8 @@ namespace grab::client
                     request.set_text( value.text );
                     encode_target( value.target );
                 }
-                // Drag / PressKey are rejected before this visit; nothing to encode.
+                // Drag / PressKey / Activate are rejected before this visit; nothing
+                // to encode.
             },
             action
         );

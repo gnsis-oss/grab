@@ -60,6 +60,7 @@ namespace grab::spi
         TypeText,
         Drag,
         PressKey,
+        Activate,
     };
 
     struct ActionRequest
