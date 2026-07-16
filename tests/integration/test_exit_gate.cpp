@@ -2,9 +2,11 @@
 #include "drivers/desktop/x11/x11_tree_source.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
+#include "grab/event_bus.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/session.hpp"
+#include "kernel/lifecycle/session_impl.hpp"
 #include "transport/codec.hpp"
 
 // clang-format off
@@ -288,6 +290,44 @@ TEST( ExitGate,
     EXPECT_NE( first_session->get(), second_session->get() );
     EXPECT_TRUE( ( *first_session )->is_open() );
     EXPECT_TRUE( ( *second_session )->is_open() );
+
+    // Session isolation: each composition root owns a private bus; events
+    // published in one session must never surface in another.
+    auto first_core  = grab::kernel::lifecycle::SessionCore::open( grab::SessionOptions{
+        .display = std::string{ display },
+        .seat    = {},
+    } );
+    auto second_core = grab::kernel::lifecycle::SessionCore::open( grab::SessionOptions{
+        .display = std::string{ display },
+        .seat    = {},
+    } );
+    ASSERT_TRUE( first_core.has_value() ) << first_core.error().message;
+    ASSERT_TRUE( second_core.has_value() ) << second_core.error().message;
+
+    // NOLINTBEGIN(readability-trailing-comma)
+    auto        first_watch  = ( *first_core )
+                                   ->bus()
+                                   .subscribe( grab::SubscriptionScope{
+                                       .kinds  = { grab::EventKind::NodeChanged },
+                                       .filter = {},
+                                   } );
+    auto        second_watch = ( *second_core )
+                                   ->bus()
+                                   .subscribe( grab::SubscriptionScope{
+                                       .kinds  = { grab::EventKind::NodeChanged },
+                                       .filter = {},
+                                   } );
+    // NOLINTEND(readability-trailing-comma)
+
+    grab::Event synthetic;
+    synthetic.kind     = grab::EventKind::NodeChanged;
+    synthetic.category = grab::EventCategory::Window;
+    ( *first_core )->bus().publish( synthetic );
+
+    const auto delivered = first_watch.try_pop();
+    ASSERT_TRUE( delivered.has_value() );
+    EXPECT_EQ( delivered->kind, grab::EventKind::NodeChanged );
+    EXPECT_FALSE( second_watch.try_pop().has_value() );
 
     grab::drivers::desktop::x11::X11Runtime runtime;
     const grab::OperationContext            context{

@@ -91,6 +91,7 @@ add_executable(grab_kernel_tests
     kernel/capture/test_damage_hint_auditor.cpp
     kernel/capture/test_inject_gate.cpp
     kernel/capture/test_tile_differ.cpp
+    kernel/lifecycle/test_session_core.cpp
     kernel/test_ui.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp

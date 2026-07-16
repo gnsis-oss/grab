@@ -52,9 +52,13 @@ add_library(grab_core STATIC
     src/core/resolver.cpp
     src/core/session.cpp
     src/core/space_graph.cpp
+    src/kernel/lifecycle/session_impl.cpp
 )
 target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
 target_link_libraries(grab_core PRIVATE grab_vendor_l0)
+# Composition root: SessionCore (grab_core) composes the X11 driver stack.
+# The static-library cycle grab_core <-> grab_kernel/grab_driver_x11 is intentional; CMake supports cycles among STATIC libraries.
+target_link_libraries(grab_core PRIVATE grab_driver_x11)
 target_include_directories(grab_core PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_core PUBLIC cxx_std_23)

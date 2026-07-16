@@ -114,6 +114,12 @@ namespace grab::drivers::desktop::x11
         return tree_source_.get();
     }
 
+    grab::kernel::TargetRegistry*
+    X11Runtime::target_registry() noexcept
+    {
+        return &targets_;
+    }
+
     const grab::kernel::TargetRegistry*
     X11Runtime::target_registry() const noexcept
     {

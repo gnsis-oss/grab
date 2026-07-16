@@ -4,6 +4,7 @@
 #include "grab/role.hpp"
 #include "grab/ui.hpp"
 #include "kernel/graph/tree_store.hpp"
+#include "kernel/tree_fixtures.hpp"
 #include "spi/tree_source.hpp"
 
 // clang-format off
@@ -19,58 +20,12 @@
 namespace
 {
 
-    constexpr grab::RuntimeId runtimeId{ 7U };
-    constexpr grab::TreeEpoch treeEpoch{ 2U };
-
-    [[nodiscard]]
-    grab::UiNodeRecord
-    node( std::uint64_t id,
-          grab::RoleId  role     = grab::role::region,
-          std::uint32_t states   = 0U,
-          std::uint64_t revision = 1U )
-    {
-        return grab::UiNodeRecord{
-            grab::NodeId{id                          },
-            grab::NodeGeneration{                  1U },
-            role,
-            states,
-            {                    },
-            grab::UiProvenance{
-                         .runtime  = runtimeId,.revision = revision,
-                         },
-        };
-    }
-
-    [[nodiscard]]
-    grab::UiSnapshot
-    snapshot( std::uint64_t                   revision,
-              std::vector<grab::UiNodeRecord> nodes,
-              std::vector<grab::UiRelation>   relations = {} )
-    {
-        return grab::UiSnapshot::from_records(
-            grab::UiSnapshotMetadata{
-                .runtime  = runtimeId,
-                .tree     = 3U,
-                .epoch    = treeEpoch,
-                .revision = revision,
-                .complete = true,
-            },
-            std::move( nodes ),
-            {},
-            std::move( relations )
-        );
-    }
-
-    [[nodiscard]]
-    grab::spi::UiUpdate
-    update( std::uint64_t    sequence,
-            grab::UiSnapshot value )
-    {
-        return grab::spi::UiUpdate{
-            .source_sequence = sequence,
-            .payload         = std::move( value ),
-        };
-    }
+    using grab::testing::tree::fixtureEpoch;
+    using grab::testing::tree::fixtureRuntime;
+    using grab::testing::tree::fixtureTree;
+    using grab::testing::tree::node;
+    using grab::testing::tree::snapshot;
+    using grab::testing::tree::update;
 
     [[nodiscard]]
     bool
@@ -351,9 +306,9 @@ TEST( TreeStore,
     ASSERT_TRUE( store.apply( update( 1U, snapshot( 1U, { node( 1U ) } ) ) ) );
 
     grab::spi::UiDelta delta{
-        .runtime          = runtimeId,
-        .tree             = 3U,
-        .epoch            = treeEpoch,
+        .runtime          = fixtureRuntime,
+        .tree             = fixtureTree,
+        .epoch            = fixtureEpoch,
         .base_revision    = 0U,
         .revision         = 2U,
         .complete         = true,
@@ -401,9 +356,9 @@ TEST( TreeStore,
     );
 
     grab::spi::UiDelta delta{
-        .runtime          = runtimeId,
-        .tree             = 3U,
-        .epoch            = treeEpoch,
+        .runtime          = fixtureRuntime,
+        .tree             = fixtureTree,
+        .epoch            = fixtureEpoch,
         .base_revision    = 1U,
         .revision         = 2U,
         .complete         = true,
@@ -452,7 +407,7 @@ TEST( TreeStore,
     const auto                restarted = grab::UiSnapshot::from_records(
         grab::UiSnapshotMetadata{
             .runtime  = restartedRuntime,
-            .tree     = 3U,
+            .tree     = fixtureTree,
             .epoch    = grab::TreeEpoch{ 1U },
             .revision = 1U,
             .complete = true,
@@ -479,7 +434,7 @@ TEST( TreeStore,
     EXPECT_EQ( current->runtime, restartedRuntime );
     const auto previous = store.previous_snapshot();
     ASSERT_TRUE( previous.has_value() );
-    EXPECT_EQ( previous->runtime, runtimeId );
+    EXPECT_EQ( previous->runtime, fixtureRuntime );
 }
 
 TEST( TreeStore,
@@ -492,7 +447,7 @@ TEST( TreeStore,
     auto                      restarted = grab::UiSnapshot::from_records(
         grab::UiSnapshotMetadata{
             .runtime  = restarted_runtime,
-            .tree     = 3U,
+            .tree     = fixtureTree,
             .epoch    = grab::TreeEpoch{ 1U },
             .revision = 1U,
             .complete = true,
@@ -531,9 +486,9 @@ TEST( TreeStore,
     const auto gap = store.apply( grab::spi::UiUpdate{
         .source_sequence = 2U,
         .payload         = grab::spi::TreeGap{
-                                              .runtime              = runtimeId,
-                                              .tree                 = 3U,
-                                              .epoch                = treeEpoch,
+                                              .runtime              = fixtureRuntime,
+                                              .tree                 = fixtureTree,
+                                              .epoch                = fixtureEpoch,
                                               .last_source_sequence = 1U,
                                               .dropped              = 4U,
                                               },
@@ -542,9 +497,9 @@ TEST( TreeStore,
     EXPECT_EQ( gap.error().code, grab::ErrorCode::QueueGap );
 
     grab::spi::UiDelta delta{
-        .runtime          = runtimeId,
-        .tree             = 3U,
-        .epoch            = treeEpoch,
+        .runtime          = fixtureRuntime,
+        .tree             = fixtureTree,
+        .epoch            = fixtureEpoch,
         .base_revision    = 1U,
         .revision         = 2U,
         .complete         = true,

@@ -1,12 +1,13 @@
 #include "core/reactor.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
+#include "kernel/lifecycle/session_impl.hpp"
+#include "kernel/lifecycle/startup_signal.hpp"
 
 #include <atomic>
 #include <exception>
 #include <expected>
 #include <functional>
-#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -65,46 +66,6 @@ namespace grab
             };
         }
 
-        class StartupSignal
-        {
-            public:
-
-                StartupSignal()                       = default;
-                ~StartupSignal()                      = default;
-
-                StartupSignal( const StartupSignal& ) = delete;
-                StartupSignal&
-                operator=( const StartupSignal& ) = delete;
-                StartupSignal( StartupSignal&& )  = delete;
-                StartupSignal&
-                operator=( StartupSignal&& ) = delete;
-
-                [[nodiscard]]
-                std::future<grab::Result<void>>
-                future()
-                {
-                    return result_.get_future();
-                }
-
-                void
-                report( grab::Result<void> result )
-                {
-                    const std::scoped_lock lock( mutex_ );
-                    if( reported_ )
-                    {
-                        return;
-                    }
-                    reported_ = true;
-                    result_.set_value( std::move( result ) );
-                }
-
-            private:
-
-                std::mutex                       mutex_;
-                bool                             reported_ = false;
-                std::promise<grab::Result<void>> result_;
-        };
-
     }    // namespace
 
     class Session::Impl
@@ -147,13 +108,14 @@ namespace grab
             run_reactor();
 
             void
-                                join_thread() noexcept;
+                                                            join_thread() noexcept;
 
-            SessionOptions      options_;
-            grab::core::Reactor reactor_;
-            std::thread         reactor_thread_;
-            std::mutex          close_mutex_;
-            std::atomic_bool    open_{ false };
+            SessionOptions                                  options_;
+            grab::core::Reactor                             reactor_;
+            std::thread                                     reactor_thread_;
+            std::mutex                                      close_mutex_;
+            std::unique_ptr<kernel::lifecycle::SessionCore> core_;
+            std::atomic_bool                                open_{ false };
     };
 
     Session::Impl::Impl( SessionOptions options ) :
@@ -164,7 +126,7 @@ namespace grab
     grab::Result<void>
     Session::Impl::start()
     {
-        const auto startup = std::make_shared<StartupSignal>();
+        const auto startup = std::make_shared<kernel::lifecycle::StartupSignal>();
         auto       ready   = startup->future();
 
         try
@@ -202,6 +164,14 @@ namespace grab
             return std::unexpected( std::move( error ) );
         }
 
+        // Compose the live stack when a display is available; without one the
+        // session stays reactor-only (composition diagnostics land with the
+        // AT-SPI attach task).
+        if( auto core = kernel::lifecycle::SessionCore::open( options_ ) )
+        {
+            core_ = std::move( *core );
+        }
+
         open_.store( true, std::memory_order_release );
         return {};
     }
@@ -215,6 +185,7 @@ namespace grab
             reactor_.stop();
         }
         join_thread();
+        core_.reset();
     }
 
     bool

@@ -46,6 +46,10 @@ namespace grab::drivers::desktop::x11
             tree_source() override;
 
             [[nodiscard]]
+            grab::kernel::TargetRegistry*
+            target_registry() noexcept;
+
+            [[nodiscard]]
             const grab::kernel::TargetRegistry*
             target_registry() const noexcept;
 
