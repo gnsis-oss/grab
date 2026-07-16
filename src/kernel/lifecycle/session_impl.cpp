@@ -1,12 +1,17 @@
 #include "drivers/desktop/x11/x11_runtime.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
+#include "grab/event_bus.hpp"
+#include "grab/locator.hpp"
+#include "grab/query.hpp"
 #include "grab/relation.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "kernel/graph/tree_store.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
+#include "kernel/query/evaluator.hpp"
+#include "kernel/query/snapshot_tree_nav.hpp"
 #include "spi/runtime.hpp"
 #include "spi/tree_source.hpp"
 
@@ -116,6 +121,29 @@ namespace grab::kernel::lifecycle
     SessionCore::open_for_test()
     {
         return std::unique_ptr<SessionCore>( new SessionCore() );
+    }
+
+    Result<Match>
+    SessionCore::resolve( const Locator& locator,
+                          Cardinality    cardinality )
+    {
+        auto snapshot = store_.snapshot();
+        if( !snapshot.has_value() )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no tree snapshot" );
+        }
+        const query::SnapshotTreeNav navigation{ *snapshot };
+        return query::resolve( locator,
+                               cardinality,
+                               query::QueryScope{ .navigation = navigation } );
+    }
+
+    Result<Subscription>
+    SessionCore::watch( SubscriptionScope scope,
+                        QueueOptions      options )
+    {
+        return bus_.subscribe( std::move( scope ), options );
     }
 
     Result<void>
@@ -344,6 +372,32 @@ namespace grab::kernel::lifecycle
     SessionCore::primary_runtime() noexcept
     {
         return *primary_runtime_;
+    }
+
+    Result<Match>
+    resolve_verb( SessionCore*   core,
+                  const Locator& locator,
+                  Cardinality    cardinality )
+    {
+        if( core == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no composed display stack" );
+        }
+        return core->resolve( locator, cardinality );
+    }
+
+    Result<Subscription>
+    watch_verb( SessionCore*      core,
+                SubscriptionScope scope,
+                QueueOptions      options )
+    {
+        if( core == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no composed display stack" );
+        }
+        return core->watch( std::move( scope ), options );
     }
 
 }    // namespace grab::kernel::lifecycle

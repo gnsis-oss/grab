@@ -37,5 +37,6 @@ space.hpp
 trace.hpp
 ui.hpp
 version.hpp
+watch.hpp
 window_match.hpp
 workspace.hpp

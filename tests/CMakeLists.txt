@@ -92,6 +92,7 @@ add_executable(grab_kernel_tests
     kernel/capture/test_inject_gate.cpp
     kernel/capture/test_tile_differ.cpp
     kernel/lifecycle/test_session_core.cpp
+    kernel/lifecycle/test_session_verbs.cpp
     kernel/test_ui.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp

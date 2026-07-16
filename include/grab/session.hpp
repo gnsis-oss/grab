@@ -1,6 +1,9 @@
 #pragma once
 
+#include "grab/locator.hpp"
+#include "grab/query.hpp"
 #include "grab/result.hpp"
+#include "grab/watch.hpp"
 #include "grab/workspace.hpp"
 
 #include <functional>
@@ -55,6 +58,16 @@ namespace grab
             [[nodiscard]]
             grab::Result<void>
             post( std::function<void()> fn );
+
+            [[nodiscard]]
+            Result<Match>
+            resolve( const Locator& locator,
+                     Cardinality    cardinality = Cardinality::ExactlyOne );
+
+            [[nodiscard]]
+            Result<Subscription>
+            watch( SubscriptionScope scope,
+                   QueueOptions      options = {} );
 
         private:
 

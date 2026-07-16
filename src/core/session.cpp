@@ -1,4 +1,7 @@
 #include "core/reactor.hpp"
+#include "grab/event_bus.hpp"
+#include "grab/locator.hpp"
+#include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
@@ -100,6 +103,13 @@ namespace grab
             [[nodiscard]]
             grab::Result<void>
             post( std::function<void()> fn );
+
+            [[nodiscard]]
+            kernel::lifecycle::SessionCore*
+            core() noexcept
+            {
+                return core_.get();
+            }
 
         private:
 
@@ -286,6 +296,22 @@ namespace grab
     Session::post( std::function<void()> fn )
     {
         return impl_->post( std::move( fn ) );
+    }
+
+    grab::Result<Match>
+    Session::resolve( const Locator& locator,
+                      Cardinality    cardinality )
+    {
+        return kernel::lifecycle::resolve_verb( impl_->core(), locator, cardinality );
+    }
+
+    grab::Result<Subscription>
+    Session::watch( SubscriptionScope scope,
+                    QueueOptions      options )
+    {
+        return kernel::lifecycle::watch_verb( impl_->core(),
+                                              std::move( scope ),
+                                              options );
     }
 
 }    // namespace grab

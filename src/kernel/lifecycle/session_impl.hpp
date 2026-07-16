@@ -2,6 +2,8 @@
 
 #include "grab/context.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/locator.hpp"
+#include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "kernel/graph/target_registry.hpp"
@@ -43,6 +45,16 @@ namespace grab::kernel::lifecycle
             Result<void>
             attach( spi::Runtime&           runtime,
                     const OperationContext& context );
+
+            [[nodiscard]]
+            Result<Match>
+            resolve( const Locator& locator,
+                     Cardinality    cardinality = Cardinality::ExactlyOne );
+
+            [[nodiscard]]
+            Result<Subscription>
+            watch( SubscriptionScope scope,
+                   QueueOptions      options = {} );
 
             [[nodiscard]]
             EventBus&
@@ -88,5 +100,17 @@ namespace grab::kernel::lifecycle
             std::vector<std::pair<std::uint64_t, std::uint64_t>> pending_active_;
             std::vector<std::pair<std::uint64_t, std::uint64_t>> current_active_;
     };
+
+    [[nodiscard]]
+    Result<Match>
+    resolve_verb( SessionCore*   core,
+                  const Locator& locator,
+                  Cardinality    cardinality );
+
+    [[nodiscard]]
+    Result<Subscription>
+    watch_verb( SessionCore*      core,
+                SubscriptionScope scope,
+                QueueOptions      options );
 
 }    // namespace grab::kernel::lifecycle
