@@ -1,8 +1,8 @@
 #include "codec/png.hpp"
+#include "drivers/desktop/x11/workflow.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
-#include "screen/workflow.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

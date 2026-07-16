@@ -1,10 +1,11 @@
+#include "drivers/desktop/x11/enumerate.hpp"
+#include "drivers/desktop/x11/window_match.hpp"
+#include "drivers/desktop/x11/x11_capture_route.hpp"
+#include "grab/capture.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
 #include "platform/x11/protocol.hpp"
-#include "screen/enumerate.hpp"
-#include "screen/window_match.hpp"
-#include "screen/x11_capture.hpp"
 
 #include <algorithm>
 #include <array>
@@ -39,6 +40,17 @@ namespace grab
 
         using XcbConnection =
             std::unique_ptr<xcb_connection_t, decltype( &xcb_disconnect )>;
+
+        [[nodiscard]]
+        grab::Result<grab::Image>
+        image_of( grab::Result<grab::Frame> frame )
+        {
+            if( !frame.has_value() )
+            {
+                return std::unexpected( std::move( frame.error() ) );
+            }
+            return std::move( frame->image );
+        }
 
         struct ActiveDisplay
         {
@@ -216,12 +228,12 @@ namespace grab
 
     struct Screen::Impl
     {
-            screen::X11Capturer        capturer;
-            std::optional<std::string> display;
+            grab::drivers::desktop::x11::X11CaptureRoute route;
+            std::optional<std::string>                   display;
 
-            Impl( screen::X11Capturer capturer_value,
-                  const char*         display_value ) :
-                capturer( std::move( capturer_value ) ),
+            Impl( grab::drivers::desktop::x11::X11CaptureRoute route_value,
+                  const char*                                  display_value ) :
+                route( std::move( route_value ) ),
                 display( display_value == nullptr ? std::optional<std::string>{}
                                                   : std::optional<std::string>{
                                                         std::string{ display_value }
@@ -256,23 +268,12 @@ namespace grab
     grab::Result<Screen>
     Screen::open( const char* display )
     {
-        auto capturer = screen::X11Capturer::open( display );
-        if( !capturer.has_value() )
+        auto route = grab::drivers::desktop::x11::X11CaptureRoute::open( display );
+        if( !route.has_value() )
         {
-            return std::unexpected( std::move( capturer.error() ) );
+            return std::unexpected( std::move( route.error() ) );
         }
-
-        return Screen{ std::make_unique<Impl>( std::move( *capturer ), display ) };
-    }
-
-    grab::Result<Image>
-    Screen::window( std::uint32_t id )
-    {
-        if( impl_ == nullptr )
-        {
-            return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
-        }
-        return impl_->capturer.capture_window( id );
+        return Screen{ std::make_unique<Impl>( std::move( *route ), display ) };
     }
 
     grab::Result<Image>
@@ -282,7 +283,6 @@ namespace grab
         {
             return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
-
         const std::vector<std::string> candidates =
             grab::screen::normalized_wm_class_candidates( wm_class_candidates );
         if( candidates.empty() )
@@ -301,7 +301,7 @@ namespace grab
         {
             if( grab::screen::wm_class_matches_any( info.wm_class, candidates ) )
             {
-                return impl_->capturer.capture_window( info.id );
+                return image_of( impl_->route.capture_window( info.id ) );
             }
         }
 
@@ -316,7 +316,7 @@ namespace grab
         {
             return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
-        return impl_->capturer.capture_display();
+        return image_of( impl_->route.capture_display() );
     }
 
     grab::Result<Image>
@@ -329,7 +329,7 @@ namespace grab
         {
             return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
-        return impl_->capturer.capture_region( x, y, width, height );
+        return image_of( impl_->route.capture_region( x, y, width, height ) );
     }
 
     grab::Result<Image>
@@ -339,14 +339,13 @@ namespace grab
         {
             return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
         }
-
         auto active_window_id = read_active_window_id( impl_->display_name() );
         if( !active_window_id.has_value() )
         {
             return std::unexpected( std::move( active_window_id.error() ) );
         }
 
-        return impl_->capturer.capture_window( *active_window_id );
+        return image_of( impl_->route.capture_window( *active_window_id ) );
     }
 
 }    // namespace grab

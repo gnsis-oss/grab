@@ -1,6 +1,6 @@
+#include "drivers/desktop/x11/x11_capture.hpp"
 #include "grab/result.hpp"
-#include "screen/virtual_display.hpp"
-#include "screen/x11_capture.hpp"
+#include "session/virtual_display.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

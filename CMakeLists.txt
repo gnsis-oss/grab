@@ -74,9 +74,11 @@ target_compile_definitions(grab_core PUBLIC
 
 add_library(grab_kernel STATIC
     src/kernel/action/transaction.cpp
+    src/kernel/action/polling_event_source.cpp
     src/kernel/action/wait_engine.cpp
     src/kernel/capture/damage_hint_auditor.cpp
     src/kernel/capture/inject_gate.cpp
+    src/kernel/capture/pacing_governor.cpp
     src/kernel/capture/tile_differ.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp
@@ -97,12 +99,7 @@ target_include_directories(grab_codec PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_codec PUBLIC cxx_std_23)
 
 add_library(grab_screen STATIC
-    src/screen/enumerate.cpp
     src/screen/screen.cpp
-    src/screen/virtual_display.cpp
-    src/screen/workflow.cpp
-    src/screen/x11_capture.cpp
-    src/screen/record.cpp
 )
 target_link_libraries(grab_screen
     PUBLIC
@@ -112,7 +109,6 @@ target_link_libraries(grab_screen
         PkgConfig::GRAB_XCB_COMPOSITE
         PkgConfig::GRAB_XCB_SHM
         PkgConfig::GRAB_XCB_RANDR
-        ${GRAB_LIBAV_TARGETS}
 )
 target_include_directories(grab_screen PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_screen PUBLIC cxx_std_23)
@@ -165,8 +161,9 @@ add_library(grab_session STATIC
     src/session/registry.cpp
     src/session/selection.cpp
     src/session/state_machine.cpp
+    src/session/virtual_display.cpp
 )
-target_link_libraries(grab_session PUBLIC grab_core)
+target_link_libraries(grab_session PUBLIC grab_core PkgConfig::GRAB_XCB)
 target_include_directories(grab_session PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_session PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_session PUBLIC cxx_std_23)
@@ -185,6 +182,10 @@ target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 
 add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/coordinate_authority.cpp
+    src/drivers/desktop/x11/enumerate.cpp
+    src/drivers/desktop/x11/record.cpp
+    src/drivers/desktop/x11/workflow.cpp
+    src/drivers/desktop/x11/x11_capture.cpp
     src/drivers/desktop/x11/x11_capture_route.cpp
     src/drivers/desktop/x11/x11_event_source.cpp
     src/drivers/desktop/x11/x11_input_correctness.cpp
@@ -202,6 +203,7 @@ target_link_libraries(grab_driver_x11
         grab_screen
         grab_input
         grab_input_x11
+        ${GRAB_LIBAV_TARGETS}
 )
 target_include_directories(grab_driver_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_x11 PUBLIC cxx_std_23)

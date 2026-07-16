@@ -1,10 +1,10 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "drivers/desktop/x11/coordinate_authority.hpp"
+#include "drivers/desktop/x11/x11_capture.hpp"
 #include "grab/capture.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
-#include "screen/x11_capture.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -36,6 +36,17 @@ namespace grab::drivers::desktop::x11
             [[nodiscard]]
             grab::Result<grab::Frame>
             capture_window( std::uint32_t window );
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture_display();
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture_region( std::int16_t  x,
+                            std::int16_t  y,
+                            std::uint16_t width,
+                            std::uint16_t height );
 
             [[nodiscard]]
             grab::Result<std::vector<grab::TransformRecord>>

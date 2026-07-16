@@ -1,7 +1,7 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "grab/result.hpp"
-#include "screen/enumerate.hpp"
 #include "spi/topology_source.hpp"
 
 #include <cstdint>

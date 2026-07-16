@@ -1,5 +1,5 @@
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "grab/result.hpp"
-#include "screen/enumerate.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

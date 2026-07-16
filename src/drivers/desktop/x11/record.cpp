@@ -1,8 +1,10 @@
 #include "core/reactor.hpp"
+#include "drivers/desktop/x11/record.hpp"
+#include "drivers/desktop/x11/x11_capture_route.hpp"
+#include "grab/capture.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
-#include "screen/record.hpp"
-#include "screen/x11_capture.hpp"
+#include "kernel/capture/pacing_governor.hpp"
 
 #include <array>
 #include <bit>
@@ -44,7 +46,6 @@ namespace grab::screen
 
         constexpr std::uint32_t noFrameLimit          = 0U;
         constexpr std::uint32_t noFramesWritten       = 0U;
-        constexpr std::uint32_t minimumFrameRate      = 1U;
         constexpr std::int64_t  noPacketDuration      = 0;
         constexpr std::int64_t  singleFrameDuration   = 1;
         constexpr std::int64_t  firstPresentationTime = 0;
@@ -54,7 +55,6 @@ namespace grab::screen
         constexpr int           frameAlignment        = 32;
         constexpr int           scaleSourcePlane      = 0;
         constexpr int           noOutputContextFlags  = 0;
-        constexpr int64_t       nanosecondsPerSecond  = 1'000'000'000;
         constexpr auto          noTimerDelay          = std::chrono::nanoseconds{ 0 };
         constexpr AVPixelFormat encoderPixelFormat    = AV_PIX_FMT_YUV420P;
         constexpr AVCodecID     primaryCodec          = AV_CODEC_ID_H264;
@@ -186,15 +186,6 @@ namespace grab::screen
             }
 
             return {};
-        }
-
-        [[nodiscard]]
-        std::chrono::nanoseconds
-        interval_for_fps( std::uint32_t fps ) noexcept
-        {
-            return std::chrono::nanoseconds{
-                nanosecondsPerSecond / static_cast<int64_t>( fps )
-            };
         }
 
         [[nodiscard]]
@@ -358,11 +349,11 @@ namespace grab::screen
 
     struct Recorder::State
     {
-            State( grab::core::Reactor& reactor_value,
-                   X11Capturer          capturer_value,
-                   RecordOptions        options_value ) noexcept :
+            State( grab::core::Reactor&                         reactor_value,
+                   grab::drivers::desktop::x11::X11CaptureRoute route_value,
+                   RecordOptions options_value ) noexcept :
                 reactor( &reactor_value ),
-                capturer( std::move( capturer_value ) ),
+                route( std::move( route_value ) ),
                 options( std::move( options_value ) )
             {
             }
@@ -413,13 +404,13 @@ namespace grab::screen
                                        "recording output path must be non-empty" );
                 }
 
-                if( options.fps < minimumFrameRate )
+                auto governor_result =
+                    grab::kernel::capture::PacingGovernor::for_fps( options.fps );
+                if( !governor_result.has_value() )
                 {
-                    return grab::fail(
-                        grab::ErrorCode::InvalidArgument,
-                        "recording frame rate must be greater than zero"
-                    );
+                    return std::unexpected( std::move( governor_result.error() ) );
                 }
+                governor     = *governor_result;
 
                 auto storage = validate_frame_storage( first_frame );
                 if( !storage.has_value() )
@@ -436,7 +427,6 @@ namespace grab::screen
                 width       = first_frame.width;
                 height      = first_frame.height;
                 source_pix  = *source_format;
-                interval    = interval_for_fps( options.fps );
                 max_frames  = options.max_frames;
                 next_pts    = firstPresentationTime;
                 frame_count = noFramesWritten;
@@ -519,13 +509,13 @@ namespace grab::screen
                     return {};
                 }
 
-                auto image = capturer.capture_display();
-                if( !image.has_value() )
+                auto captured_frame = route.capture_display();
+                if( !captured_frame.has_value() )
                 {
-                    return std::unexpected( std::move( image.error() ) );
+                    return std::unexpected( std::move( captured_frame.error() ) );
                 }
 
-                auto converted = convert_frame_locked( *image );
+                auto converted = convert_frame_locked( captured_frame->image );
                 if( !converted.has_value() )
                 {
                     return converted;
@@ -575,11 +565,15 @@ namespace grab::screen
             }
 
             [[nodiscard]]
-            std::chrono::nanoseconds
-            timer_interval() const
+            std::chrono::steady_clock::time_point
+            next_capture_deadline( std::chrono::steady_clock::time_point from ) const
             {
                 const std::scoped_lock lock( mutex );
-                return interval;
+                if( !governor.has_value() )
+                {
+                    return from;
+                }
+                return governor->next_deadline( from );
             }
 
             [[nodiscard]]
@@ -937,14 +931,14 @@ namespace grab::screen
                 }
             }
 
-            mutable std::mutex         mutex;
-            grab::core::Reactor*       reactor = nullptr;
-            X11Capturer                capturer;
-            RecordOptions              options;
-            std::chrono::nanoseconds   interval{};
-            std::uint32_t              width          = 0U;
-            std::uint32_t              height         = 0U;
-            std::uint32_t              max_frames     = noFrameLimit;
+            mutable std::mutex                                   mutex;
+            grab::core::Reactor*                                 reactor = nullptr;
+            grab::drivers::desktop::x11::X11CaptureRoute         route;
+            RecordOptions                                        options;
+            std::optional<grab::kernel::capture::PacingGovernor> governor;
+            std::uint32_t                                        width  = 0U;
+            std::uint32_t                                        height = 0U;
+            std::uint32_t              max_frames                       = noFrameLimit;
             std::uint32_t              frame_count    = noFramesWritten;
             std::int64_t               next_pts       = firstPresentationTime;
             AVPixelFormat              source_pix     = AV_PIX_FMT_NONE;
@@ -1002,14 +996,14 @@ namespace grab::screen
         try
         {
             const auto fired_at = std::chrono::steady_clock::now();
-            const auto interval = state->timer_interval();
             auto       recorded = state->record_one_frame();
             if( !recorded.has_value() )
             {
                 state->remember_async_error( std::move( recorded.error() ) );
                 return;
             }
-            State::schedule_next_timer( state, fired_at + interval );
+            State::schedule_next_timer( state,
+                                        state->next_capture_deadline( fired_at ) );
         }
         catch( const std::exception& exception )
         {
@@ -1065,30 +1059,31 @@ namespace grab::screen
     {
         const char* const display =
             options.display.empty() ? nullptr : options.display.c_str();
-        auto capturer = X11Capturer::open( display );
-        if( !capturer.has_value() )
+        auto route = grab::drivers::desktop::x11::X11CaptureRoute::open( display );
+        if( !route.has_value() )
         {
-            return std::unexpected( std::move( capturer.error() ) );
+            return std::unexpected( std::move( route.error() ) );
         }
 
-        auto first_frame = capturer->capture_display();
+        auto first_frame = route->capture_display();
         if( !first_frame.has_value() )
         {
             return std::unexpected( std::move( first_frame.error() ) );
         }
 
-        X11Capturer moved_capturer = std::move( *capturer );
-        auto        state =
-            std::make_shared<State>( reactor, std::move( moved_capturer ), options );
-        auto initialized = state->initialize( *first_frame );
+        auto moved_route = std::move( *route );
+        auto state =
+            std::make_shared<State>( reactor, std::move( moved_route ), options );
+        auto initialized = state->initialize( first_frame->image );
         if( !initialized.has_value() )
         {
             return std::unexpected( std::move( initialized.error() ) );
         }
 
-        State::schedule_next_timer( state,
-                                    std::chrono::steady_clock::now() +
-                                        state->timer_interval() );
+        State::schedule_next_timer(
+            state,
+            state->next_capture_deadline( std::chrono::steady_clock::now() )
+        );
         return Recorder{ std::move( state ) };
     }
 

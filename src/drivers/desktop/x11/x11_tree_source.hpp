@@ -1,11 +1,11 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "grab/ids.hpp"
 #include "grab/presentation.hpp"
 #include "grab/result.hpp"
 #include "grab/ui.hpp"
 #include "kernel/graph/target_registry.hpp"
-#include "screen/enumerate.hpp"
 #include "spi/tree_source.hpp"
 
 #include <cstdint>

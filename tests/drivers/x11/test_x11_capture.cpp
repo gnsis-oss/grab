@@ -1,6 +1,6 @@
+#include "drivers/desktop/x11/x11_capture.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
-#include "screen/x11_capture.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

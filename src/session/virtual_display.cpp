@@ -1,6 +1,6 @@
 #include "grab/process_ref.hpp"
 #include "grab/result.hpp"
-#include "screen/virtual_display.hpp"
+#include "session/virtual_display.hpp"
 
 #include <array>
 #include <cerrno>

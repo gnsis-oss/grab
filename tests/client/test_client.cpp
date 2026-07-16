@@ -1,6 +1,7 @@
 #include "client/client.hpp"
 #include "client/loopback_transport.hpp"
 #include "client/unix_socket_transport.hpp"
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "grab/capture.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -13,7 +14,6 @@
 #include "grab/session.hpp"
 #include "grab/trace.hpp"
 #include "grab/ui.hpp"
-#include "screen/enumerate.hpp"
 #include "transport/server.hpp"
 
 // clang-format off

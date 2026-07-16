@@ -40,12 +40,7 @@ add_executable(grab_core_tests
     core/test_version.cpp
     codec/test_image.cpp
     codec/test_png.cpp
-    screen/test_enumerate.cpp
     screen/test_screen.cpp
-    screen/test_virtual_display.cpp
-    screen/test_workflow.cpp
-    screen/test_x11_capture.cpp
-    screen/test_record.cpp
     image/test_compare.cpp
     input/test_keymap.cpp
     input/test_gestures.cpp
@@ -87,9 +82,11 @@ target_include_directories(grab_client_tests PRIVATE
 
 add_executable(grab_kernel_tests
     kernel/action/test_transaction.cpp
+    kernel/action/test_polling_event_source.cpp
     kernel/action/test_wait_engine.cpp
     kernel/capture/test_damage_hint_auditor.cpp
     kernel/capture/test_inject_gate.cpp
+    kernel/capture/test_pacing_governor.cpp
     kernel/capture/test_tile_differ.cpp
     kernel/lifecycle/test_session_core.cpp
     kernel/lifecycle/test_session_verbs.cpp
@@ -107,6 +104,11 @@ gtest_discover_tests(grab_kernel_tests)
 
 add_executable(grab_driver_x11_tests
     drivers/x11/test_coordinate_authority.cpp
+    drivers/x11/test_enumerate.cpp
+    drivers/x11/test_record.cpp
+    drivers/x11/test_virtual_display.cpp
+    drivers/x11/test_workflow.cpp
+    drivers/x11/test_x11_capture.cpp
     drivers/x11/test_x11_capture_route.cpp
     drivers/x11/test_x11_event_source.cpp
     drivers/x11/test_x11_input_correctness.cpp
@@ -116,6 +118,8 @@ add_executable(grab_driver_x11_tests
 target_link_libraries(grab_driver_x11_tests PRIVATE
     grab_driver_x11
     grab_vendor_l0
+    grab_notify
+    ${GRAB_LIBAV_TARGETS}
     GTest::gtest_main
 )
 target_include_directories(grab_driver_x11_tests PRIVATE
