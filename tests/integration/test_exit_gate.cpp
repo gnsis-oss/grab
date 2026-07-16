@@ -1,13 +1,13 @@
+#include "client/client.hpp"
+#include "client/loopback_transport.hpp"
 #include "core/reactor.hpp"
-#include "drivers/desktop/x11/x11_runtime.hpp"
-#include "drivers/desktop/x11/x11_tree_source.hpp"
 #include "grab/capture.hpp"
-#include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/ids.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
+#include "grab/origin.hpp"
 #include "grab/session.hpp"
 #include "grab/space.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
@@ -20,13 +20,13 @@
 #include <xcb/xproto.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
-#include <vector>
 // clang-format on
 
 namespace
@@ -41,7 +41,6 @@ namespace
     constexpr std::uint16_t    windowWidth  = 320U;
     constexpr std::uint16_t    windowHeight = 180U;
     constexpr std::uint8_t     format32Bits = 32U;
-    constexpr std::uint32_t    firstTree    = 1U;
     constexpr std::int64_t     browserPid   = 4'242;
 
     struct XcbWindowGuard
@@ -144,52 +143,6 @@ namespace
                                                                format32Bits,
                                                                1U,
                                                                &window ) );
-    }
-
-    [[nodiscard]]
-    bool
-    property_equals( const grab::UiNodeRecord& node,
-                     grab::PropertyId          property,
-                     std::string_view          expected )
-    {
-        const auto  value = node.property( property );
-        const auto* text  = std::get_if<std::string>( &value.value );
-        return value.state ==
-               grab::PropertyRead::State::Present &&
-               text !=
-               nullptr &&
-             *text == expected;
-    }
-
-    [[nodiscard]]
-    std::vector<const grab::UiNodeRecord*>
-    matching_windows( const grab::UiSnapshot& snapshot,
-                      std::string_view        title )
-    {
-        std::vector<const grab::UiNodeRecord*> matches;
-        for( const auto& node : snapshot.nodes() )
-        {
-            if( node.role ==
-                grab::role::window &&
-                property_equals( node, grab::property::title, title ) &&
-                property_equals( node, grab::property::window_class, windowClass ) )
-            {
-                matches.push_back( &node );
-            }
-        }
-        return matches;
-    }
-
-    [[nodiscard]]
-    bool
-    has_route( const grab::drivers::desktop::x11::X11Runtime& runtime,
-               std::string_view                               name )
-    {
-        return std::ranges::any_of( runtime.routes(),
-                                    [name]( const auto& route )
-                                    {
-                                        return route.name == name;
-                                    } );
     }
 
 }    // namespace
@@ -334,21 +287,6 @@ TEST( ExitGate,
     EXPECT_EQ( delivered->kind, grab::EventKind::NodeChanged );
     EXPECT_FALSE( second_watch.try_pop().has_value() );
 
-    grab::drivers::desktop::x11::X11Runtime runtime;
-    const grab::OperationContext            context{
-        .deadline = grab::Deadline::unbounded(),
-    };
-    ASSERT_TRUE( runtime.start( context ).has_value() );
-    ASSERT_NE( runtime.tree_source(), nullptr );
-
-    // TODO(phase1): Session has no attach/register-runtime operation yet.  Starting
-    // the runtime beside two live Sessions is the closest currently exposed seam.
-    EXPECT_EQ( runtime.name(), std::string_view{ "x11" } );
-    EXPECT_NE( runtime.target_registry(), nullptr );
-
-    auto initial_snapshot = runtime.tree_source()->snapshot( firstTree, context );
-    ASSERT_TRUE( initial_snapshot.has_value() );
-
     const auto locator = grab::sel::all(
         { grab::sel::role( grab::role::window ),
           grab::sel::property( grab::property::title, std::string{ windowTitle } ),
@@ -361,64 +299,54 @@ TEST( ExitGate,
     ASSERT_TRUE( reparsed_locator.has_value() );
     EXPECT_EQ( *reparsed_locator, locator );
 
-    // TODO(phase1): Locator has no resolve()/exactly_one() API.  Apply the same
-    // predicates to the generic snapshot and prove the single node maps back to
-    // the native test XID; replace this with locator.exactly_one() once exposed.
-    const auto matches = matching_windows( *initial_snapshot, windowTitle );
-    ASSERT_EQ( matches.size(), 1U );
-    const auto* const node = matches.front();
-    ASSERT_NE( node, nullptr );
+    const auto session_match = ( *first_session )->resolve( locator );
+    ASSERT_TRUE( session_match.has_value() ) << session_match.error().message;
+    EXPECT_NE( session_match->ref.node, 0U );
+    EXPECT_NE( session_match->ref.generation.value, 0U );
+    EXPECT_NE( session_match->provenance.runtime.value, 0U );
+    EXPECT_GT( session_match->snapshot_revision, 0U );
 
-    const grab::WidgetRef resolved_ref{
-        .runtime    = initial_snapshot->runtime,
-        .tree       = initial_snapshot->tree,
-        .epoch      = initial_snapshot->epoch,
-        .node       = node->id.value,
-        .generation = node->generation,
-    };
-    auto* const x11_source = dynamic_cast<grab::drivers::desktop::x11::X11TreeSource*>(
-        runtime.tree_source()
-    );
-    ASSERT_NE( x11_source, nullptr );
-    const auto resolved_xid = x11_source->resolve_xid( resolved_ref );
-    ASSERT_TRUE( resolved_xid.has_value() );
-    EXPECT_EQ( *resolved_xid, test_window.window );
-    EXPECT_NE( node->generation.value, 0U );
-    EXPECT_NE( node->provenance().runtime.value, 0U );
-    EXPECT_NE( node->provenance().revision, 0U );
+    // NOLINTBEGIN(readability-trailing-comma)
+    auto input_watch =
+        ( *first_session )
+            ->watch( grab::SubscriptionScope{
+                .kinds  = { grab::EventKind::MouseClick, grab::EventKind::KeyDown },
+                .filter = {},
+    } );
+    // NOLINTEND(readability-trailing-comma)
+    ASSERT_TRUE( input_watch.has_value() ) << input_watch.error().message;
+    EXPECT_NE( input_watch->id(), grab::SubscriptionId{} );
 
-    const auto bounds_read = node->property( grab::property::bounds );
-    ASSERT_EQ( bounds_read.state, grab::PropertyRead::State::Present );
-    const auto* const bounds = std::get_if<grab::SpaceRect>( &bounds_read.value );
-    ASSERT_NE( bounds, nullptr );
-    EXPECT_NE( bounds->space.value, 0U );
-    EXPECT_GT( bounds->w, 0.0 );
-    EXPECT_GT( bounds->h, 0.0 );
+    const auto click_receipt =
+        ( *first_session )->perform( grab::Click{ .target = *session_match } );
+    ASSERT_TRUE( click_receipt.has_value() ) << click_receipt.error().message;
+    EXPECT_TRUE( click_receipt->commit ==
+                 grab::CommitStatus::Committed ||
+                 click_receipt->commit == grab::CommitStatus::Verified );
+    EXPECT_FALSE( click_receipt->routes.empty() );
 
-    EXPECT_TRUE( has_route( runtime, "x11.pointer" ) );
-    EXPECT_TRUE( has_route( runtime, "x11.keyboard" ) );
-    EXPECT_TRUE( has_route( runtime, "x11.capture" ) );
+    const auto type_receipt =
+        ( *first_session )
+            ->perform( grab::TypeText{ .target = *session_match, .text = "phase one" } );
+    ASSERT_TRUE( type_receipt.has_value() ) << type_receipt.error().message;
+    EXPECT_TRUE( type_receipt->commit ==
+                 grab::CommitStatus::Committed ||
+                 type_receipt->commit == grab::CommitStatus::Verified );
+    EXPECT_FALSE( type_receipt->routes.empty() );
 
-    const grab::Match resolved_match{
-        .ref                = resolved_ref,
-        .mode               = grab::ConsistencyMode::Live,
-        .snapshot_revision  = initial_snapshot->revision,
-        .matched_predicates = {"role=window","title","window_class"                                },
-        .provenance         = grab::ProviderProvenance{
-                               .provider           = "x11",
-                               .candidate_provider = "x11",
-                               .runtime            = initial_snapshot->runtime,.revision           = initial_snapshot->revision,
-                               },
-    };
-    const grab::Click    click{ .target = resolved_match };
-    const grab::TypeText type_text{
-        .target = resolved_match,
-        .text   = "phase one",
-    };
-    ASSERT_NE( std::get_if<grab::Match>( &click.target ), nullptr );
-    ASSERT_NE( std::get_if<grab::Match>( &type_text.target ), nullptr );
-    EXPECT_EQ( std::get<grab::Match>( click.target ).ref, resolved_ref );
-    EXPECT_EQ( std::get<grab::Match>( type_text.target ).ref, resolved_ref );
+    std::size_t injected_events = 0U;
+    while( auto event = input_watch->try_pop() )
+    {
+        if( event->kind !=
+            grab::EventKind::MouseClick &&
+            event->kind != grab::EventKind::KeyDown )
+        {
+            continue;
+        }
+        EXPECT_EQ( event->origin, grab::EventOrigin::InjectedSelf );
+        ++injected_events;
+    }
+    EXPECT_GT( injected_events, 0U );
 
     // Output-name capture through the public Session verb.
     const auto outputs = grab::screen::list_outputs();
@@ -433,17 +361,12 @@ TEST( ExitGate,
 
     // Match-target capture: resolve the test window through the session's own
     // store, then capture that window's surface.
-    const auto session_match = ( *first_session )->resolve( locator );
-    ASSERT_TRUE( session_match.has_value() ) << session_match.error().message;
     auto window_frame =
         ( *first_session )->capture( grab::CaptureTarget{ *session_match } );
     ASSERT_TRUE( window_frame.has_value() ) << window_frame.error().message;
     EXPECT_NE( window_frame->id.value, 0U );
     EXPECT_EQ( window_frame->image.width, windowWidth );
     EXPECT_EQ( window_frame->image.height, windowHeight );
-
-    // TODO(phase1): the exit gate still exercises no public perform(); the
-    // Task-9 rewrite drives every verb through Session/client.
 
     ASSERT_TRUE( set_text_property( test_window.connection,
                                     test_window.window,
@@ -457,13 +380,45 @@ TEST( ExitGate,
                                     changedWindowTitle ) );
     ASSERT_GT( xcb_flush( test_window.connection ), 0 );
 
-    auto changed_snapshot = x11_source->snapshot( firstTree, context );
-    ASSERT_TRUE( changed_snapshot.has_value() );
-    EXPECT_GT( changed_snapshot->revision, initial_snapshot->revision );
-    EXPECT_EQ( matching_windows( *changed_snapshot, changedWindowTitle ).size(), 1U );
+    const auto changed_locator = grab::sel::all(
+        { grab::sel::role( grab::role::window ),
+          grab::sel::property( grab::property::title,
+                               std::string{ changedWindowTitle } ),
+          grab::sel::property( grab::property::window_class,
+                               std::string{ windowClass } ) }
+    );
 
-    // TODO(phase1): The tree source exposes initial/current state, but Session has
-    // no node watch API that yields that initial state plus a SubscriptionId.
+    auto client_session = grab::Session::open( grab::SessionOptions{
+        .display = std::string{ display },
+        .seat    = {},
+    } );
+    ASSERT_TRUE( client_session.has_value() ) << client_session.error().message;
+    grab::client::LoopbackTransport loopback{ std::move( *client_session ) };
+    grab::client::Client            client{ loopback };
+
+    const auto                      client_match = client.resolve( changed_locator );
+    ASSERT_TRUE( client_match.has_value() ) << client_match.error().message;
+
+    auto client_output_frame =
+        client.capture( grab::CaptureTarget{ outputs->front().name },
+                        grab::CaptureOptions{} );
+    ASSERT_TRUE( client_output_frame.has_value() )
+        << client_output_frame.error().message;
+    EXPECT_NE( client_output_frame->id.value, 0U );
+
+    auto client_window_frame =
+        client.capture( grab::CaptureTarget{ *client_match }, grab::CaptureOptions{} );
+    ASSERT_TRUE( client_window_frame.has_value() )
+        << client_window_frame.error().message;
+    EXPECT_EQ( client_window_frame->image.width, windowWidth );
+    EXPECT_EQ( client_window_frame->image.height, windowHeight );
+
+    const auto client_receipt =
+        client.perform( grab::Click{ .target = *client_match }, grab::ActionOptions{} );
+    ASSERT_TRUE( client_receipt.has_value() ) << client_receipt.error().message;
+    EXPECT_TRUE( client_receipt->commit ==
+                 grab::CommitStatus::Committed ||
+                 client_receipt->commit == grab::CommitStatus::Verified );
 
     const grab::Event legacy_event{
         .timestamp = 1.25,
@@ -492,8 +447,6 @@ TEST( ExitGate,
     EXPECT_EQ( decoded_tab->pid, grab::Pid{ browserPid } );
     EXPECT_EQ( decoded_tab->tab_title, "Exit gate" );
     EXPECT_EQ( decoded_tab->prev_tab_title, "Phase zero" );
-
-    EXPECT_TRUE( runtime.stop().has_value() );
 }
 
 TEST( ExitGate,
