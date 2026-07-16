@@ -108,6 +108,9 @@ TEST( EventServiceHardening,
         "ListEventTypes",
         "Subscribe",
         "SetClientContext",
+        "ResolveNode",
+        "PerformAction",
+        "CaptureFrame",
     } );
 
     EXPECT_EQ( service.registered_rpc_count(), rpc_names.size() );

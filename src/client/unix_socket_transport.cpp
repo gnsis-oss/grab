@@ -1,5 +1,6 @@
 #include "client/transport.hpp"
 #include "client/unix_socket_transport.hpp"
+#include "codec/png.hpp"
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
@@ -7,16 +8,19 @@
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/ids.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
 #include "grab/result.hpp"
+#include "grab/space.hpp"
 #include "grab/trace.hpp"
 #include "transport/codec.hpp"
 #include "transport/proto_descriptor.hpp"
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <expected>
 #include <grpcpp/channel.h>
@@ -29,9 +33,13 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace grab::client
@@ -48,10 +56,155 @@ namespace grab::client
             return std::chrono::system_clock::now() + rpcTimeout;
         }
 
+        constexpr std::string_view grabErrorDetailPrefix{ "grab-error: " };
+
+        [[nodiscard]]
+        std::optional<grab::ErrorCode>
+        error_code_from_details( std::string_view details ) noexcept
+        {
+            if( !details.starts_with( grabErrorDetailPrefix ) )
+            {
+                return std::nullopt;
+            }
+            const auto name = details.substr( grabErrorDetailPrefix.size() );
+            for( const auto& descriptor : grab::error_descriptors() )
+            {
+                if( descriptor.name == name )
+                {
+                    return descriptor.code;
+                }
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]]
+        std::uint32_t
+        encode_cardinality( grab::Cardinality cardinality ) noexcept
+        {
+            switch( cardinality )
+            {
+                case grab::Cardinality::ExactlyOne :
+                    return 0U;
+                case grab::Cardinality::First :
+                    return 1U;
+                case grab::Cardinality::All :
+                    return 2U;
+            }
+            return 0U;
+        }
+
+        [[nodiscard]]
+        std::uint32_t
+        encode_routing( grab::RoutePolicy routing ) noexcept
+        {
+            switch( routing )
+            {
+                case grab::RoutePolicy::PreferSemantic :
+                    return 0U;
+                case grab::RoutePolicy::SemanticOnly :
+                    return 1U;
+                case grab::RoutePolicy::PhysicalOnly :
+                    return 2U;
+            }
+            return 0U;
+        }
+
+        [[nodiscard]]
+        std::uint32_t
+        encode_retry( grab::RetryClass retry ) noexcept
+        {
+            switch( retry )
+            {
+                case grab::RetryClass::Never :
+                    return 0U;
+                case grab::RetryClass::ResolveOnly :
+                    return 1U;
+                case grab::RetryClass::Idempotent :
+                    return 2U;
+                case grab::RetryClass::Compensated :
+                    return 3U;
+            }
+            return 0U;
+        }
+
+        [[nodiscard]]
+        grab::ConsistencyMode
+        decode_consistency( std::uint32_t value ) noexcept
+        {
+            switch( value )
+            {
+                case 0U :
+                    return grab::ConsistencyMode::Live;
+                case 1U :
+                    return grab::ConsistencyMode::Revisioned;
+                case 2U :
+                    return grab::ConsistencyMode::Pinned;
+                default :
+                    return grab::ConsistencyMode::Live;
+            }
+        }
+
+        void
+        encode_widget_ref( const grab::WidgetRef&        ref,
+                           eventgrab::v1::WidgetRefWire* wire )
+        {
+            wire->set_runtime( ref.runtime.value );
+            wire->set_tree( ref.tree );
+            wire->set_epoch( ref.epoch.value );
+            wire->set_node( ref.node );
+            wire->set_generation( ref.generation.value );
+        }
+
+        [[nodiscard]]
+        grab::Match
+        decode_match( const eventgrab::v1::MatchWire& wire )
+        {
+            return grab::Match{
+                .ref =
+                    grab::WidgetRef{
+                                    .runtime    = grab::RuntimeId{ wire.ref().runtime() },
+                                    .tree       = wire.ref().tree(),
+                                    .epoch      = grab::TreeEpoch{ wire.ref().epoch() },
+                                    .node       = wire.ref().node(),
+                                    .generation = grab::NodeGeneration{ wire.ref().generation() },
+                                    },
+                .mode              = decode_consistency( wire.consistency() ),
+                .snapshot_revision = wire.snapshot_revision(),
+                .matched_predicates =
+                    { wire.matched_predicates().begin(),
+                                    wire.matched_predicates().end() },
+                .provenance = grab::ProviderProvenance{
+                                    .provider           = wire.provider(),
+                                    .candidate_provider = wire.candidate_provider(),
+                                    .runtime            = grab::RuntimeId{ wire.provenance_runtime() },
+                                    .revision           = wire.provenance_revision(),
+                                    },
+            };
+        }
+
         [[nodiscard]]
         grab::Error
         grpc_error( const grpc::Status& status )
         {
+            if( const auto typed = error_code_from_details( status.error_details() );
+                typed.has_value() )
+            {
+                auto message = status.error_message();
+                if( message.empty() )
+                {
+                    message = "gRPC transport request failed";
+                }
+                return grab::Error{
+                    .code        = *typed,
+                    .message     = std::move( message ),
+                    .capability  = {},
+                    .target      = {},
+                    .attempts    = {},
+                    .disposition = grab::default_disposition_of( *typed ),
+                    .diagnostics = {},
+                };
+            }
+
             grab::ErrorCode        code        = grab::ErrorCode::ProtocolError;
             grab::ErrorDisposition disposition = grab::ErrorDisposition::Fatal;
 
@@ -258,30 +411,163 @@ namespace grab::client
     UnixSocketTransport::resolve( const grab::Locator& locator,
                                   grab::Cardinality    cardinality )
     {
-        static_cast<void>( locator );
-        static_cast<void>( cardinality );
-        return grab::fail( grab::ErrorCode::CapabilityUnavailable,
-                           "resolve is not yet available over the socket transport" );
+        grpc::ClientContext                context;
+        eventgrab::v1::ResolveNodeRequest  request;
+        eventgrab::v1::ResolveNodeResponse response;
+        context.set_deadline( rpc_deadline() );
+        request.set_locator( locator.to_string() );
+        request.set_cardinality( encode_cardinality( cardinality ) );
+
+        const auto status = impl_->stub_->ResolveNode( &context, request, &response );
+        if( !status.ok() )
+        {
+            return std::unexpected( grpc_error( status ) );
+        }
+        return decode_match( response.match() );
     }
 
     grab::Result<grab::Receipt>
     UnixSocketTransport::perform( const grab::Action&        action,
                                   const grab::ActionOptions& options )
     {
-        static_cast<void>( action );
-        static_cast<void>( options );
-        return grab::fail( grab::ErrorCode::CapabilityUnavailable,
-                           "perform is not yet available over the socket transport" );
+        grpc::ClientContext                  context;
+        eventgrab::v1::PerformActionRequest  request;
+        eventgrab::v1::PerformActionResponse response;
+        context.set_deadline( rpc_deadline() );
+
+        const auto encode_target = [&request]( const grab::ActionTarget& target )
+        {
+            std::visit(
+                [&request]( const auto& value )
+                {
+                    using Target = std::decay_t<decltype( value )>;
+                    if constexpr( std::is_same_v<Target, grab::Locator> )
+                    {
+                        request.set_locator( value.to_string() );
+                    }
+                    else
+                    {
+                        encode_widget_ref( value.ref, request.mutable_target_ref() );
+                    }
+                },
+                target
+            );
+        };
+
+        std::visit(
+            [&request, &encode_target]( const auto& value )
+            {
+                using ActionType = std::decay_t<decltype( value )>;
+                if constexpr( std::is_same_v<ActionType, grab::Click> )
+                {
+                    request.set_command( "input.click" );
+                }
+                else
+                {
+                    request.set_command( "input.type" );
+                    request.set_text( value.text );
+                }
+                encode_target( value.target );
+            },
+            action
+        );
+
+        auto* wire_options = request.mutable_options();
+        wire_options->set_deadline_ms( static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>( options.deadline )
+                .count()
+        ) );
+        wire_options->set_cardinality( encode_cardinality( options.cardinality ) );
+        wire_options->set_routing( encode_routing( options.routing ) );
+        wire_options->set_retry( encode_retry( options.retry ) );
+        wire_options->set_force( options.force );
+
+        const auto status = impl_->stub_->PerformAction( &context, request, &response );
+        if( !status.ok() )
+        {
+            return std::unexpected( grpc_error( status ) );
+        }
+
+        grab::Receipt receipt{};
+        const auto&   wire = response.receipt();
+        if( const auto commit =
+                grab::detail::commit_status_name.value_of( wire.commit_status() );
+            commit.has_value() )
+        {
+            receipt.commit = *commit;
+        }
+        receipt.fallback_used     = wire.fallback_used();
+        receipt.forced            = wire.forced();
+        receipt.locator           = wire.locator();
+        receipt.snapshot_revision = wire.snapshot_revision();
+        receipt.routes.reserve( static_cast<std::size_t>( wire.routes_size() ) );
+        for( const auto& route : wire.routes() )
+        {
+            receipt.routes.push_back( grab::RouteAttempt{
+                .route     = route,
+                .selected  = false,
+                .rejection = {},
+                .detail    = {},
+            } );
+        }
+        return receipt;
     }
 
     grab::Result<grab::Frame>
     UnixSocketTransport::capture( const grab::CaptureTarget&  target,
                                   const grab::CaptureOptions& options )
     {
-        static_cast<void>( target );
+        grpc::ClientContext                 context;
+        eventgrab::v1::CaptureFrameRequest  request;
+        eventgrab::v1::CaptureFrameResponse response;
+        context.set_deadline( rpc_deadline() );
+
+        if( const auto* output = std::get_if<std::string>( &target ) )
+        {
+            request.set_output( *output );
+        }
+        else
+        {
+            return grab::fail(
+                grab::ErrorCode::InvalidArgument,
+                "socket capture requires an output name; node-grade capture targets "
+                "are not yet expressible over the wire"
+            );
+        }
+
+        // Capture options are currently enforced by the server-side defaults.
         static_cast<void>( options );
-        return grab::fail( grab::ErrorCode::CapabilityUnavailable,
-                           "capture is not yet available over the socket transport" );
+        const auto status = impl_->stub_->CaptureFrame( &context, request, &response );
+        if( !status.ok() )
+        {
+            return std::unexpected( grpc_error( status ) );
+        }
+
+        const auto& png   = response.png();
+        auto        image = grab::codec::decode_png(
+            std::as_bytes( std::span{ png.data(), png.size() } )
+        );
+        if( !image.has_value() )
+        {
+            return std::unexpected( std::move( image.error() ) );
+        }
+        const auto& meta = response.meta();
+        return grab::Frame{
+            .id    = grab::FrameId{ meta.frame_id() },
+            .image = std::move( *image ),
+            .space =
+                grab::CoordinateSpaceId{
+                    static_cast<decltype( grab::CoordinateSpaceId{}.value )>(
+                        meta.space()
+                    )
+                },
+            .generation     = grab::CaptureGeneration{ static_cast<std::uint32_t>(
+                meta.generation()
+            ) },
+            .captured_at_ns = meta.captured_at_ns(),
+            .content_rect   = {},
+            .scale          = 1.0,
+        };
     }
 
     grab::Result<void>

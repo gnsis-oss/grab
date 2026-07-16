@@ -4,6 +4,7 @@
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/result.hpp"
+#include "grab/session.hpp"
 #include "service/daemon.hpp"
 #include "storage/jsonl_sink.hpp"
 #include "transport/server.hpp"
@@ -273,6 +274,7 @@ namespace grab::service
             grab::EventBus                                  bus_;
             grab::core::Reactor                             reactor_;
             grab::event::SourceRegistry                     registry_;
+            std::unique_ptr<grab::Session>                  session_;
             std::optional<grab::transport::TransportServer> server_;
             std::optional<grab::storage::JsonlSink>         sink_;
             std::shared_ptr<DrainState>                     drain_state_;
@@ -326,8 +328,19 @@ namespace grab::service
     grab::Result<void>
     Daemon::Impl::start_transport()
     {
-        auto transport =
-            grab::transport::TransportServer::start( endpoint_, bus_, &registry_ );
+        // The daemon owns one public Session so the wire verbs share the same
+        // composition root as local callers. Without a display the session
+        // still opens (reactor-only) and its verbs report CapabilityUnavailable.
+        auto session = grab::Session::open( grab::SessionOptions{} );
+        if( session.has_value() )
+        {
+            session_ = std::move( *session );
+        }
+
+        auto transport = grab::transport::TransportServer::start( endpoint_,
+                                                                  bus_,
+                                                                  &registry_,
+                                                                  session_.get() );
         if( !transport.has_value() )
         {
             return std::unexpected( std::move( transport.error() ) );
@@ -609,6 +622,7 @@ namespace grab::service
             server_.reset();
         }
 
+        session_.reset();
         signal_drain_stop();
         join_drain();
         flush_and_close_sink();

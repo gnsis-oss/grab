@@ -1,3 +1,4 @@
+#include "codec/png.hpp"
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
@@ -5,6 +6,11 @@
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/locator.hpp"
+#include "grab/role.hpp"
+#include "grab/session.hpp"
+#include "grab/ui.hpp"
+#include "screen/enumerate.hpp"
 #include "transport/codec.hpp"
 #include "transport/proto_descriptor.hpp"
 #include "transport/server.hpp"
@@ -22,17 +28,21 @@
 // clang-format off
 #include <gtest/gtest.h>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <future>
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 // clang-format on
 
 namespace
@@ -288,12 +298,14 @@ namespace
         public:
 
             explicit TestServer( grab::EventBus&              bus,
-                                 const grab::ActiveKindProbe* probe = nullptr )
+                                 const grab::ActiveKindProbe* probe   = nullptr,
+                                 grab::Session*               session = nullptr )
             {
                 auto transport =
                     grab::transport::TransportServer::start( endpoint_.value(),
                                                              bus,
-                                                             probe );
+                                                             probe,
+                                                             session );
                 if( transport.has_value() )
                 {
                     transport_.emplace( std::move( *transport ) );
@@ -301,7 +313,12 @@ namespace
                     return;
                 }
 
-                service_ = std::make_unique<grab::transport::EventService>( bus, probe );
+                service_ = std::make_unique<grab::transport::EventService>(
+                    bus,
+                    probe,
+                    grab::transport::ServiceOptions{},
+                    session
+                );
                 grpc::ServerBuilder builder;
                 builder.RegisterService( service_.get() );
                 in_process_ = builder.BuildAndStart();
@@ -790,4 +807,120 @@ TEST( EventService,
                    second_request.context()
                ),
                std::string::npos );
+}
+
+TEST( EventServiceCommands,
+      UnknownCommandIsRejectedNamingKnownCommands )
+{
+    grab::EventBus   bus;
+    const TestServer server{ bus };
+    ASSERT_TRUE( server.started() );
+
+    grpc::ClientContext context;
+    context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+    eventgrab::v1::PerformActionRequest  request;
+    eventgrab::v1::PerformActionResponse response;
+    request.set_command( "input.frobnicate" );
+    const auto status = server.stub().PerformAction( &context, request, &response );
+    EXPECT_EQ( status.error_code(), grpc::StatusCode::INVALID_ARGUMENT );
+    EXPECT_NE( status.error_message().find( "input.click" ), std::string::npos );
+    EXPECT_NE( status.error_message().find( "unknown command" ), std::string::npos );
+}
+
+TEST( EventServiceCommands,
+      PerformWithoutSessionReportsCapabilityUnavailableDetail )
+{
+    grab::EventBus   bus;
+    const TestServer server{ bus };    // no session bound
+    ASSERT_TRUE( server.started() );
+
+    grpc::ClientContext context;
+    context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+    eventgrab::v1::PerformActionRequest  request;
+    eventgrab::v1::PerformActionResponse response;
+    request.set_command( "input.click" );
+    request.set_locator( "role=window" );    // capability check precedes parsing
+    const auto status = server.stub().PerformAction( &context, request, &response );
+    EXPECT_EQ( status.error_code(), grpc::StatusCode::FAILED_PRECONDITION );
+    EXPECT_EQ( status.error_details(), "grab-error: capability_unavailable" );
+}
+
+TEST( EventServiceCommands,
+      ConsentGatedMutatingCommandIsRefused )
+{
+    auto session = grab::Session::open( grab::SessionOptions{} );
+    ASSERT_TRUE( session.has_value() );
+
+    grab::EventBus   bus;
+    const TestServer server{ bus, nullptr, session->get() };
+    ASSERT_TRUE( server.started() );
+
+    grpc::ClientContext context;
+    context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+    eventgrab::v1::PerformActionRequest  request;
+    eventgrab::v1::PerformActionResponse response;
+    request.set_command( "input.click" );
+    request.set_locator( "role=window" );
+    const auto status = server.stub().PerformAction( &context, request, &response );
+    EXPECT_EQ( status.error_code(), grpc::StatusCode::PERMISSION_DENIED );
+    EXPECT_EQ( status.error_details(), "grab-error: permission_needed" );
+    EXPECT_NE( status.error_message().find( "consent" ), std::string::npos );
+}
+
+TEST( EventServiceCommands,
+      ResolveNodeWithoutSessionReportsCapabilityUnavailableDetail )
+{
+    grab::EventBus   bus;
+    const TestServer server{ bus };
+    ASSERT_TRUE( server.started() );
+
+    grpc::ClientContext context;
+    context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+    eventgrab::v1::ResolveNodeRequest  request;
+    eventgrab::v1::ResolveNodeResponse response;
+    request.set_locator( "role=window" );
+    request.set_cardinality( 0U );
+    const auto status = server.stub().ResolveNode( &context, request, &response );
+    EXPECT_EQ( status.error_code(), grpc::StatusCode::FAILED_PRECONDITION );
+    EXPECT_EQ( status.error_details(), "grab-error: capability_unavailable" );
+}
+
+TEST( EventServiceCommands,
+      CaptureFrameRoundTripsPngOverSocket )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+    auto session = grab::Session::open( grab::SessionOptions{
+        .display = std::string{ display },
+        .seat    = {},
+    } );
+    ASSERT_TRUE( session.has_value() ) << session.error().message;
+
+    grab::EventBus   bus;
+    const TestServer server{ bus, nullptr, session->get() };
+    ASSERT_TRUE( server.started() );
+
+    const auto outputs = grab::screen::list_outputs();
+    ASSERT_TRUE( outputs.has_value() );
+    ASSERT_FALSE( outputs->empty() );
+
+    grpc::ClientContext context;
+    context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+    eventgrab::v1::CaptureFrameRequest  request;
+    eventgrab::v1::CaptureFrameResponse response;
+    request.set_output( outputs->front().name );
+    const auto status = server.stub().CaptureFrame( &context, request, &response );
+    ASSERT_TRUE( status.ok() ) << status.error_message();
+    ASSERT_FALSE( response.png().empty() );
+    EXPECT_NE( response.meta().frame_id(), 0U );
+
+    const auto decoded = grab::codec::decode_png(
+        std::as_bytes( std::span{ response.png().data(), response.png().size() } )
+    );
+    ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
+    EXPECT_GT( decoded->width, 0U );
+    EXPECT_GT( decoded->height, 0U );
 }

@@ -15,6 +15,13 @@ service EventGrabService {
 
   // Records caller context in the daemon diagnostic stream.
   rpc SetClientContext(SetClientContextRequest) returns (SetClientContextResponse);
+
+  // Resolves a canonical locator string to a single node match.
+  rpc ResolveNode(ResolveNodeRequest) returns (ResolveNodeResponse);
+  // Executes a canonical command (grab command-descriptor name) against a locator or node target.
+  rpc PerformAction(PerformActionRequest) returns (PerformActionResponse);
+  // Captures an output or a locator-resolved window as a PNG frame.
+  rpc CaptureFrame(CaptureFrameRequest) returns (CaptureFrameResponse);
 }
 
 message DiagnosticEntry {
@@ -48,4 +55,76 @@ message SetClientContextRequest {
 message SetClientContextResponse {
   ResponseDiagnostics diagnostics = 1;
   uint64 sequence = 2;
+}
+
+message WidgetRefWire {
+  uint32 runtime = 1;
+  uint32 tree = 2;
+  uint32 epoch = 3;
+  uint64 node = 4;
+  uint32 generation = 5;
+}
+
+message MatchWire {
+  WidgetRefWire ref = 1;
+  uint32 consistency = 2;            // grab::ConsistencyMode numeric: 0 Live, 1 Revisioned, 2 Pinned
+  uint64 snapshot_revision = 3;
+  repeated string matched_predicates = 4;
+  string provider = 5;
+  string candidate_provider = 6;
+  uint32 provenance_runtime = 7;
+  uint64 provenance_revision = 8;
+}
+
+message ResolveNodeRequest {
+  string locator = 1;                // grab::Locator canonical string form
+  uint32 cardinality = 2;            // grab::Cardinality numeric: 0 ExactlyOne, 1 First, 2 All
+}
+message ResolveNodeResponse {
+  MatchWire match = 1;
+  ResponseDiagnostics diagnostics = 2;
+}
+
+message ActionOptionsWire {
+  uint64 deadline_ms = 1;            // 0 means use the server default
+  uint32 cardinality = 2;            // as above
+  uint32 routing = 3;                // grab::RoutePolicy numeric: 0 PreferSemantic, 1 SemanticOnly, 2 PhysicalOnly
+  uint32 retry = 4;                  // grab::RetryClass numeric: 0 Never, 1 ResolveOnly, 2 Idempotent, 3 Compensated
+  bool force = 5;
+}
+
+message PerformActionRequest {
+  string command = 1;                // canonical descriptor name, e.g. "input.click", "input.type"
+  string locator = 2;                // canonical locator target (used when target_ref is absent)
+  WidgetRefWire target_ref = 3;      // optional node-grade target
+  ActionOptionsWire options = 4;
+  string text = 5;                   // text for input.type
+}
+message ReceiptWire {
+  string commit_status = 1;          // "failed_before_commit" | "possibly_committed" | "committed" | "verified"
+  bool fallback_used = 2;
+  bool forced = 3;
+  repeated string routes = 4;        // attempted route names in order
+  string locator = 5;
+  uint64 snapshot_revision = 6;
+}
+message PerformActionResponse {
+  ReceiptWire receipt = 1;
+  ResponseDiagnostics diagnostics = 2;
+}
+
+message CaptureFrameRequest {
+  string output = 1;                 // output name; exactly one of output/locator must be set
+  string locator = 2;                // canonical locator for a window-grade node
+}
+message FrameMetaWire {
+  uint64 frame_id = 1;
+  uint64 space = 2;
+  uint64 generation = 3;
+  int64 captured_at_ns = 4;
+}
+message CaptureFrameResponse {
+  bytes png = 1;
+  FrameMetaWire meta = 2;
+  ResponseDiagnostics diagnostics = 3;
 }

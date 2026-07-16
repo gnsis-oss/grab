@@ -10,6 +10,7 @@ namespace grab
 
     class ActiveKindProbe;
     class EventBus;
+    class Session;
 
 }    // namespace grab
 
@@ -33,7 +34,8 @@ namespace grab::transport
             static grab::Result<TransportServer>
             start( const std::string&           endpoint,
                    grab::EventBus&              bus,
-                   const grab::ActiveKindProbe* probe = nullptr );
+                   const grab::ActiveKindProbe* probe   = nullptr,
+                   grab::Session*               session = nullptr );
 
             ~TransportServer();
 

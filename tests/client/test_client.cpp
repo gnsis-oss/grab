@@ -213,6 +213,8 @@ namespace
 
     constexpr std::string_view loopbackWindowTitle       = "grab loopback verbs";
     constexpr std::string_view loopbackWindowClass       = "grab-loopback-verbs";
+    constexpr std::string_view socketWindowTitle         = "grab socket verbs";
+    constexpr std::string_view socketWindowClass         = "grab-socket-verbs";
     constexpr std::string_view utf8StringAtomName        = "UTF8_STRING";
     constexpr std::string_view netWmNameAtomName         = "_NET_WM_NAME";
     constexpr std::string_view netClientListAtomName     = "_NET_CLIENT_LIST";
@@ -468,6 +470,155 @@ namespace
                      grab::CommitStatus::Committed ||
                      receipt->commit == grab::CommitStatus::Verified );
         EXPECT_FALSE( receipt->routes.empty() );
+    }
+
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+    TEST( ClientSocketVerbs,
+          VerbsRoundTripThroughTransportServer )
+    {
+        const char* const display = std::getenv( "DISPLAY" );
+        if( display == nullptr || std::string_view{ display }.empty() )
+        {
+            GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+        }
+
+        int            screenNumber = 0;
+        XcbWindowGuard windowGuard;
+        windowGuard.connection = xcb_connect( display, &screenNumber );
+        if( windowGuard.connection ==
+            nullptr ||
+            xcb_connection_has_error( windowGuard.connection ) != xcbConnectionSuccess )
+        {
+            GTEST_SKIP() << "requires a reachable X display";
+        }
+
+        auto screenIterator =
+            xcb_setup_roots_iterator( xcb_get_setup( windowGuard.connection ) );
+        for( int screenIndex = 0; screenIndex < screenNumber && screenIterator.rem > 0;
+             ++screenIndex )
+        {
+            xcb_screen_next( &screenIterator );
+        }
+        ASSERT_GT( screenIterator.rem, 0 );
+        ASSERT_NE( screenIterator.data, nullptr );
+        const auto* const screen = screenIterator.data;
+
+        windowGuard.window       = xcb_generate_id( windowGuard.connection );
+        const std::array<std::uint32_t, loopbackWindowValueCount> windowValues{
+            screen->black_pixel,
+            loopbackWindowEventMask,
+        };
+        ASSERT_TRUE(
+            request_succeeded( windowGuard.connection,
+                               xcb_create_window_checked( windowGuard.connection,
+                                                          XCB_COPY_FROM_PARENT,
+                                                          windowGuard.window,
+                                                          screen->root,
+                                                          loopbackWindowX,
+                                                          loopbackWindowY,
+                                                          loopbackWindowWidth,
+                                                          loopbackWindowHeight,
+                                                          loopbackWindowBorderWidth,
+                                                          XCB_WINDOW_CLASS_INPUT_OUTPUT,
+                                                          screen->root_visual,
+                                                          loopbackWindowValueMask,
+                                                          windowValues.data() ) )
+        );
+
+        const auto utf8StringAtom =
+            intern_atom( windowGuard.connection, utf8StringAtomName );
+        const auto netWmNameAtom =
+            intern_atom( windowGuard.connection, netWmNameAtomName );
+        const auto netClientListAtom =
+            intern_atom( windowGuard.connection, netClientListAtomName );
+        ASSERT_NE( utf8StringAtom, XCB_ATOM_NONE );
+        ASSERT_NE( netWmNameAtom, XCB_ATOM_NONE );
+        ASSERT_NE( netClientListAtom, XCB_ATOM_NONE );
+
+        ASSERT_TRUE( set_text_property( windowGuard.connection,
+                                        windowGuard.window,
+                                        XCB_ATOM_WM_NAME,
+                                        XCB_ATOM_STRING,
+                                        socketWindowTitle ) );
+        ASSERT_TRUE( set_text_property( windowGuard.connection,
+                                        windowGuard.window,
+                                        netWmNameAtom,
+                                        utf8StringAtom,
+                                        socketWindowTitle ) );
+        const std::string windowClassValue = std::string{ socketWindowClass } +
+                                             '\0' +
+                                             std::string{ socketWindowClass } +
+                                             '\0';
+        ASSERT_TRUE( set_text_property( windowGuard.connection,
+                                        windowGuard.window,
+                                        XCB_ATOM_WM_CLASS,
+                                        XCB_ATOM_STRING,
+                                        windowClassValue ) );
+        ASSERT_TRUE( request_succeeded( windowGuard.connection,
+                                        xcb_map_window_checked( windowGuard.connection,
+                                                                windowGuard.window ) ) );
+        ASSERT_TRUE(
+            request_succeeded( windowGuard.connection,
+                               xcb_change_property_checked( windowGuard.connection,
+                                                            XCB_PROP_MODE_REPLACE,
+                                                            screen->root,
+                                                            netClientListAtom,
+                                                            XCB_ATOM_WINDOW,
+                                                            windowPropertyFormat,
+                                                            clientListWindowCount,
+                                                            &windowGuard.window ) )
+        );
+        ASSERT_GT( xcb_flush( windowGuard.connection ), xcbFlushFailure );
+
+        auto session = grab::Session::open( grab::SessionOptions{
+            .display = std::string{ display },
+            .seat    = {},
+        } );
+        ASSERT_TRUE( session.has_value() ) << session.error().message;
+
+        const TempSocket temp;
+        grab::EventBus   bus;
+        auto server = grab::transport::TransportServer::start( temp.endpoint(),
+                                                               bus,
+                                                               nullptr,
+                                                               session->get() );
+        if( !server.has_value() &&
+            server.error().message.starts_with( transportStartFailurePrefix ) )
+        {
+            GTEST_SKIP() << server.error().message;
+        }
+        ASSERT_TRUE( server.has_value() ) << server.error().message;
+
+        grab::client::UnixSocketTransport transport{ temp.endpoint() };
+        grab::client::Client              client{ transport };
+
+        const auto                        locator = grab::sel::all(
+            { grab::sel::role( grab::role::window ),
+              grab::sel::property( grab::property::title,
+                                   std::string{ socketWindowTitle } ),
+              grab::sel::property( grab::property::window_class,
+                                   std::string{ socketWindowClass } ) }
+        );
+        const auto match = client.resolve( locator );
+        ASSERT_TRUE( match.has_value() ) << match.error().message;
+        EXPECT_NE( match->ref.node, 0U );
+
+        const auto outputs = grab::screen::list_outputs();
+        ASSERT_TRUE( outputs.has_value() );
+        ASSERT_FALSE( outputs->empty() );
+        const auto frame = client.capture( grab::CaptureTarget{ outputs->front().name },
+                                           grab::CaptureOptions{} );
+        ASSERT_TRUE( frame.has_value() ) << frame.error().message;
+        EXPECT_NE( frame->id.value, 0U );
+        EXPECT_GT( frame->image.width, 0U );
+        EXPECT_GT( frame->image.height, 0U );
+
+        const auto receipt =
+            client.perform( grab::Click{ .target = *match }, grab::ActionOptions{} );
+        ASSERT_FALSE( receipt.has_value() );
+        EXPECT_EQ( receipt.error().code, grab::ErrorCode::PermissionNeeded );
+
+        server->shutdown();
     }
 
 }    // namespace

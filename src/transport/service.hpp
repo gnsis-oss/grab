@@ -23,6 +23,7 @@ namespace grab
 {
 
     class ActiveKindProbe;
+    class Session;
 
 }    // namespace grab
 
@@ -192,7 +193,8 @@ namespace grab::transport
 
             explicit EventService( grab::EventBus&              bus,
                                    const grab::ActiveKindProbe* probe   = nullptr,
-                                   ServiceOptions               options = {} ) noexcept;
+                                   ServiceOptions               options = {},
+                                   grab::Session* session = nullptr ) noexcept;
             ~EventService() override;
 
             EventService( const EventService& ) = delete;
@@ -222,6 +224,21 @@ namespace grab::transport
                               const eventgrab::v1::SetClientContextRequest*,
                               eventgrab::v1::SetClientContextResponse* ) override;
 
+            grpc::Status
+            ResolveNode( grpc::ServerContext*,
+                         const eventgrab::v1::ResolveNodeRequest*,
+                         eventgrab::v1::ResolveNodeResponse* ) override;
+
+            grpc::Status
+            PerformAction( grpc::ServerContext*,
+                           const eventgrab::v1::PerformActionRequest*,
+                           eventgrab::v1::PerformActionResponse* ) override;
+
+            grpc::Status
+            CaptureFrame( grpc::ServerContext*,
+                          const eventgrab::v1::CaptureFrameRequest*,
+                          eventgrab::v1::CaptureFrameResponse* ) override;
+
             [[nodiscard]]
             std::size_t
             registered_rpc_count() const noexcept;
@@ -242,8 +259,9 @@ namespace grab::transport
                                                                const std::function<grpc::Status( grab::OperationContext& )>& work
                                                            );
 
-            grab::EventBus*                                bus_   = nullptr;
-            const grab::ActiveKindProbe*                   probe_ = nullptr;
+            grab::EventBus*                                bus_     = nullptr;
+            const grab::ActiveKindProbe*                   probe_   = nullptr;
+            grab::Session*                                 session_ = nullptr;
             ServiceOptions                                 options_;
             std::unique_ptr<AdmissionController>           admission_;
             PeerSessionRegistry                            sessions_;

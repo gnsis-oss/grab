@@ -1,11 +1,19 @@
+#include "codec/png.hpp"
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.pb.h"
 #include "grab/active_kind_probe.hpp"
+#include "grab/capture.hpp"
+#include "grab/command_descriptor.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/ids.hpp"
+#include "grab/interaction.hpp"
+#include "grab/locator.hpp"
 #include "grab/process_ref.hpp"
 #include "grab/result.hpp"
+#include "grab/session.hpp"
+#include "grab/trace.hpp"
 #include "transport/codec.hpp"
 #include "transport/proto_descriptor.hpp"
 #include "transport/service.hpp"
@@ -24,6 +32,7 @@
 #include <grpcpp/support/sync_stream.h>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stop_token>
@@ -46,12 +55,16 @@ namespace grab::transport
         constexpr std::string_view admissionDeadlineReason{
             "admission rejected: per-call deadline expired",
         };
+        constexpr std::string_view grabErrorDetailPrefix{ "grab-error: " };
 
         constexpr auto registeredRpcNames = std::to_array<std::string_view>( {
             "PushEvent",
             "ListEventTypes",
             "Subscribe",
             "SetClientContext",
+            "ResolveNode",
+            "PerformAction",
+            "CaptureFrame",
         } );
 
         struct NotifyState
@@ -76,6 +89,178 @@ namespace grab::transport
         internal_error( std::string_view message )
         {
             return grpc::Status{ grpc::StatusCode::INTERNAL, std::string{ message } };
+        }
+
+        [[nodiscard]]
+        grpc::Status
+        status_from_error( const grab::Error& error )
+        {
+            grpc::StatusCode code = grpc::StatusCode::FAILED_PRECONDITION;
+            switch( error.code )
+            {
+                case grab::ErrorCode::InvalidArgument :
+                    code = grpc::StatusCode::INVALID_ARGUMENT;
+                    break;
+                case grab::ErrorCode::NoMatch :
+                    code = grpc::StatusCode::NOT_FOUND;
+                    break;
+                case grab::ErrorCode::DeadlineExceeded :
+                    code = grpc::StatusCode::DEADLINE_EXCEEDED;
+                    break;
+                case grab::ErrorCode::Cancelled :
+                    code = grpc::StatusCode::CANCELLED;
+                    break;
+                case grab::ErrorCode::PermissionNeeded :
+                case grab::ErrorCode::PermissionDenied :
+                    code = grpc::StatusCode::PERMISSION_DENIED;
+                    break;
+                case grab::ErrorCode::InternalFault :
+                    code = grpc::StatusCode::INTERNAL;
+                    break;
+                default :
+                    break;
+            }
+            return grpc::Status{
+                code,
+                error.message,
+                std::string{ grabErrorDetailPrefix } +
+                    std::string{ grab::name_of( error.code ) },
+            };
+        }
+
+        [[nodiscard]]
+        grab::Error
+        capability_error( std::string_view message )
+        {
+            return grab::Error{
+                .code        = grab::ErrorCode::CapabilityUnavailable,
+                .message     = std::string{ message },
+                .capability  = {},
+                .target      = {},
+                .attempts    = {},
+                .disposition = grab::ErrorDisposition::Fatal,
+                .diagnostics = {},
+            };
+        }
+
+        [[nodiscard]]
+        std::string
+        known_command_names()
+        {
+            std::string names;
+            for( const auto& descriptor : grab::list_commands() )
+            {
+                if( !names.empty() )
+                {
+                    names.append( ", " );
+                }
+                names.append( descriptor.name );
+            }
+            return names;
+        }
+
+        [[nodiscard]]
+        std::optional<grab::Cardinality>
+        decode_cardinality( std::uint32_t value ) noexcept
+        {
+            switch( value )
+            {
+                case 0U :
+                    return grab::Cardinality::ExactlyOne;
+                case 1U :
+                    return grab::Cardinality::First;
+                case 2U :
+                    return grab::Cardinality::All;
+                default :
+                    return std::nullopt;
+            }
+        }
+
+        [[nodiscard]]
+        std::optional<grab::RoutePolicy>
+        decode_routing( std::uint32_t value ) noexcept
+        {
+            switch( value )
+            {
+                case 0U :
+                    return grab::RoutePolicy::PreferSemantic;
+                case 1U :
+                    return grab::RoutePolicy::SemanticOnly;
+                case 2U :
+                    return grab::RoutePolicy::PhysicalOnly;
+                default :
+                    return std::nullopt;
+            }
+        }
+
+        [[nodiscard]]
+        std::optional<grab::RetryClass>
+        decode_retry( std::uint32_t value ) noexcept
+        {
+            switch( value )
+            {
+                case 0U :
+                    return grab::RetryClass::Never;
+                case 1U :
+                    return grab::RetryClass::ResolveOnly;
+                case 2U :
+                    return grab::RetryClass::Idempotent;
+                case 3U :
+                    return grab::RetryClass::Compensated;
+                default :
+                    return std::nullopt;
+            }
+        }
+
+        [[nodiscard]]
+        std::uint32_t
+        encode_consistency( grab::ConsistencyMode mode ) noexcept
+        {
+            switch( mode )
+            {
+                case grab::ConsistencyMode::Live :
+                    return 0U;
+                case grab::ConsistencyMode::Revisioned :
+                    return 1U;
+                case grab::ConsistencyMode::Pinned :
+                    return 2U;
+            }
+            return 0U;
+        }
+
+        void
+        encode_match( const grab::Match&        match,
+                      eventgrab::v1::MatchWire* wire )
+        {
+            auto* ref = wire->mutable_ref();
+            ref->set_runtime( match.ref.runtime.value );
+            ref->set_tree( match.ref.tree );
+            ref->set_epoch( match.ref.epoch.value );
+            ref->set_node( match.ref.node );
+            ref->set_generation( match.ref.generation.value );
+            wire->set_consistency( encode_consistency( match.mode ) );
+            wire->set_snapshot_revision( match.snapshot_revision );
+            for( const auto& predicate : match.matched_predicates )
+            {
+                wire->add_matched_predicates( predicate );
+            }
+            wire->set_provider( match.provenance.provider );
+            wire->set_candidate_provider( match.provenance.candidate_provider );
+            wire->set_provenance_runtime( match.provenance.runtime.value );
+            wire->set_provenance_revision( match.provenance.revision );
+        }
+
+        [[nodiscard]]
+        grab::WidgetRef
+        decode_widget_ref( const eventgrab::v1::WidgetRefWire& wire ) noexcept
+        {
+            return grab::WidgetRef{
+                .runtime    = grab::RuntimeId{ wire.runtime() },
+                .tree       = wire.tree(),
+                .epoch      = grab::TreeEpoch{ wire.epoch() },
+                .node       = wire.node(),
+                .generation = grab::NodeGeneration{ wire.generation() },
+            };
         }
 
         [[nodiscard]]
@@ -697,9 +882,11 @@ namespace grab::transport
 
     EventService::EventService( grab::EventBus&              bus,
                                 const grab::ActiveKindProbe* probe,
-                                ServiceOptions               options ) noexcept :
+                                ServiceOptions               options,
+                                grab::Session*               session ) noexcept :
         bus_( &bus ),
         probe_( probe ),
+        session_( session ),
         options_( options ),
         admission_( std::make_unique<AdmissionController>( options_.admission ) )
     {
@@ -855,6 +1042,310 @@ namespace grab::transport
                 diagnostic->set_sequence( sequence );
                 diagnostic->set_message( std::string{ "client context accepted: " } +
                                          request->context() );
+                return grpc::Status::OK;
+            }
+        );
+    }
+
+    grpc::Status
+    EventService::ResolveNode( grpc::ServerContext*                     context,
+                               const eventgrab::v1::ResolveNodeRequest* request,
+                               eventgrab::v1::ResolveNodeResponse*      response )
+    {
+        return dispatch( "ResolveNode",
+                         context,
+                         [&]( grab::OperationContext& )
+                         {
+                             if( request == nullptr || response == nullptr )
+                             {
+                                 return invalid_argument(
+                                     "missing resolve node request or response"
+                                 );
+                             }
+                             if( session_ == nullptr )
+                             {
+                                 return status_from_error( capability_error(
+                                     "daemon has no session for node resolution"
+                                 ) );
+                             }
+
+                             auto locator =
+                                 grab::Locator::from_string( request->locator() );
+                             if( !locator.has_value() )
+                             {
+                                 return invalid_argument( locator.error().message );
+                             }
+
+                             const auto cardinality =
+                                 decode_cardinality( request->cardinality() );
+                             if( !cardinality.has_value() )
+                             {
+                                 return invalid_argument( "invalid cardinality" );
+                             }
+
+                             auto match = session_->resolve( *locator, *cardinality );
+                             if( !match.has_value() )
+                             {
+                                 return status_from_error( match.error() );
+                             }
+
+                             encode_match( *match, response->mutable_match() );
+                             return grpc::Status::OK;
+                         } );
+    }
+
+    grpc::Status
+    EventService::PerformAction( grpc::ServerContext*                       context,
+                                 const eventgrab::v1::PerformActionRequest* request,
+                                 eventgrab::v1::PerformActionResponse*      response )
+    {
+        return dispatch(
+            "PerformAction",
+            context,
+            [&]( grab::OperationContext& )
+            {
+                if( request == nullptr || response == nullptr )
+                {
+                    return invalid_argument(
+                        "missing perform action request or response"
+                    );
+                }
+
+                const std::string_view command{ request->command() };
+                const auto&            commands = grab::list_commands();
+                const auto             descriptor =
+                    std::ranges::find( commands,
+                                       command,
+                                       &grab::CommandDescriptor::name );
+                if( descriptor == commands.end() )
+                {
+                    std::string message{ "unknown command '" };
+                    message.append( command );
+                    message.append( "'; known commands: " );
+                    message.append( known_command_names() );
+                    return invalid_argument( message );
+                }
+
+                if( descriptor->kind !=
+                    grab::CommandKind::Click &&
+                    descriptor->kind != grab::CommandKind::Type )
+                {
+                    return invalid_argument(
+                        "command is not performable over PerformAction"
+                    );
+                }
+                if( session_ == nullptr )
+                {
+                    return status_from_error(
+                        capability_error( "daemon has no session for actions" )
+                    );
+                }
+
+                // No consent-grant machinery exists yet (Wave-2 scope); mutating
+                // consent-gated commands are refused at the wire boundary. Read-only
+                // consent-gated commands (screen.capture) ride the implicit observation
+                // grant.
+                if( descriptor->mutability ==
+                    grab::Mutability::Mutating &&
+                    descriptor->consent_gated )
+                {
+                    std::string message{ "command '" };
+                    message.append( descriptor->name );
+                    message.append(
+                        "' is consent-gated and no grant machinery exists yet"
+                    );
+                    return status_from_error( grab::Error{
+                        .code        = grab::ErrorCode::PermissionNeeded,
+                        .message     = std::move( message ),
+                        .capability  = {},
+                        .target      = {},
+                        .attempts    = {},
+                        .disposition = grab::ErrorDisposition::Fatal,
+                        .diagnostics = {},
+                    } );
+                }
+
+                std::optional<grab::ActionTarget> target;
+                if( request->has_target_ref() )
+                {
+                    target.emplace( grab::Match{
+                        .ref                = decode_widget_ref( request->target_ref() ),
+                        .mode               = grab::ConsistencyMode::Live,
+                        .snapshot_revision  = 0U,
+                        .matched_predicates = {},
+                        .provenance         = {},
+                    } );
+                }
+                else
+                {
+                    auto locator = grab::Locator::from_string( request->locator() );
+                    if( !locator.has_value() )
+                    {
+                        return invalid_argument( locator.error().message );
+                    }
+                    target.emplace( std::move( *locator ) );
+                }
+
+                grab::ActionOptions options{};
+                const auto&         wire_options = request->options();
+                if( wire_options.deadline_ms() > 0U )
+                {
+                    options.deadline = std::chrono::milliseconds{
+                        static_cast<std::chrono::milliseconds::rep>(
+                            wire_options.deadline_ms()
+                        )
+                    };
+                }
+
+                const auto cardinality =
+                    decode_cardinality( wire_options.cardinality() );
+                if( !cardinality.has_value() )
+                {
+                    return invalid_argument( "invalid cardinality" );
+                }
+                options.cardinality = *cardinality;
+
+                const auto routing  = decode_routing( wire_options.routing() );
+                if( !routing.has_value() )
+                {
+                    return invalid_argument( "invalid routing policy" );
+                }
+                options.routing  = *routing;
+
+                const auto retry = decode_retry( wire_options.retry() );
+                if( !retry.has_value() )
+                {
+                    return invalid_argument( "invalid retry class" );
+                }
+                options.retry = *retry;
+                options.force = wire_options.force();
+
+                std::optional<grab::Action> action;
+                if( descriptor->kind == grab::CommandKind::Click )
+                {
+                    action.emplace( grab::Click{ .target = std::move( *target ) } );
+                }
+                else
+                {
+                    action.emplace( grab::TypeText{
+                        .target = std::move( *target ),
+                        .text   = request->text(),
+                    } );
+                }
+
+                auto receipt = session_->perform( *action, options );
+                if( !receipt.has_value() )
+                {
+                    return status_from_error( receipt.error() );
+                }
+
+                auto* wire = response->mutable_receipt();
+                wire->set_commit_status( std::string{
+                    grab::detail::commit_status_name.text_of( receipt->commit, "" )
+                } );
+                wire->set_fallback_used( receipt->fallback_used );
+                wire->set_forced( receipt->forced );
+                for( const auto& attempt : receipt->routes )
+                {
+                    wire->add_routes( attempt.route );
+                }
+                wire->set_locator( receipt->locator );
+                wire->set_snapshot_revision( receipt->snapshot_revision );
+                return grpc::Status::OK;
+            }
+        );
+    }
+
+    grpc::Status
+    EventService::CaptureFrame( grpc::ServerContext*                      context,
+                                const eventgrab::v1::CaptureFrameRequest* request,
+                                eventgrab::v1::CaptureFrameResponse*      response )
+    {
+        return dispatch(
+            "CaptureFrame",
+            context,
+            [&]( grab::OperationContext& )
+            {
+                if( request == nullptr || response == nullptr )
+                {
+                    return invalid_argument(
+                        "missing capture frame request or response"
+                    );
+                }
+
+                constexpr std::string_view captureCommand{ "screen.capture" };
+                const auto&                commands = grab::list_commands();
+                const auto                 descriptor =
+                    std::ranges::find( commands,
+                                       captureCommand,
+                                       &grab::CommandDescriptor::name );
+                if( descriptor == commands.end() )
+                {
+                    return internal_error(
+                        "screen.capture command descriptor is missing"
+                    );
+                }
+                // Read-only consent-gated commands (screen.capture) ride the implicit
+                // observation grant.
+
+                const bool has_output  = !request->output().empty();
+                const bool has_locator = !request->locator().empty();
+                if( has_output == has_locator )
+                {
+                    return invalid_argument(
+                        "capture requires exactly one of output or locator"
+                    );
+                }
+                if( session_ == nullptr )
+                {
+                    return status_from_error(
+                        capability_error( "daemon has no session for capture" )
+                    );
+                }
+
+                std::optional<grab::CaptureTarget> target;
+                if( has_locator )
+                {
+                    auto locator = grab::Locator::from_string( request->locator() );
+                    if( !locator.has_value() )
+                    {
+                        return invalid_argument( locator.error().message );
+                    }
+                    auto match =
+                        session_->resolve( *locator, grab::Cardinality::ExactlyOne );
+                    if( !match.has_value() )
+                    {
+                        return status_from_error( match.error() );
+                    }
+                    target.emplace( std::move( *match ) );
+                }
+                else
+                {
+                    target.emplace( request->output() );
+                }
+
+                auto frame = session_->capture( *target );
+                if( !frame.has_value() )
+                {
+                    return status_from_error( frame.error() );
+                }
+
+                auto png = grab::codec::encode_png( frame->image );
+                if( !png.has_value() )
+                {
+                    return internal_error( png.error().message );
+                }
+                response->set_png( std::string{
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+                    reinterpret_cast<const char*>( png->data() ),
+                    png->size()
+                } );
+
+                auto* meta = response->mutable_meta();
+                meta->set_frame_id( frame->id.value );
+                meta->set_space( frame->space.value );
+                meta->set_generation( frame->generation.value );
+                meta->set_captured_at_ns( frame->captured_at_ns );
                 return grpc::Status::OK;
             }
         );
