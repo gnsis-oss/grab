@@ -4,4 +4,4 @@ src/core=4836
 src/event=5486
 src/input=2395
 src/platform=1243
-src/screen=3974
+src/screen=2811
