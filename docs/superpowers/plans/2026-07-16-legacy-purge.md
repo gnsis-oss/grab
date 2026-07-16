@@ -174,6 +174,13 @@ Prereq: W1. Port before delete:
 
 **Delete:** `src/input/{seat,gestures,locator}.{cpp,hpp}`; rewrite `src/input/input.cpp` as facade. Budget: `src/input=2395` → `150`. Tests `tests/input/*` re-pointed at routes/transaction/facade.
 
+> **Wave-1 execution correction (2026-07-16, verified in code) — this wave is larger than the sketch above.** Three facts the parent sketch missed:
+> 1. **`src/input/seat.{cpp,hpp}` (309 LOC) is NOT deletable — it is the live XTest primitive.** Wave-1's `X11InputSeat` holds a `grab::input::Seat` **by value** (`src/drivers/desktop/x11/x11_routes.hpp:67`; constructed at `x11_routes.cpp:533`, `x11_runtime.cpp:68`). The correctness kit *wraps* the legacy seat, it does not replace it. Correct action: **relocate** `seat.{cpp,hpp}` under `src/drivers/desktop/x11/` (verbatim move, like `src/platform` in Wave 4) — or inline its XTest bodies into `X11InputSeat` — never delete. The `src/input` budget target is therefore **~150 + wherever seat lands**, and seat's LOC moves to the (unbudgeted) driver tree.
+> 2. **The `Action` vocabulary has only `Click`/`TypeText`** (`include/grab/interaction.hpp:35-46`); there is no `Drag` or `PressKey` verb and no `spi::ActionVerb` for them (`transaction.cpp:454-465`). So `Input::drag/drag_curve_in_window/press_key` and the CLI `drag/drag-curve/key` verbs **cannot** become `Session::perform` facades until the vocabulary is extended. **New Wave-2 prerequisite task (2a): add `Drag`/`PressKey` to `Action` + `spi::ActionVerb` + the X11 pointer/keyboard routes + transaction dispatch**, TDD, before any facade collapse.
+> 3. **`Input::locate/activate` have no Session equivalent** (no locate verb; `resolve` returns a `Match`, not a window-activation). `locator.cpp`'s activation path needs the `window_mapped` WaitEngine predicate *and* a `Session`-level activate/locate convenience before `Input` can shed it.
+>
+> Revised Wave-2 task order: **2a** vocabulary+routes (Drag/PressKey) → **2b** `window_mapped` predicate + sel-based location → **2c** relocate `seat` under the X11 driver (budget line edit) → **2d** port `gestures` to route-driven recipes, delete `gestures.{cpp,hpp}` → **2e** replace `locator` usage, delete `locator.{cpp,hpp}` → **2f** collapse `input.cpp` to a Session-verb facade. Budget ends at `src/input = ~150` with `seat` relocated, not deleted.
+
 ## Wave 3 — Capture purge (`src/screen/` 4,876 → facade + relocations)
 
 Prereq: W1. Port before delete:
