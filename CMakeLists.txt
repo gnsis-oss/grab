@@ -74,6 +74,7 @@ target_compile_definitions(grab_core PUBLIC
 
 add_library(grab_kernel STATIC
     src/kernel/action/transaction.cpp
+    src/kernel/action/polling_event_source.cpp
     src/kernel/action/wait_engine.cpp
     src/kernel/capture/damage_hint_auditor.cpp
     src/kernel/capture/inject_gate.cpp
@@ -100,7 +101,6 @@ target_compile_features(grab_codec PUBLIC cxx_std_23)
 add_library(grab_screen STATIC
     src/screen/screen.cpp
     src/screen/virtual_display.cpp
-    src/screen/workflow.cpp
     src/screen/x11_capture.cpp
 )
 target_link_libraries(grab_screen
@@ -185,6 +185,7 @@ add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/coordinate_authority.cpp
     src/drivers/desktop/x11/enumerate.cpp
     src/drivers/desktop/x11/record.cpp
+    src/drivers/desktop/x11/workflow.cpp
     src/drivers/desktop/x11/x11_capture_route.cpp
     src/drivers/desktop/x11/x11_event_source.cpp
     src/drivers/desktop/x11/x11_input_correctness.cpp

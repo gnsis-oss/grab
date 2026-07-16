@@ -3,4 +3,3 @@
 src/input/gestures.cpp=1
 src/input/locator.cpp=1
 src/screen/virtual_display.cpp=1
-src/screen/workflow.cpp=1

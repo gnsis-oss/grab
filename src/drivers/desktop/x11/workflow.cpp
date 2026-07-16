@@ -1,14 +1,20 @@
 #include "codec/png.hpp"
 #include "core/reactor.hpp"
+#include "drivers/desktop/x11/workflow.hpp"
 #include "event/window_x11.hpp"
+#include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/geometry/size.hpp"
+#include "grab/image.hpp"
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
 #include "image/compare.hpp"
+#include "kernel/action/polling_event_source.hpp"
+#include "kernel/action/wait_engine.hpp"
+#include "kernel/capture/tile_differ.hpp"
 #include "notify/notifier.hpp"
 #include "screen/window_match.hpp"
-#include "screen/workflow.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -41,7 +47,8 @@ namespace grab::screen
         constexpr std::uint64_t    noDiffPixels                 = 0U;
         constexpr std::size_t      subscriptionDepth            = 64U;
         constexpr auto             trackerPollInterval = std::chrono::milliseconds{ 50 };
-        constexpr auto             watchPollInterval   = std::chrono::milliseconds{ 20 };
+        constexpr auto             watchPollWindow     = std::chrono::milliseconds{ 25 };
+        constexpr std::uint16_t    watchTileExtent     = 32U;
         constexpr std::string_view defaultMissLabel    = "<empty>";
         constexpr std::string_view notificationApp     = "grab";
         constexpr std::string_view diffSummary         = "screens differ";
@@ -205,27 +212,6 @@ namespace grab::screen
         }
 
         [[nodiscard]]
-        grab::Result<void>
-        capture_window_to_file( grab::Screen&                   screen,
-                                const std::vector<std::string>& candidates,
-                                const std::filesystem::path&    path )
-        {
-            auto image = screen.window_by_class( candidates );
-            if( !image.has_value() )
-            {
-                return std::unexpected( std::move( image.error() ) );
-            }
-
-            auto encoded = grab::codec::encode_png( *image );
-            if( !encoded.has_value() )
-            {
-                return std::unexpected( std::move( encoded.error() ) );
-            }
-
-            return write_binary_file( path, *encoded );
-        }
-
-        [[nodiscard]]
         std::optional<grab::WindowChange>
         matching_title_change( const grab::Event&              event,
                                const std::vector<std::string>& candidates )
@@ -244,31 +230,6 @@ namespace grab::screen
             }
 
             return *payload;
-        }
-
-        [[nodiscard]]
-        grab::Result<std::uint32_t>
-        capture_pending_title_changes( grab::Screen&                   screen,
-                                       grab::Subscription&             subscription,
-                                       const std::vector<std::string>& candidates,
-                                       const std::filesystem::path&    path )
-        {
-            std::uint32_t captured = 0U;
-            while( auto event = subscription.try_pop() )
-            {
-                if( !matching_title_change( *event, candidates ).has_value() )
-                {
-                    continue;
-                }
-
-                auto written = capture_window_to_file( screen, candidates, path );
-                if( !written.has_value() )
-                {
-                    return std::unexpected( std::move( written.error() ) );
-                }
-                captured += oneCapture;
-            }
-            return captured;
         }
 
         [[nodiscard]]
@@ -414,31 +375,106 @@ namespace grab::screen
             return std::unexpected( std::move( tracker.error() ) );
         }
 
-        std::uint32_t captured = 0U;
-        const auto    path     = std::filesystem::path{ out_path };
+        const auto                     path     = std::filesystem::path{ out_path };
+        std::uint32_t                  captured = 0U;
+        std::optional<grab::Image>     previous;
+        const grab::kernel::TileDiffer differ;
+        const grab::geometry::Size     tile_size{
+            .width  = watchTileExtent,
+            .height = watchTileExtent,
+        };
+
+        // Drain any pending matching title-change events, capturing the window
+        // and writing a fresh PNG only when its pixels actually changed since the
+        // last write. Returns the number of NEW captures written this drain.
+        const auto drain_once = [&]() -> grab::Result<std::uint32_t>
+        {
+            std::uint32_t written_now = 0U;
+            while( auto event = subscription.try_pop() )
+            {
+                if( !matching_title_change( *event, candidates ).has_value() )
+                {
+                    continue;
+                }
+
+                auto image = screen.window_by_class( candidates );
+                if( !image.has_value() )
+                {
+                    return std::unexpected( std::move( image.error() ) );
+                }
+
+                bool changed = !previous.has_value();
+                if( previous.has_value() )
+                {
+                    const auto result = differ.diff( *previous, *image, tile_size );
+                    changed = result.kind != grab::kernel::TileDiffKind::NoChange;
+                }
+                if( !changed )
+                {
+                    continue;
+                }
+
+                auto encoded = grab::codec::encode_png( *image );
+                if( !encoded.has_value() )
+                {
+                    return std::unexpected( std::move( encoded.error() ) );
+                }
+                auto write_result = write_binary_file( path, *encoded );
+                if( !write_result.has_value() )
+                {
+                    return std::unexpected( std::move( write_result.error() ) );
+                }
+                previous     = std::move( *image );
+                written_now += oneCapture;
+            }
+            return written_now;
+        };
+
+        grab::OperationContext                   wait_context;
+        const grab::kernel::action::WaitEngine   engine{ wait_context };
+        grab::kernel::action::PollingEventSource pacer;
+
         while( !should_stop() )
         {
-            auto pending =
-                capture_pending_title_changes( screen, subscription, candidates, path );
-            if( !pending.has_value() )
+            grab::kernel::action::NamedPredicate predicate{
+                .name    = "watch_title_change",
+                .observe = [&drain_once, &captured]()
+                    -> grab::Result<grab::kernel::action::PredicateObservation>
+                {
+                    auto drained = drain_once();
+                    if( !drained.has_value() )
+                    {
+                        return std::unexpected( std::move( drained.error() ) );
+                    }
+                    captured += *drained;
+                    return grab::kernel::action::PredicateObservation{
+                        .satisfied = *drained > 0U,
+                        .detail    = "no matching title change yet",
+                    };
+                },
+            };
+            const grab::kernel::action::WaitParams params{
+                .deadline = grab::Deadline::after( watchPollWindow ),
+                .backoff  = {},
+            };
+            auto waited = engine.wait( predicate, params, pacer );
+            if( !waited.has_value() &&
+                waited.error().code != grab::ErrorCode::DeadlineExceeded )
             {
                 tracker->stop();
                 running.stop_and_join();
-                return std::unexpected( std::move( pending.error() ) );
+                return std::unexpected( std::move( waited.error() ) );
             }
-            captured += *pending;
-            std::this_thread::sleep_for( watchPollInterval );
         }
 
-        auto pending =
-            capture_pending_title_changes( screen, subscription, candidates, path );
-        if( !pending.has_value() )
+        auto final_drain = drain_once();
+        if( !final_drain.has_value() )
         {
             tracker->stop();
             running.stop_and_join();
-            return std::unexpected( std::move( pending.error() ) );
+            return std::unexpected( std::move( final_drain.error() ) );
         }
-        captured += *pending;
+        captured += *final_drain;
 
         tracker->stop();
         running.stop_and_join();
