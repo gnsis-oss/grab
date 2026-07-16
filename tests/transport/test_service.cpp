@@ -1,4 +1,5 @@
 #include "codec/png.hpp"
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
@@ -10,7 +11,6 @@
 #include "grab/role.hpp"
 #include "grab/session.hpp"
 #include "grab/ui.hpp"
-#include "screen/enumerate.hpp"
 #include "transport/codec.hpp"
 #include "transport/proto_descriptor.hpp"
 #include "transport/server.hpp"

@@ -40,7 +40,6 @@ add_executable(grab_core_tests
     core/test_version.cpp
     codec/test_image.cpp
     codec/test_png.cpp
-    screen/test_enumerate.cpp
     screen/test_screen.cpp
     screen/test_virtual_display.cpp
     screen/test_workflow.cpp
@@ -107,6 +106,7 @@ gtest_discover_tests(grab_kernel_tests)
 
 add_executable(grab_driver_x11_tests
     drivers/x11/test_coordinate_authority.cpp
+    drivers/x11/test_enumerate.cpp
     drivers/x11/test_x11_capture_route.cpp
     drivers/x11/test_x11_event_source.cpp
     drivers/x11/test_x11_input_correctness.cpp

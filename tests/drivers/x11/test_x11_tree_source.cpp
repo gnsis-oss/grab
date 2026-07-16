@@ -1,3 +1,4 @@
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
 #include "grab/context.hpp"
 #include "grab/geometry/rectangle.hpp"
@@ -8,7 +9,6 @@
 #include "grab/space.hpp"
 #include "grab/ui.hpp"
 #include "kernel/graph/target_registry.hpp"
-#include "screen/enumerate.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

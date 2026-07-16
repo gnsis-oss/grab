@@ -1,10 +1,10 @@
 #include "core/space_graph.hpp"
 #include "drivers/desktop/x11/coordinate_authority.hpp"
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "grab/geometry/rectangle.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
-#include "screen/enumerate.hpp"
 
 #include <algorithm>
 #include <cstdint>

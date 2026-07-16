@@ -97,7 +97,6 @@ target_include_directories(grab_codec PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_codec PUBLIC cxx_std_23)
 
 add_library(grab_screen STATIC
-    src/screen/enumerate.cpp
     src/screen/screen.cpp
     src/screen/virtual_display.cpp
     src/screen/workflow.cpp
@@ -185,6 +184,7 @@ target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 
 add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/coordinate_authority.cpp
+    src/drivers/desktop/x11/enumerate.cpp
     src/drivers/desktop/x11/x11_capture_route.cpp
     src/drivers/desktop/x11/x11_event_source.cpp
     src/drivers/desktop/x11/x11_input_correctness.cpp

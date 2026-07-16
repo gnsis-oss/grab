@@ -1,7 +1,7 @@
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "grab/capture.hpp"
 #include "grab/space.hpp"
-#include "screen/enumerate.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

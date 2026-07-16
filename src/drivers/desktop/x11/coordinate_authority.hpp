@@ -1,10 +1,10 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "grab/geometry/rectangle.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
-#include "screen/enumerate.hpp"
 
 #include <memory>
 #include <span>
