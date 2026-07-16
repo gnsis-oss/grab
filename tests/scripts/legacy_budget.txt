@@ -2,6 +2,6 @@
 # shrink-only: purge waves lower these numbers; deleting a dir deletes its line.
 src/core=4836
 src/event=5486
-src/input=2395
+src/input=2029
 src/platform=1243
 src/screen=4876

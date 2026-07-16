@@ -1,9 +1,9 @@
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/geometry/curve.hpp"
 #include "grab/geometry/point.hpp"
 #include "grab/pointer_button.hpp"
 #include "grab/result.hpp"
 #include "input/gestures.hpp"
-#include "input/seat.hpp"
 
 #include <chrono>
 #include <cstddef>

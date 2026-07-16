@@ -129,9 +129,8 @@ add_library(grab_input STATIC
     src/input/gestures.cpp
     src/input/input.cpp
     src/input/locator.cpp
-    src/input/seat.cpp
 )
-target_link_libraries(grab_input PUBLIC grab_core grab_input_x11 PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XTEST)
+target_link_libraries(grab_input PUBLIC grab_core grab_driver_x11 grab_input_x11 PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XTEST)
 target_include_directories(grab_input PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_input PUBLIC cxx_std_23)
 
@@ -192,6 +191,7 @@ add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/x11_runtime.cpp
     src/drivers/desktop/x11/x11_topology_source.cpp
     src/drivers/desktop/x11/x11_tree_source.cpp
+    src/drivers/desktop/x11/x11_xtest_seat.cpp
 )
 target_link_libraries(grab_driver_x11
     PUBLIC
@@ -200,8 +200,8 @@ target_link_libraries(grab_driver_x11
     PRIVATE
         grab_vendor_l0
         grab_screen
-        grab_input
         grab_input_x11
+        PkgConfig::GRAB_XCB_XTEST
 )
 target_include_directories(grab_driver_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_x11 PUBLIC cxx_std_23)

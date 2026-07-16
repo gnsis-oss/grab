@@ -1,9 +1,9 @@
 #include "core/reactor.hpp"
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "event/xinput2.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/result.hpp"
-#include "input/seat.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

@@ -1,3 +1,4 @@
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/drag.hpp"
 #include "grab/input.hpp"
 #include "grab/keymap.hpp"
@@ -6,7 +7,6 @@
 #include "grab/window_match.hpp"
 #include "input/gestures.hpp"
 #include "input/locator.hpp"
-#include "input/seat.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "platform/x11/xkb_keymap.hpp"
 

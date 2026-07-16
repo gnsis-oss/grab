@@ -2,8 +2,8 @@
 
 #include "drivers/desktop/x11/injection_ledger.hpp"
 #include "drivers/desktop/x11/x11_input_correctness.hpp"
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/keymap.hpp"
-#include "input/seat.hpp"
 #include "spi/route.hpp"
 
 #include <array>

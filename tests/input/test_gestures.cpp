@@ -1,7 +1,7 @@
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/drag.hpp"
 #include "grab/result.hpp"
 #include "input/gestures.hpp"
-#include "input/seat.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

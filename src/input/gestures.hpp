@@ -1,9 +1,9 @@
 #pragma once
 
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/drag.hpp"
 #include "grab/geometry/point.hpp"
 #include "grab/result.hpp"
-#include "input/seat.hpp"
 
 namespace grab::input
 {
