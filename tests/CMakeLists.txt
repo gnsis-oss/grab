@@ -79,11 +79,10 @@ include(GoogleTest)
 add_executable(grab_client_tests
     client/test_client.cpp
 )
-target_link_libraries(grab_client_tests PRIVATE grab_client grab_transport GTest::gtest_main)
+target_link_libraries(grab_client_tests PRIVATE grab_client grab_kernel grab_screen grab_transport GTest::gtest_main)
 target_include_directories(grab_client_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests)
-gtest_discover_tests(grab_client_tests DISCOVERY_MODE PRE_TEST)
 
 add_executable(grab_kernel_tests
     kernel/action/test_transaction.cpp
@@ -176,10 +175,14 @@ if(GRAB_TEST_PROVISION_XVFB)
     gtest_discover_tests(grab_driver_x11_tests
         DISCOVERY_MODE PRE_TEST
         PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
+    gtest_discover_tests(grab_client_tests
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
 else()
     gtest_discover_tests(grab_core_tests)
     gtest_discover_tests(grab_integration_tests DISCOVERY_MODE PRE_TEST)
     gtest_discover_tests(grab_driver_x11_tests DISCOVERY_MODE PRE_TEST)
+    gtest_discover_tests(grab_client_tests DISCOVERY_MODE PRE_TEST)
 endif()
 
 add_executable(grab_session_tests

@@ -1,6 +1,9 @@
 #pragma once
 
 #include "client/transport.hpp"
+#include "grab/session.hpp"
+
+#include <memory>
 
 namespace grab
 {
@@ -21,6 +24,25 @@ namespace grab::client
                                         const grab::ActiveKindProbe* probe =
                                             nullptr ) noexcept;
 
+            explicit LoopbackTransport( std::unique_ptr<grab::Session> session,
+                                        const grab::ActiveKindProbe*   probe =
+                                            nullptr ) noexcept;
+
+            [[nodiscard]]
+            grab::Result<grab::Match>
+            resolve( const grab::Locator& locator,
+                     grab::Cardinality    cardinality ) override;
+
+            [[nodiscard]]
+            grab::Result<grab::Receipt>
+            perform( const grab::Action&        action,
+                     const grab::ActionOptions& options ) override;
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture( const grab::CaptureTarget&  target,
+                     const grab::CaptureOptions& options ) override;
+
             [[nodiscard]]
             grab::Result<void>
             push_event( grab::Event event ) override;
@@ -35,8 +57,9 @@ namespace grab::client
 
         private:
 
-            grab::EventBus*              bus_   = nullptr;
-            const grab::ActiveKindProbe* probe_ = nullptr;
+            grab::EventBus*                bus_ = nullptr;
+            std::unique_ptr<grab::Session> session_;
+            const grab::ActiveKindProbe*   probe_ = nullptr;
     };
 
 }    // namespace grab::client

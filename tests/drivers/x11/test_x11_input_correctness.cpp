@@ -1,13 +1,18 @@
 #include "drivers/desktop/x11/x11_input_correctness.hpp"
+#include "drivers/desktop/x11/x11_runtime.hpp"
+#include "spi/tree_source.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <future>
 #include <memory>
+#include <optional>
 #include <span>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -226,4 +231,73 @@ TEST( ScratchKeycodePool,
       DISABLED_ConnectionBackendRequiresXServer )
 {
     GTEST_SKIP() << "Requires a live X11 display";
+}
+
+TEST( X11InputCorrectness,
+      PointerRouteReservesMatchTarget )
+{
+    if( std::getenv( "DISPLAY" ) == nullptr )
+    {
+        GTEST_SKIP() << "Requires a live X11 display";
+    }
+
+    constexpr std::uint32_t                 snapshot_tree = 1U;
+    constexpr std::uint64_t                 fallback_node = 1U;
+    constexpr grab::NodeGeneration          fallback_generation{ 1U };
+    constexpr std::string_view              pointer_route_name{ "x11.pointer" };
+
+    grab::OperationContext                  context;
+    grab::drivers::desktop::x11::X11Runtime runtime;
+    ASSERT_TRUE( runtime.start( context ).has_value() );
+
+    const auto                 descriptors = runtime.routes();
+    std::optional<std::size_t> pointer_route_index;
+    for( std::size_t index{}; index < descriptors.size(); ++index )
+    {
+        if( descriptors[index].name == pointer_route_name )
+        {
+            pointer_route_index = index;
+            break;
+        }
+    }
+    ASSERT_TRUE( pointer_route_index.has_value() );
+
+    auto* const route = runtime.action_route( *pointer_route_index );
+    ASSERT_NE( route, nullptr );
+
+    auto* const tree_source = runtime.tree_source();
+    ASSERT_NE( tree_source, nullptr );
+    auto snapshot = tree_source->snapshot( snapshot_tree, context );
+    ASSERT_TRUE( snapshot.has_value() );
+
+    const auto nodes = snapshot->nodes();
+    const auto node  = nodes.empty() ? fallback_node : nodes.front().id.value;
+    const auto generation =
+        nodes.empty() ? fallback_generation : nodes.front().generation;
+    const grab::WidgetRef widget{
+        .runtime    = snapshot->runtime,
+        .tree       = snapshot->tree,
+        .epoch      = snapshot->epoch,
+        .node       = node,
+        .generation = generation,
+    };
+    const grab::spi::ActionRequest request{
+        .verb = grab::spi::ActionVerb::Click,
+        .target =
+            grab::Match{
+                        .ref                = widget,
+                        .mode               = grab::ConsistencyMode::Live,
+                        .snapshot_revision  = snapshot->revision,
+                        .matched_predicates = {},
+                        .provenance         = {},
+                        },
+        .text = {},
+    };
+
+    {
+        const auto reservation = route->reserve( request, context );
+        EXPECT_TRUE( reservation.has_value() );
+    }
+
+    EXPECT_TRUE( runtime.stop().has_value() );
 }

@@ -3,9 +3,13 @@
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "grab/capture.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/interaction.hpp"
+#include "grab/locator.hpp"
+#include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/trace.hpp"
 #include "transport/codec.hpp"
@@ -249,6 +253,36 @@ namespace grab::client
 
     UnixSocketTransport&
     UnixSocketTransport::operator=( UnixSocketTransport&& ) noexcept = default;
+
+    grab::Result<grab::Match>
+    UnixSocketTransport::resolve( const grab::Locator& locator,
+                                  grab::Cardinality    cardinality )
+    {
+        static_cast<void>( locator );
+        static_cast<void>( cardinality );
+        return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                           "resolve is not yet available over the socket transport" );
+    }
+
+    grab::Result<grab::Receipt>
+    UnixSocketTransport::perform( const grab::Action&        action,
+                                  const grab::ActionOptions& options )
+    {
+        static_cast<void>( action );
+        static_cast<void>( options );
+        return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                           "perform is not yet available over the socket transport" );
+    }
+
+    grab::Result<grab::Frame>
+    UnixSocketTransport::capture( const grab::CaptureTarget&  target,
+                                  const grab::CaptureOptions& options )
+    {
+        static_cast<void>( target );
+        static_cast<void>( options );
+        return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                           "capture is not yet available over the socket transport" );
+    }
 
     grab::Result<void>
     UnixSocketTransport::push_event( grab::Event event )

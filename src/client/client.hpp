@@ -54,6 +54,21 @@ namespace grab::client
             ensure_daemon( DaemonOptions options );
 
             [[nodiscard]]
+            grab::Result<grab::Match>
+            resolve( const grab::Locator& locator,
+                     grab::Cardinality    cardinality = grab::Cardinality::ExactlyOne );
+
+            [[nodiscard]]
+            grab::Result<grab::Receipt>
+            perform( const grab::Action&        action,
+                     const grab::ActionOptions& options = {} );
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture( const grab::CaptureTarget&  target,
+                     const grab::CaptureOptions& options = {} );
+
+            [[nodiscard]]
             grab::Result<void>
             push_event( grab::Event event );
 

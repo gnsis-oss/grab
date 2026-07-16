@@ -380,11 +380,12 @@ namespace grab::drivers::desktop::x11
                                        },
         } );
 
+        // Client-list windows are managed and mapped, so report Visible|Enabled.
         return grab::UiNodeRecord{
             binding.node,
             grab::NodeGeneration{1U                                  },
             grab::role::window,
-            0U,
+            grab::NodeState::Visible | grab::NodeState::Enabled,
             std::move( properties ),
             grab::UiProvenance{
                                  .runtime  = runtime_,.revision = revision,

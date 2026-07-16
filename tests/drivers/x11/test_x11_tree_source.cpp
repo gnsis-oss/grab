@@ -141,7 +141,8 @@ TEST( X11TreeSource,
     const auto& first_node = nodes.front();
     EXPECT_EQ( first_node.generation, firstGeneration );
     EXPECT_EQ( first_node.role, grab::role::window );
-    EXPECT_EQ( first_node.states, 0U );
+    EXPECT_TRUE( grab::has_state( first_node.states, grab::NodeState::Visible ) );
+    EXPECT_TRUE( grab::has_state( first_node.states, grab::NodeState::Enabled ) );
     const grab::UiProvenance expected_provenance{
         .runtime  = runtimeId,
         .revision = firstRevision,

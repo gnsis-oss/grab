@@ -1,17 +1,28 @@
 #include "client/client.hpp"
 #include "client/loopback_transport.hpp"
 #include "client/unix_socket_transport.hpp"
+#include "grab/capture.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/interaction.hpp"
+#include "grab/locator.hpp"
+#include "grab/query.hpp"
 #include "grab/result.hpp"
+#include "grab/role.hpp"
+#include "grab/session.hpp"
 #include "grab/trace.hpp"
+#include "grab/ui.hpp"
+#include "screen/enumerate.hpp"
 #include "transport/server.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -20,6 +31,8 @@
 #include <unistd.h>
 #include <utility>
 #include <variant>
+#include <xcb/xcb.h>
+#include <xcb/xproto.h>
 // clang-format on
 
 namespace
@@ -196,6 +209,265 @@ namespace
 
         EXPECT_TRUE( grab::client::is_connection_error( connection ) );
         EXPECT_FALSE( grab::client::is_connection_error( semantic ) );
+    }
+
+    constexpr std::string_view loopbackWindowTitle       = "grab loopback verbs";
+    constexpr std::string_view loopbackWindowClass       = "grab-loopback-verbs";
+    constexpr std::string_view utf8StringAtomName        = "UTF8_STRING";
+    constexpr std::string_view netWmNameAtomName         = "_NET_WM_NAME";
+    constexpr std::string_view netClientListAtomName     = "_NET_CLIENT_LIST";
+    constexpr std::int16_t     loopbackWindowX           = 11;
+    constexpr std::int16_t     loopbackWindowY           = 13;
+    constexpr std::uint16_t    loopbackWindowWidth       = 200U;
+    constexpr std::uint16_t    loopbackWindowHeight      = 120U;
+    constexpr std::uint16_t    loopbackWindowBorderWidth = 0U;
+    constexpr std::size_t      loopbackWindowValueCount  = 2U;
+    constexpr std::uint32_t    loopbackWindowValueMask =
+        XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
+    constexpr std::uint32_t loopbackWindowEventMask = XCB_EVENT_MASK_EXPOSURE |
+                                                      XCB_EVENT_MASK_STRUCTURE_NOTIFY |
+                                                      XCB_EVENT_MASK_PROPERTY_CHANGE;
+    constexpr std::uint8_t  windowPropertyFormat    = 32U;
+    constexpr std::uint32_t clientListWindowCount   = 1U;
+    constexpr int           xcbConnectionSuccess    = 0;
+    constexpr int           xcbFlushFailure         = 0;
+    constexpr std::uint64_t emptyFrameId            = 0U;
+
+    struct XcbWindowGuard
+    {
+            xcb_connection_t* connection{};
+            xcb_window_t      window{ XCB_WINDOW_NONE };
+
+            ~XcbWindowGuard()
+            {
+                if( connection == nullptr )
+                {
+                    return;
+                }
+                if( window != XCB_WINDOW_NONE )
+                {
+                    static_cast<void>( xcb_destroy_window( connection, window ) );
+                    static_cast<void>( xcb_flush( connection ) );
+                }
+                xcb_disconnect( connection );
+            }
+
+            XcbWindowGuard()                        = default;
+            XcbWindowGuard( const XcbWindowGuard& ) = delete;
+            XcbWindowGuard&
+            operator=( const XcbWindowGuard& ) = delete;
+    };
+
+    [[nodiscard]]
+    bool
+    request_succeeded( xcb_connection_t* connection,
+                       xcb_void_cookie_t request )
+    {
+        auto* const error = xcb_request_check( connection, request );
+        if( error == nullptr )
+        {
+            return true;
+        }
+        std::free( error );
+        return false;
+    }
+
+    [[nodiscard]]
+    xcb_atom_t
+    intern_atom( xcb_connection_t* connection,
+                 std::string_view  name )
+    {
+        const auto  cookie = xcb_intern_atom( connection,
+                                              0U,
+                                              static_cast<std::uint16_t>( name.size() ),
+                                              name.data() );
+        auto* const reply  = xcb_intern_atom_reply( connection, cookie, nullptr );
+        if( reply == nullptr )
+        {
+            return XCB_ATOM_NONE;
+        }
+        const auto atom = reply->atom;
+        std::free( reply );
+        return atom;
+    }
+
+    [[nodiscard]]
+    bool
+    set_text_property( xcb_connection_t* connection,
+                       xcb_window_t      window,
+                       xcb_atom_t        property,
+                       xcb_atom_t        type,
+                       std::string_view  value )
+    {
+        return request_succeeded(
+            connection,
+            xcb_change_property_checked( connection,
+                                         XCB_PROP_MODE_REPLACE,
+                                         window,
+                                         property,
+                                         type,
+                                         8U,
+                                         static_cast<std::uint32_t>( value.size() ),
+                                         value.data() )
+        );
+    }
+
+    TEST( ClientLoopbackVerbs,
+          VerbsWithoutBoundSessionReturnCapabilityUnavailable )
+    {
+        grab::EventBus                  bus;
+        grab::client::LoopbackTransport transport{ bus };
+        grab::client::Client            client{ transport };
+
+        const auto match = client.resolve( grab::sel::role( grab::role::window ) );
+        ASSERT_FALSE( match.has_value() );
+        EXPECT_EQ( match.error().code, grab::ErrorCode::CapabilityUnavailable );
+
+        const auto receipt = client.perform(
+            grab::Click{ .target = grab::sel::role( grab::role::window ) },
+            grab::ActionOptions{}
+        );
+        ASSERT_FALSE( receipt.has_value() );
+        EXPECT_EQ( receipt.error().code, grab::ErrorCode::CapabilityUnavailable );
+
+        const auto frame =
+            client.capture( grab::CaptureTarget{ std::string{ "screen" } },
+                            grab::CaptureOptions{} );
+        ASSERT_FALSE( frame.has_value() );
+        EXPECT_EQ( frame.error().code, grab::ErrorCode::CapabilityUnavailable );
+    }
+
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+    TEST( ClientLoopbackVerbs,
+          VerbsRoundTripAgainstLiveSessionOnDisplay )
+    {
+        const char* const display = std::getenv( "DISPLAY" );
+        if( display == nullptr || std::string_view{ display }.empty() )
+        {
+            GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+        }
+
+        int            screenNumber = 0;
+        XcbWindowGuard windowGuard;
+        windowGuard.connection = xcb_connect( display, &screenNumber );
+        if( windowGuard.connection ==
+            nullptr ||
+            xcb_connection_has_error( windowGuard.connection ) != xcbConnectionSuccess )
+        {
+            GTEST_SKIP() << "requires a reachable X display";
+        }
+
+        auto screenIterator =
+            xcb_setup_roots_iterator( xcb_get_setup( windowGuard.connection ) );
+        for( int screenIndex = 0; screenIndex < screenNumber && screenIterator.rem > 0;
+             ++screenIndex )
+        {
+            xcb_screen_next( &screenIterator );
+        }
+        ASSERT_GT( screenIterator.rem, 0 );
+        ASSERT_NE( screenIterator.data, nullptr );
+        const auto* const screen = screenIterator.data;
+
+        windowGuard.window       = xcb_generate_id( windowGuard.connection );
+        const std::array<std::uint32_t, loopbackWindowValueCount> windowValues{
+            screen->black_pixel,
+            loopbackWindowEventMask,
+        };
+        ASSERT_TRUE(
+            request_succeeded( windowGuard.connection,
+                               xcb_create_window_checked( windowGuard.connection,
+                                                          XCB_COPY_FROM_PARENT,
+                                                          windowGuard.window,
+                                                          screen->root,
+                                                          loopbackWindowX,
+                                                          loopbackWindowY,
+                                                          loopbackWindowWidth,
+                                                          loopbackWindowHeight,
+                                                          loopbackWindowBorderWidth,
+                                                          XCB_WINDOW_CLASS_INPUT_OUTPUT,
+                                                          screen->root_visual,
+                                                          loopbackWindowValueMask,
+                                                          windowValues.data() ) )
+        );
+
+        const auto utf8StringAtom =
+            intern_atom( windowGuard.connection, utf8StringAtomName );
+        const auto netWmNameAtom =
+            intern_atom( windowGuard.connection, netWmNameAtomName );
+        const auto netClientListAtom =
+            intern_atom( windowGuard.connection, netClientListAtomName );
+        ASSERT_NE( utf8StringAtom, XCB_ATOM_NONE );
+        ASSERT_NE( netWmNameAtom, XCB_ATOM_NONE );
+        ASSERT_NE( netClientListAtom, XCB_ATOM_NONE );
+
+        ASSERT_TRUE( set_text_property( windowGuard.connection,
+                                        windowGuard.window,
+                                        XCB_ATOM_WM_NAME,
+                                        XCB_ATOM_STRING,
+                                        loopbackWindowTitle ) );
+        ASSERT_TRUE( set_text_property( windowGuard.connection,
+                                        windowGuard.window,
+                                        netWmNameAtom,
+                                        utf8StringAtom,
+                                        loopbackWindowTitle ) );
+        const std::string windowClassValue = std::string{ loopbackWindowClass } +
+                                             '\0' +
+                                             std::string{ loopbackWindowClass } +
+                                             '\0';
+        ASSERT_TRUE( set_text_property( windowGuard.connection,
+                                        windowGuard.window,
+                                        XCB_ATOM_WM_CLASS,
+                                        XCB_ATOM_STRING,
+                                        windowClassValue ) );
+        ASSERT_TRUE( request_succeeded( windowGuard.connection,
+                                        xcb_map_window_checked( windowGuard.connection,
+                                                                windowGuard.window ) ) );
+        ASSERT_TRUE(
+            request_succeeded( windowGuard.connection,
+                               xcb_change_property_checked( windowGuard.connection,
+                                                            XCB_PROP_MODE_REPLACE,
+                                                            screen->root,
+                                                            netClientListAtom,
+                                                            XCB_ATOM_WINDOW,
+                                                            windowPropertyFormat,
+                                                            clientListWindowCount,
+                                                            &windowGuard.window ) )
+        );
+        ASSERT_GT( xcb_flush( windowGuard.connection ), xcbFlushFailure );
+
+        auto session = grab::Session::open( grab::SessionOptions{
+            .display = std::string{ display },
+            .seat    = {},
+        } );
+        ASSERT_TRUE( session.has_value() ) << session.error().message;
+        grab::client::LoopbackTransport transport{ std::move( *session ) };
+        grab::client::Client            client{ transport };
+
+        const auto                      locator = grab::sel::all(
+            { grab::sel::role( grab::role::window ),
+              grab::sel::property( grab::property::title,
+                                   std::string{ loopbackWindowTitle } ),
+              grab::sel::property( grab::property::window_class,
+                                   std::string{ loopbackWindowClass } ) }
+        );
+        const auto match = client.resolve( locator );
+        ASSERT_TRUE( match.has_value() ) << match.error().message;
+
+        const auto outputs = grab::screen::list_outputs();
+        ASSERT_TRUE( outputs.has_value() );
+        ASSERT_FALSE( outputs->empty() );
+        const auto frame = client.capture( grab::CaptureTarget{ outputs->front().name },
+                                           grab::CaptureOptions{} );
+        ASSERT_TRUE( frame.has_value() ) << frame.error().message;
+        EXPECT_NE( frame->id.value, emptyFrameId );
+
+        const auto receipt =
+            client.perform( grab::Click{ .target = *match }, grab::ActionOptions{} );
+        ASSERT_TRUE( receipt.has_value() ) << receipt.error().message;
+        EXPECT_TRUE( receipt->commit ==
+                     grab::CommitStatus::Committed ||
+                     receipt->commit == grab::CommitStatus::Verified );
+        EXPECT_FALSE( receipt->routes.empty() );
     }
 
 }    // namespace

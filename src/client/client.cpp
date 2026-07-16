@@ -1,9 +1,13 @@
 #include "client/client.hpp"
 #include "client/transport.hpp"
+#include "grab/capture.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/interaction.hpp"
+#include "grab/locator.hpp"
 #include "grab/process_ref.hpp"
+#include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/trace.hpp"
 
@@ -207,6 +211,75 @@ namespace grab::client
             {
                 daemon_options_ = std::move( options );
                 return ensure_daemon_impl( false );
+            }
+
+            [[nodiscard]]
+            grab::Result<grab::Match>
+            resolve( const grab::Locator& locator,
+                     grab::Cardinality    cardinality )
+            {
+                auto bound = transport();
+                if( !bound.has_value() )
+                {
+                    return std::unexpected( bound.error() );
+                }
+                auto resolved = ( *bound )->resolve( locator, cardinality );
+                if( resolved.has_value() || !is_connection_error( resolved.error() ) )
+                {
+                    return resolved;
+                }
+                auto recovered = recover_connection();
+                if( !recovered.has_value() )
+                {
+                    return std::unexpected( std::move( recovered.error() ) );
+                }
+                return ( *bound )->resolve( locator, cardinality );
+            }
+
+            [[nodiscard]]
+            grab::Result<grab::Receipt>
+            perform( const grab::Action&        action,
+                     const grab::ActionOptions& options )
+            {
+                auto bound = transport();
+                if( !bound.has_value() )
+                {
+                    return std::unexpected( bound.error() );
+                }
+                auto performed = ( *bound )->perform( action, options );
+                if( performed.has_value() || !is_connection_error( performed.error() ) )
+                {
+                    return performed;
+                }
+                auto recovered = recover_connection();
+                if( !recovered.has_value() )
+                {
+                    return std::unexpected( std::move( recovered.error() ) );
+                }
+                return ( *bound )->perform( action, options );
+            }
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture( const grab::CaptureTarget&  target,
+                     const grab::CaptureOptions& options )
+            {
+                auto bound = transport();
+                if( !bound.has_value() )
+                {
+                    return std::unexpected( bound.error() );
+                }
+                auto captured = ( *bound )->capture( target, options );
+                if( captured.has_value() || !is_connection_error( captured.error() ) )
+                {
+                    return captured;
+                }
+                auto recovered = recover_connection();
+                if( !recovered.has_value() )
+                {
+                    return std::unexpected( std::move( recovered.error() ) );
+                }
+                return ( *bound )->capture( target, options );
             }
 
             [[nodiscard]]
@@ -522,6 +595,27 @@ namespace grab::client
     Client::ensure_daemon( DaemonOptions options )
     {
         return state_->ensure_daemon( std::move( options ) );
+    }
+
+    grab::Result<grab::Match>
+    Client::resolve( const grab::Locator& locator,
+                     grab::Cardinality    cardinality )
+    {
+        return state_->resolve( locator, cardinality );
+    }
+
+    grab::Result<grab::Receipt>
+    Client::perform( const grab::Action&        action,
+                     const grab::ActionOptions& options )
+    {
+        return state_->perform( action, options );
+    }
+
+    grab::Result<grab::Frame>
+    Client::capture( const grab::CaptureTarget&  target,
+                     const grab::CaptureOptions& options )
+    {
+        return state_->capture( target, options );
     }
 
     grab::Result<void>

@@ -54,6 +54,10 @@ namespace grab::drivers::desktop::x11
             {
                 return widget_ref_from( value.widget );
             }
+            else if constexpr( requires { value.ref; } )
+            {
+                return widget_ref_from( value.ref );
+            }
             else if constexpr( requires { value.widget_ref; } )
             {
                 return widget_ref_from( value.widget_ref );

@@ -23,6 +23,21 @@ namespace grab::client
             operator=( UnixSocketTransport&& ) noexcept;
 
             [[nodiscard]]
+            grab::Result<grab::Match>
+            resolve( const grab::Locator& locator,
+                     grab::Cardinality    cardinality ) override;
+
+            [[nodiscard]]
+            grab::Result<grab::Receipt>
+            perform( const grab::Action&        action,
+                     const grab::ActionOptions& options ) override;
+
+            [[nodiscard]]
+            grab::Result<grab::Frame>
+            capture( const grab::CaptureTarget&  target,
+                     const grab::CaptureOptions& options ) override;
+
+            [[nodiscard]]
             grab::Result<void>
             push_event( grab::Event event ) override;
 
