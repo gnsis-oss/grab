@@ -1,5 +1,6 @@
 #include "codec/png.hpp"
 #include "core/reactor.hpp"
+#include "drivers/desktop/x11/window_match.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
 #include "event/window_x11.hpp"
 #include "grab/context.hpp"
@@ -14,7 +15,6 @@
 #include "kernel/action/wait_engine.hpp"
 #include "kernel/capture/tile_differ.hpp"
 #include "notify/notifier.hpp"
-#include "screen/window_match.hpp"
 
 #include <algorithm>
 #include <chrono>

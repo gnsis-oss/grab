@@ -9,6 +9,7 @@
 #include "core/prober.hpp"
 #include "core/reactor.hpp"
 #include "core/registry.hpp"
+#include "drivers/desktop/x11/window_match.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
 #include "event/window_x11.hpp"
 #include "grab/capture.hpp"
@@ -30,7 +31,6 @@
 #include "grab/ui.hpp"
 #include "image/compare.hpp"
 #include "notify/notifier.hpp"
-#include "screen/window_match.hpp"
 #include "service/daemon.hpp"
 
 #include <charconv>

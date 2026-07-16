@@ -41,8 +41,6 @@ add_executable(grab_core_tests
     codec/test_image.cpp
     codec/test_png.cpp
     screen/test_screen.cpp
-    screen/test_virtual_display.cpp
-    screen/test_x11_capture.cpp
     image/test_compare.cpp
     input/test_keymap.cpp
     input/test_gestures.cpp
@@ -108,7 +106,9 @@ add_executable(grab_driver_x11_tests
     drivers/x11/test_coordinate_authority.cpp
     drivers/x11/test_enumerate.cpp
     drivers/x11/test_record.cpp
+    drivers/x11/test_virtual_display.cpp
     drivers/x11/test_workflow.cpp
+    drivers/x11/test_x11_capture.cpp
     drivers/x11/test_x11_capture_route.cpp
     drivers/x11/test_x11_event_source.cpp
     drivers/x11/test_x11_input_correctness.cpp

@@ -100,8 +100,6 @@ target_compile_features(grab_codec PUBLIC cxx_std_23)
 
 add_library(grab_screen STATIC
     src/screen/screen.cpp
-    src/screen/virtual_display.cpp
-    src/screen/x11_capture.cpp
 )
 target_link_libraries(grab_screen
     PUBLIC
@@ -163,8 +161,9 @@ add_library(grab_session STATIC
     src/session/registry.cpp
     src/session/selection.cpp
     src/session/state_machine.cpp
+    src/session/virtual_display.cpp
 )
-target_link_libraries(grab_session PUBLIC grab_core)
+target_link_libraries(grab_session PUBLIC grab_core PkgConfig::GRAB_XCB)
 target_include_directories(grab_session PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_session PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_session PUBLIC cxx_std_23)
@@ -186,6 +185,7 @@ add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/enumerate.cpp
     src/drivers/desktop/x11/record.cpp
     src/drivers/desktop/x11/workflow.cpp
+    src/drivers/desktop/x11/x11_capture.cpp
     src/drivers/desktop/x11/x11_capture_route.cpp
     src/drivers/desktop/x11/x11_event_source.cpp
     src/drivers/desktop/x11/x11_input_correctness.cpp

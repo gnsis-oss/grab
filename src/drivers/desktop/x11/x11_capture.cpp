@@ -1,11 +1,11 @@
 #include "core/id_factory.hpp"
+#include "drivers/desktop/x11/x11_capture.hpp"
 #include "grab/capture.hpp"
 #include "grab/geometry/rectangle.hpp"
 #include "grab/ids.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
-#include "screen/x11_capture.hpp"
 
 #include <algorithm>
 #include <bit>

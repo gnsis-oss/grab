@@ -1,10 +1,10 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "drivers/desktop/x11/coordinate_authority.hpp"
+#include "drivers/desktop/x11/x11_capture.hpp"
 #include "grab/capture.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
-#include "screen/x11_capture.hpp"
 
 #include <cstdint>
 #include <memory>
