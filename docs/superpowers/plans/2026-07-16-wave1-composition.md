@@ -253,6 +253,8 @@ TEST( SessionVerbs, PerformHonorsCallerStopToken )
 
 - [ ] Steps: failing test (no-bus environment must still open; diagnostics non-empty mentioning atspi) → implement → green → commit — `feat(session): best-effort AT-SPI runtime attach with recorded diagnostics (W1.1)`
 
+> **Execution finding (Task 7, commit `1939981`) — TreeStore is single-scope.** `TreeStore::apply` retires any prior runtime scope when an update carries a different `RuntimeId` (`tree_store.cpp:1358-1370`) and permanently rejects retired ids; worse, `X11TreeSource` and `AtspiTreeSource` both mint `RuntimeId{1}`, so two live sources would collide on scope identity. AT-SPI attach is therefore **deferred** (recorded diagnostic) until this is resolved. Resolution direction per the canonical plan's §1 storage rule ("each runtime publishes its own versioned snapshots; composite views are query-time projections"): **one TreeStore per attached runtime** inside SessionCore plus a session-level RuntimeId allocation authority — NOT a multi-scope store. Scheduled as **Task 7b** (own bite-size addendum) after Task 9; the Wave-1 exit gate's semantic arm remains satisfied by the deferral diagnostic until 7b lands.
+
 ### Task 8: X11 event + topology sources, EventOrigin stamping, demand wiring
 
 **Files:**
