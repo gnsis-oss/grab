@@ -1,5 +1,7 @@
 #include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
+#include "grab/drag.hpp"
+#include "grab/geometry/point.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -528,6 +530,277 @@ namespace grab::drivers::desktop::x11
                 std::string   text_;
         };
 
+        [[nodiscard]]
+        bool
+        in_int16_range( grab::geometry::Point point ) noexcept
+        {
+            return point.x >=
+                   std::numeric_limits<std::int16_t>::min() &&
+                   point.x <=
+                   std::numeric_limits<std::int16_t>::max() &&
+                   point.y >=
+                   std::numeric_limits<std::int16_t>::min() &&
+                   point.y <= std::numeric_limits<std::int16_t>::max();
+        }
+
+        [[nodiscard]]
+        grab::geometry::Point
+        interpolated_point( grab::geometry::Point from,
+                            grab::geometry::Point to,
+                            std::int32_t          step,
+                            std::int32_t          step_count ) noexcept
+        {
+            const auto start_x = static_cast<std::int64_t>( from.x );
+            const auto start_y = static_cast<std::int64_t>( from.y );
+            const auto dx      = static_cast<std::int64_t>( to.x ) - start_x;
+            const auto dy      = static_cast<std::int64_t>( to.y ) - start_y;
+            const auto count   = static_cast<std::int64_t>( step_count );
+            const auto current = static_cast<std::int64_t>( step );
+            return grab::geometry::Point{
+                .x = static_cast<std::int32_t>( start_x + ( ( dx * current ) / count ) ),
+                .y = static_cast<std::int32_t>( start_y + ( ( dy * current ) / count ) ),
+            };
+        }
+
+        class PointerDragReservation final : public ReservationBase
+        {
+            public:
+
+                PointerDragReservation( X11InputSeat&                   seat,
+                                        grab::geometry::Point           from,
+                                        grab::geometry::Point           to,
+                                        const grab::input::DragOptions& options ) :
+                    seat_( &seat ),
+                    from_( from ),
+                    to_( to ),
+                    options_( options )
+                {
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                commit( const grab::OperationContext& ) final
+                {
+                    if( options_.interpolation_steps <
+                        grab::input::DragOptions::minimumInterpolationSteps ||
+                        options_.interpolation_steps >
+                        grab::input::DragOptions::maximumInterpolationSteps )
+                    {
+                        return failure<void>(
+                            grab::ErrorCode::InvalidArgument,
+                            "drag interpolation-step count is out of range"
+                        );
+                    }
+                    if( !in_int16_range( from_ ) || !in_int16_range( to_ ) )
+                    {
+                        return failure<void>( grab::ErrorCode::InvalidArgument,
+                                              "drag coordinate is outside int16 range" );
+                    }
+
+                    auto result = seat_->move_pointer_absolute(
+                        static_cast<std::int16_t>( from_.x ),
+                        static_cast<std::int16_t>( from_.y )
+                    );
+                    if( !result )
+                    {
+                        return result;
+                    }
+                    result = seat_->flush();
+                    if( !result )
+                    {
+                        return result;
+                    }
+
+                    result = seat_->button( 1U, true );
+                    if( !result )
+                    {
+                        return possibly_committed();
+                    }
+
+                    for( std::int32_t step = 1; step <= options_.interpolation_steps;
+                         ++step )
+                    {
+                        const auto point =
+                            interpolated_point( from_,
+                                                to_,
+                                                step,
+                                                options_.interpolation_steps );
+                        if( !in_int16_range( point ) )
+                        {
+                            return possibly_committed();
+                        }
+                        result = seat_->move_pointer_absolute(
+                            static_cast<std::int16_t>( point.x ),
+                            static_cast<std::int16_t>( point.y )
+                        );
+                        if( !result )
+                        {
+                            return possibly_committed();
+                        }
+                        result = seat_->flush();
+                        if( !result )
+                        {
+                            return possibly_committed();
+                        }
+                    }
+
+                    result = seat_->button( 1U, false );
+                    if( !result )
+                    {
+                        return possibly_committed();
+                    }
+                    result = seat_->flush();
+                    if( !result )
+                    {
+                        return possibly_committed();
+                    }
+                    return {};
+                }
+
+            private:
+
+                X11InputSeat*            seat_{};
+                grab::geometry::Point    from_{};
+                grab::geometry::Point    to_{};
+                grab::input::DragOptions options_{};
+        };
+
+        class KeyReservation final : public ReservationBase
+        {
+            public:
+
+                KeyReservation( X11InputSeat& seat,
+                                grab::Keymap& keymap,
+                                std::string   key_name ) :
+                    seat_( &seat ),
+                    keymap_( &keymap ),
+                    key_name_( std::move( key_name ) )
+                {
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                commit( const grab::OperationContext& ) final
+                {
+                    const auto keystroke = keymap_->keystroke_for_key( key_name_ );
+                    if( !keystroke.has_value() )
+                    {
+                        return failure<void>( grab::ErrorCode::UnsupportedCharacter,
+                                              "named key is not available in keymap: " +
+                                                  key_name_ );
+                    }
+
+                    constexpr auto max_keycode =
+                        std::numeric_limits<std::uint8_t>::max();
+                    if( keystroke->keycode == 0U || keystroke->keycode > max_keycode )
+                    {
+                        return failure<void>(
+                            grab::ErrorCode::InvalidArgument,
+                            "X11 keycode is outside the supported range"
+                        );
+                    }
+
+                    std::uint32_t shift = 0U;
+                    if( keystroke->shift )
+                    {
+                        shift = keymap_->shift_keycode();
+                        if( shift == 0U || shift > max_keycode )
+                        {
+                            return failure<void>(
+                                grab::ErrorCode::UnsupportedCharacter,
+                                "keymap does not provide the required Shift modifier"
+                            );
+                        }
+                    }
+                    std::uint32_t altgr = 0U;
+                    if( keystroke->altgr )
+                    {
+                        altgr = keymap_->altgr_keycode();
+                        if( altgr == 0U || altgr > max_keycode )
+                        {
+                            return failure<void>(
+                                grab::ErrorCode::UnsupportedCharacter,
+                                "keymap does not provide the required AltGr modifier"
+                            );
+                        }
+                    }
+
+                    bool       begun = false;
+                    const auto send  = [this, &begun]( std::uint32_t keycode,
+                                                       bool press ) -> grab::Result<void>
+                    {
+                        begun = true;
+                        auto result =
+                            seat_->key( static_cast<std::uint8_t>( keycode ), press );
+                        if( !result )
+                        {
+                            return possibly_committed();
+                        }
+                        return {};
+                    };
+
+                    if( keystroke->shift )
+                    {
+                        auto result = send( shift, true );
+                        if( !result )
+                        {
+                            return result;
+                        }
+                    }
+                    if( keystroke->altgr )
+                    {
+                        auto result = send( altgr, true );
+                        if( !result )
+                        {
+                            return result;
+                        }
+                    }
+                    auto result = send( keystroke->keycode, true );
+                    if( !result )
+                    {
+                        return result;
+                    }
+                    result = send( keystroke->keycode, false );
+                    if( !result )
+                    {
+                        return result;
+                    }
+                    if( keystroke->altgr )
+                    {
+                        result = send( altgr, false );
+                        if( !result )
+                        {
+                            return result;
+                        }
+                    }
+                    if( keystroke->shift )
+                    {
+                        result = send( shift, false );
+                        if( !result )
+                        {
+                            return result;
+                        }
+                    }
+
+                    result = seat_->flush();
+                    if( !result )
+                    {
+                        if( begun )
+                        {
+                            return possibly_committed();
+                        }
+                        return result;
+                    }
+                    return {};
+                }
+
+            private:
+
+                X11InputSeat* seat_{};
+                grab::Keymap* keymap_{};
+                std::string   key_name_;
+        };
+
     }    // namespace
 
     X11InputSeat::X11InputSeat( grab::input::Seat seat,
@@ -695,30 +968,39 @@ namespace grab::drivers::desktop::x11
     X11PointerRoute::reserve( const grab::spi::ActionRequest& action,
                               const grab::OperationContext& )
     {
-        if( action.verb != grab::spi::ActionVerb::Click )
+        if( action.verb == grab::spi::ActionVerb::Click )
         {
-            return failure<std::unique_ptr<grab::spi::RouteReservation>>(
-                grab::ErrorCode::CapabilityUnavailable,
-                "X11 pointer route only supports Click"
-            );
+            const auto target = widget_ref_from( action.target );
+            if( !target )
+            {
+                return failure<std::unique_ptr<grab::spi::RouteReservation>>(
+                    grab::ErrorCode::InvalidArgument,
+                    "X11 pointer route requires a WidgetRef target"
+                );
+            }
+
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<PointerReservation>( *source_,
+                                                      connection_,
+                                                      root_,
+                                                      *seat_,
+                                                      *target )
+            };
+        }
+        if( action.verb == grab::spi::ActionVerb::Drag )
+        {
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<PointerDragReservation>( *seat_,
+                                                          action.drag_from,
+                                                          action.drag_to,
+                                                          action.drag_options )
+            };
         }
 
-        const auto target = widget_ref_from( action.target );
-        if( !target )
-        {
-            return failure<std::unique_ptr<grab::spi::RouteReservation>>(
-                grab::ErrorCode::InvalidArgument,
-                "X11 pointer route requires a WidgetRef target"
-            );
-        }
-
-        return std::unique_ptr<grab::spi::RouteReservation>{
-            std::make_unique<PointerReservation>( *source_,
-                                                  connection_,
-                                                  root_,
-                                                  *seat_,
-                                                  *target )
-        };
+        return failure<std::unique_ptr<grab::spi::RouteReservation>>(
+            grab::ErrorCode::CapabilityUnavailable,
+            "X11 pointer route only supports Click and Drag"
+        );
     }
 
     X11KeyboardRoute::X11KeyboardRoute( X11TreeSource&    source,
@@ -740,17 +1022,23 @@ namespace grab::drivers::desktop::x11
         static_cast<void>( source_ );
         static_cast<void>( connection_ );
 
-        if( action.verb != grab::spi::ActionVerb::TypeText )
+        if( action.verb == grab::spi::ActionVerb::TypeText )
         {
-            return failure<std::unique_ptr<grab::spi::RouteReservation>>(
-                grab::ErrorCode::CapabilityUnavailable,
-                "X11 keyboard route only supports TypeText"
-            );
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<KeyboardReservation>( *seat_, keymap_, action.text )
+            };
+        }
+        if( action.verb == grab::spi::ActionVerb::PressKey )
+        {
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<KeyReservation>( *seat_, keymap_, action.key_name )
+            };
         }
 
-        return std::unique_ptr<grab::spi::RouteReservation>{
-            std::make_unique<KeyboardReservation>( *seat_, keymap_, action.text )
-        };
+        return failure<std::unique_ptr<grab::spi::RouteReservation>>(
+            grab::ErrorCode::CapabilityUnavailable,
+            "X11 keyboard route only supports TypeText and PressKey"
+        );
     }
 
 }    // namespace grab::drivers::desktop::x11

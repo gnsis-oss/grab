@@ -435,6 +435,16 @@ namespace grab::client
         eventgrab::v1::PerformActionResponse response;
         context.set_deadline( rpc_deadline() );
 
+        if( std::holds_alternative<grab::Drag>( action ) ||
+            std::holds_alternative<grab::PressKey>( action ) )
+        {
+            return grab::fail(
+                grab::ErrorCode::InvalidArgument,
+                "drag and press-key actions are not yet expressible over the socket "
+                "wire; use the in-process (loopback) transport"
+            );
+        }
+
         const auto encode_target = [&request]( const grab::ActionTarget& target )
         {
             std::visit(
@@ -461,13 +471,15 @@ namespace grab::client
                 if constexpr( std::is_same_v<ActionType, grab::Click> )
                 {
                     request.set_command( "input.click" );
+                    encode_target( value.target );
                 }
-                else
+                else if constexpr( std::is_same_v<ActionType, grab::TypeText> )
                 {
                     request.set_command( "input.type" );
                     request.set_text( value.text );
+                    encode_target( value.target );
                 }
-                encode_target( value.target );
+                // Drag / PressKey are rejected before this visit; nothing to encode.
             },
             action
         );

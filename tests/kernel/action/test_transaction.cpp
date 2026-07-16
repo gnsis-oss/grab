@@ -220,3 +220,47 @@ TEST( ActionTransaction,
     EXPECT_EQ( semantic.commit_count(), 0U );
     EXPECT_EQ( physical.commit_count(), 1U );
 }
+
+TEST( ActionTransaction,
+      DragVerbReservesRouteAndReturnsVerifiedReceipt )
+{
+    grab::testing::FakeRuntime runtime;
+    runtime.inject_snapshot( snapshot( runtime.runtime_id() ) );
+    auto& route =
+        runtime.add_route( "physical.pointer", grab::spi::RouteKind::Physical );
+    grab::kernel::action::Transaction transaction{ runtime, treeId };
+
+    const grab::Action                drag = grab::Drag{
+        .target  = grab::sel::role( grab::role::control ),
+        .from    = grab::geometry::Point{ .x = 10, .y = 10 },
+        .to      = grab::geometry::Point{ .x = 40, .y = 40 },
+        .options = grab::input::DragOptions{},
+    };
+    const auto outcome = transaction.perform( drag, forced_options() );
+
+    EXPECT_FALSE( outcome.error.has_value() );
+    EXPECT_EQ( outcome.receipt.commit, grab::CommitStatus::Verified );
+    EXPECT_EQ( route.commit_count(), 1U );
+    EXPECT_EQ( runtime.seat().neutralize_count(), 1U );
+}
+
+TEST( ActionTransaction,
+      PressKeyVerbReservesRouteAndReturnsVerifiedReceipt )
+{
+    grab::testing::FakeRuntime runtime;
+    runtime.inject_snapshot( snapshot( runtime.runtime_id() ) );
+    auto& route =
+        runtime.add_route( "physical.keyboard", grab::spi::RouteKind::Physical );
+    grab::kernel::action::Transaction transaction{ runtime, treeId };
+
+    const grab::Action                press = grab::PressKey{
+        .target   = grab::sel::role( grab::role::control ),
+        .key_name = "Return",
+    };
+    const auto outcome = transaction.perform( press, forced_options() );
+
+    EXPECT_FALSE( outcome.error.has_value() );
+    EXPECT_EQ( outcome.receipt.commit, grab::CommitStatus::Verified );
+    EXPECT_EQ( route.commit_count(), 1U );
+    EXPECT_EQ( runtime.seat().neutralize_count(), 1U );
+}

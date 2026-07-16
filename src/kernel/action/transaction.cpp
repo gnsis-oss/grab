@@ -456,15 +456,32 @@ namespace grab::kernel::action
                                 return spi::ActionRequest{
                                     .verb   = spi::ActionVerb::Click,
                                     .target = *target_,
-                                    .text   = {},
                                 };
                             }
-                            else
+                            else if constexpr( std::is_same_v<Verb, TypeText> )
                             {
                                 return spi::ActionRequest{
                                     .verb   = spi::ActionVerb::TypeText,
                                     .target = *target_,
                                     .text   = verb.text,
+                                };
+                            }
+                            else if constexpr( std::is_same_v<Verb, Drag> )
+                            {
+                                return spi::ActionRequest{
+                                    .verb         = spi::ActionVerb::Drag,
+                                    .target       = *target_,
+                                    .drag_from    = verb.from,
+                                    .drag_to      = verb.to,
+                                    .drag_options = verb.options,
+                                };
+                            }
+                            else
+                            {
+                                return spi::ActionRequest{
+                                    .verb     = spi::ActionVerb::PressKey,
+                                    .target   = *target_,
+                                    .key_name = verb.key_name,
                                 };
                             }
                         },
