@@ -526,8 +526,10 @@ namespace grab::drivers::desktop::x11
 
     }    // namespace
 
-    X11InputSeat::X11InputSeat( grab::input::Seat seat ) noexcept :
-        seat_( std::move( seat ) )
+    X11InputSeat::X11InputSeat( grab::input::Seat seat,
+                                InjectionLedger*  ledger ) noexcept :
+        seat_( std::move( seat ) ),
+        ledger_( ledger )
     {
     }
 
@@ -536,7 +538,12 @@ namespace grab::drivers::desktop::x11
                                          std::int16_t y )
     {
         const std::scoped_lock lock( mutex_ );
-        return seat_.move_pointer_absolute( x, y );
+        auto                   result = seat_.move_pointer_absolute( x, y );
+        if( result && ledger_ != nullptr )
+        {
+            ledger_->record( InjectionKind::Motion, 0U );
+        }
+        return result;
     }
 
     grab::Result<void>
@@ -548,6 +555,12 @@ namespace grab::drivers::desktop::x11
         if( result )
         {
             held_buttons_[button] = press;
+            if( ledger_ != nullptr )
+            {
+                ledger_->record( press ? InjectionKind::ButtonPress
+                                       : InjectionKind::ButtonRelease,
+                                 button );
+            }
         }
         return result;
     }
@@ -561,6 +574,12 @@ namespace grab::drivers::desktop::x11
         if( result )
         {
             held_keys_[keycode] = press;
+            if( ledger_ != nullptr )
+            {
+                ledger_->record( press ? InjectionKind::KeyPress
+                                       : InjectionKind::KeyRelease,
+                                 keycode );
+            }
         }
         return result;
     }
@@ -605,9 +624,16 @@ namespace grab::drivers::desktop::x11
             if( held_buttons_[index] )
             {
                 held = true;
-                if( !seat_.button( static_cast<std::uint8_t>( index ), false ) )
+                const auto result =
+                    seat_.button( static_cast<std::uint8_t>( index ), false );
+                if( !result )
                 {
                     failed = true;
+                }
+                else if( ledger_ != nullptr )
+                {
+                    ledger_->record( InjectionKind::ButtonRelease,
+                                     static_cast<std::uint32_t>( index ) );
                 }
             }
         }
@@ -617,9 +643,16 @@ namespace grab::drivers::desktop::x11
             if( held_keys_[index] )
             {
                 held = true;
-                if( !seat_.key( static_cast<std::uint8_t>( index ), false ) )
+                const auto result =
+                    seat_.key( static_cast<std::uint8_t>( index ), false );
+                if( !result )
                 {
                     failed = true;
+                }
+                else if( ledger_ != nullptr )
+                {
+                    ledger_->record( InjectionKind::KeyRelease,
+                                     static_cast<std::uint32_t>( index ) );
                 }
             }
         }

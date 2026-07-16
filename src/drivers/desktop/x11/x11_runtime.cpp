@@ -1,6 +1,8 @@
 #include "drivers/desktop/x11/x11_capture_route.hpp"
+#include "drivers/desktop/x11/x11_event_source.hpp"
 #include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_runtime.hpp"
+#include "drivers/desktop/x11/x11_topology_source.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
 #include "grab/context.hpp"
 #include "grab/ids.hpp"
@@ -84,7 +86,8 @@ namespace grab::drivers::desktop::x11
                                              targets_,
                                              connection_.get(),
                                              connection_.root() );
-        input_seat_     = std::make_unique<X11InputSeat>( std::move( *opened_seat ) );
+        input_seat_ =
+            std::make_unique<X11InputSeat>( std::move( *opened_seat ), &ledger_ );
         pointer_route_  = std::make_unique<X11PointerRoute>( *tree_source_,
                                                              connection_.get(),
                                                              connection_.root(),
@@ -93,6 +96,24 @@ namespace grab::drivers::desktop::x11
                                                               connection_.get(),
                                                               *input_seat_,
                                                               std::move( *keymap ) );
+
+        auto opened_event_source =
+            X11EventSource::open( connection_.get(), connection_.root(), ledger_ );
+        if( !opened_event_source.has_value() )
+        {
+            keyboard_route_.reset();
+            pointer_route_.reset();
+            input_seat_.reset();
+            tree_source_.reset();
+            connection_ = grab::platform::x11::XcbConnection{};
+            return std::unexpected( std::move( opened_event_source.error() ) );
+        }
+
+        event_source_ = std::move( *opened_event_source );
+        if( pending_sink_ )
+        {
+            event_source_->set_sink( pending_sink_ );
+        }
 
         // Same display authority the runtime connects to (DISPLAY env for now);
         // explicit display threading through the runtime is Task 8 scope.
@@ -107,6 +128,18 @@ namespace grab::drivers::desktop::x11
         {
             capture_route_error_ = std::move( capture_route.error() );
         }
+        topology_source_ = std::make_unique<X11TopologySource>(
+            [this]
+            {
+                if( capture_route_.has_value() )
+                {
+                    // Best-effort: topology changes refresh the capture authority.
+                    static_cast<void>(
+                        capture_route_->refresh_transforms()
+                    );    // NOLINT(bugprone-unused-return-value)
+                }
+            }
+        );
         generation_  = next_generation;
         has_started_ = true;
         return {};
@@ -115,6 +148,8 @@ namespace grab::drivers::desktop::x11
     grab::Result<void>
     X11Runtime::stop()
     {
+        topology_source_.reset();
+        event_source_.reset();
         capture_route_.reset();
         capture_route_error_.reset();
         keyboard_route_.reset();
@@ -135,6 +170,22 @@ namespace grab::drivers::desktop::x11
     X11Runtime::capture_route_error() const noexcept
     {
         return capture_route_error_.has_value() ? &*capture_route_error_ : nullptr;
+    }
+
+    void
+    X11Runtime::set_event_sink( std::function<void( grab::Event&& )> sink )
+    {
+        pending_sink_ = std::move( sink );
+        if( event_source_ != nullptr )
+        {
+            event_source_->set_sink( pending_sink_ );
+        }
+    }
+
+    X11InputSeat*
+    X11Runtime::native_seat() noexcept
+    {
+        return input_seat_.get();
     }
 
     grab::spi::TreeSource*
@@ -169,13 +220,13 @@ namespace grab::drivers::desktop::x11
     grab::spi::TopologySource*
     X11Runtime::topology_source()
     {
-        return nullptr;
+        return topology_source_.get();
     }
 
     grab::spi::EventSource*
     X11Runtime::event_source()
     {
-        return nullptr;
+        return event_source_.get();
     }
 
     std::span<const grab::spi::RouteDescriptor>

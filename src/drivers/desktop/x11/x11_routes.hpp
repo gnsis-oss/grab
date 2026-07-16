@@ -1,5 +1,6 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "drivers/desktop/x11/injection_ledger.hpp"
 #include "drivers/desktop/x11/x11_input_correctness.hpp"
 #include "grab/keymap.hpp"
 #include "input/seat.hpp"
@@ -22,7 +23,8 @@ namespace grab::drivers::desktop::x11
     {
         public:
 
-            explicit X11InputSeat( grab::input::Seat seat ) noexcept;
+            explicit X11InputSeat( grab::input::Seat seat,
+                                   InjectionLedger*  ledger = nullptr ) noexcept;
 
             [[nodiscard]]
             grab::Result<void>
@@ -63,6 +65,7 @@ namespace grab::drivers::desktop::x11
         private:
 
             grab::input::Seat      seat_;
+            InjectionLedger*       ledger_{};
             std::array<bool, 256U> held_buttons_{};
             std::array<bool, 256U> held_keys_{};
             mutable std::mutex     mutex_;

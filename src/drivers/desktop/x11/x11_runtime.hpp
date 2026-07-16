@@ -1,6 +1,8 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "drivers/desktop/x11/injection_ledger.hpp"
 #include "drivers/desktop/x11/x11_capture_route.hpp"
+#include "grab/event.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
 #include "kernel/graph/target_registry.hpp"
@@ -9,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -18,6 +21,8 @@ namespace grab::drivers::desktop::x11
 {
 
     class X11TreeSource;
+    class X11EventSource;
+    class X11TopologySource;
     class X11InputSeat;
     class X11KeyboardRoute;
     class X11PointerRoute;
@@ -52,6 +57,13 @@ namespace grab::drivers::desktop::x11
             [[nodiscard]]
             const grab::Error*
             capture_route_error() const noexcept;
+
+            void
+            set_event_sink( std::function<void( grab::Event&& )> sink );
+
+            [[nodiscard]]
+            X11InputSeat*
+            native_seat() noexcept;
 
             [[nodiscard]]
             grab::spi::TreeSource*
@@ -91,18 +103,22 @@ namespace grab::drivers::desktop::x11
 
         private:
 
-            static constexpr std::uint32_t     initialGeneration = 1U;
+            static constexpr std::uint32_t       initialGeneration = 1U;
 
-            grab::platform::x11::XcbConnection connection_;
-            grab::kernel::TargetRegistry       targets_;
-            std::unique_ptr<X11TreeSource>     tree_source_;
-            std::unique_ptr<X11InputSeat>      input_seat_;
-            std::unique_ptr<X11PointerRoute>   pointer_route_;
-            std::unique_ptr<X11KeyboardRoute>  keyboard_route_;
-            std::optional<X11CaptureRoute>     capture_route_;
-            std::optional<grab::Error>         capture_route_error_;
-            std::uint32_t                      generation_{ initialGeneration };
-            bool                               has_started_{};
+            grab::platform::x11::XcbConnection   connection_;
+            grab::kernel::TargetRegistry         targets_;
+            std::unique_ptr<X11TreeSource>       tree_source_;
+            std::unique_ptr<X11InputSeat>        input_seat_;
+            std::unique_ptr<X11PointerRoute>     pointer_route_;
+            std::unique_ptr<X11KeyboardRoute>    keyboard_route_;
+            std::optional<X11CaptureRoute>       capture_route_;
+            std::optional<grab::Error>           capture_route_error_;
+            InjectionLedger                      ledger_;
+            std::unique_ptr<X11EventSource>      event_source_;
+            std::unique_ptr<X11TopologySource>   topology_source_;
+            std::function<void( grab::Event&& )> pending_sink_;
+            std::uint32_t                        generation_{ initialGeneration };
+            bool                                 has_started_{};
     };
 
 }    // namespace grab::drivers::desktop::x11

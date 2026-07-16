@@ -108,6 +108,7 @@ gtest_discover_tests(grab_kernel_tests)
 add_executable(grab_driver_x11_tests
     drivers/x11/test_coordinate_authority.cpp
     drivers/x11/test_x11_capture_route.cpp
+    drivers/x11/test_x11_event_source.cpp
     drivers/x11/test_x11_input_correctness.cpp
     drivers/x11/test_x11_runtime.cpp
     drivers/x11/test_x11_tree_source.cpp

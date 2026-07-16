@@ -5,6 +5,7 @@
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/event_descriptor.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
@@ -18,6 +19,7 @@
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/query/evaluator.hpp"
 #include "kernel/query/snapshot_tree_nav.hpp"
+#include "spi/event_source.hpp"
 #include "spi/runtime.hpp"
 #include "spi/tree_source.hpp"
 
@@ -77,13 +79,16 @@ namespace grab::kernel::lifecycle
 
     SessionCore::~SessionCore()
     {
-        if( owned_runtime_ == nullptr )
-        {
-            return;
-        }
-
         try
         {
+            // User-held subscriptions may outlive this core; their teardown must
+            // not re-enter a destroyed runtime.
+            bus_.set_demand_callback( {} );
+            if( owned_runtime_ == nullptr )
+            {
+                return;
+            }
+
             static_cast<void>(
                 owned_runtime_->stop()
             );    // NOLINT(bugprone-unused-return-value)
@@ -144,6 +149,46 @@ namespace grab::kernel::lifecycle
             } );
         }
         core->compose_atspi_best_effort( reactor, context );
+
+        // bus_ is declared before owned_runtime_, so it outlives the runtime and
+        // remains valid for every event-source callback.
+        x11->set_event_sink(
+            [&bus = core->bus_]( Event&& event )
+            {
+                bus.publish( std::move( event ) );
+            }
+        );
+
+        // Demand callbacks return void and run on subscriber threads, where the
+        // diagnostics vector is not synchronized, so toggling failures are
+        // swallowed as best-effort. Only input kinds map to XI2 masks; the X11
+        // event source no-ops all other event names.
+        core->bus_.set_demand_callback(
+            [x11]( EventKind kind, bool enabled )
+            {
+                auto* const source = x11->event_source();
+                if( source == nullptr )
+                {
+                    return;
+                }
+
+                const spi::EventSpec spec{
+                    .name = std::string{ wire_name( kind ) },
+                };
+                if( enabled )
+                {
+                    static_cast<void>(
+                        source->enable( spec )
+                    );    // NOLINT(bugprone-unused-return-value)
+                }
+                else
+                {
+                    static_cast<void>(
+                        source->disable( spec )
+                    );    // NOLINT(bugprone-unused-return-value)
+                }
+            }
+        );
         return core;
     }
 

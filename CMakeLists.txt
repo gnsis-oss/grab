@@ -60,6 +60,8 @@ target_link_libraries(grab_core PRIVATE grab_vendor_l0)
 # The static-library cycles through grab_kernel and both drivers are intentional; CMake supports cycles among STATIC libraries.
 target_link_libraries(grab_core PRIVATE grab_driver_x11)
 target_link_libraries(grab_core PRIVATE grab_driver_atspi)
+# The core->driver_atspi->event->core component needs three repetitions because atspi.cpp.o is only pulled in the second pass and still needs Reactor from grab_core.
+set_target_properties(grab_core PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
 target_include_directories(grab_core PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_core PUBLIC cxx_std_23)
@@ -184,9 +186,11 @@ target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/coordinate_authority.cpp
     src/drivers/desktop/x11/x11_capture_route.cpp
+    src/drivers/desktop/x11/x11_event_source.cpp
     src/drivers/desktop/x11/x11_input_correctness.cpp
     src/drivers/desktop/x11/x11_routes.cpp
     src/drivers/desktop/x11/x11_runtime.cpp
+    src/drivers/desktop/x11/x11_topology_source.cpp
     src/drivers/desktop/x11/x11_tree_source.cpp
 )
 target_link_libraries(grab_driver_x11
