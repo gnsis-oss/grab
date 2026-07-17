@@ -1,4 +1,4 @@
-#include "cli/input_command.hpp"
+#include "frontends/cli/input_command.hpp"
 #include "grab/result.hpp"
 
 // clang-format off

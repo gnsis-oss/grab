@@ -4,6 +4,8 @@
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/proto_descriptor.hpp"
 #include "grab/capture.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -15,9 +17,8 @@
 #include "grab/result.hpp"
 #include "grab/space.hpp"
 #include "grab/trace.hpp"
-#include "transport/codec.hpp"
-#include "transport/proto_descriptor.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -335,6 +336,13 @@ namespace grab::client
                     return std::nullopt;
                 }
 
+                [[nodiscard]]
+                std::uint64_t
+                dropped_events() const noexcept override
+                {
+                    return dropped_.load( std::memory_order_relaxed );
+                }
+
             private:
 
                 void
@@ -346,12 +354,8 @@ namespace grab::client
                         auto event = grab::transport::from_wire( wire );
                         if( !event.has_value() )
                         {
-                            {
-                                const std::scoped_lock lock( mutex_ );
-                                terminal_error_ = event.error();
-                            }
-                            context_->TryCancel();
-                            break;
+                            dropped_.fetch_add( 1U, std::memory_order_relaxed );
+                            continue;
                         }
 
                         const std::scoped_lock lock( mutex_ );
@@ -374,6 +378,7 @@ namespace grab::client
                 std::mutex                                                mutex_;
                 std::deque<grab::SubscriptionEvent>                       events_;
                 std::optional<grab::Error> terminal_error_;
+                std::atomic<std::uint64_t> dropped_{ 0U };
                 std::thread                reader_thread_;
         };
 

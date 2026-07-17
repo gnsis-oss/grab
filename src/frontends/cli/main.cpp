@@ -1,6 +1,3 @@
-#include "cli/common.hpp"
-#include "cli/input_command.hpp"
-#include "cli/session_command.hpp"
 #include "client/client.hpp"
 #include "client/loopback_transport.hpp"
 #include "client/unix_socket_transport.hpp"
@@ -12,6 +9,10 @@
 #include "drivers/desktop/x11/window_match.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
+#include "frontends/cli/common.hpp"
+#include "frontends/cli/input_command.hpp"
+#include "frontends/cli/session_command.hpp"
+#include "frontends/grpc/daemon.hpp"
 #include "grab/capture.hpp"
 #include "grab/command_descriptor.hpp"
 #include "grab/event.hpp"
@@ -31,7 +32,6 @@
 #include "grab/ui.hpp"
 #include "image/compare.hpp"
 #include "notify/notifier.hpp"
-#include "service/daemon.hpp"
 
 #include <charconv>
 #include <condition_variable>

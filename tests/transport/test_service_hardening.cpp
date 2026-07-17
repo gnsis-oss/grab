@@ -1,25 +1,36 @@
+#include "frontends/grpc/service.hpp"
 #include "grab/event_bus.hpp"
-#include "transport/service.hpp"
+#include "grab/process_ref.hpp"
 
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <cstddef>
+#include <google/protobuf/descriptor.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 #include <grpcpp/server_builder.h>
+
+// clang-format off
 #include <gtest/gtest.h>
+#include <array>
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <csignal>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <thread>
 #include <utility>
 #include <vector>
+// clang-format on
 
 namespace
 {
 
     using namespace std::chrono_literals;
+
+    constexpr int  processExitProbeAttempts = 200;
+    constexpr auto processExitProbeInterval = std::chrono::milliseconds{ 5 };
 
     [[nodiscard]]
     grab::transport::ServiceOptions
@@ -103,20 +114,67 @@ TEST( EventServiceHardening,
     grab::EventBus                bus;
     grab::transport::EventService service{ bus };
 
-    constexpr auto                rpc_names = std::to_array<std::string_view>( {
-        "PushEvent",
-        "ListEventTypes",
-        "Subscribe",
-        "SetClientContext",
-        "ResolveNode",
-        "PerformAction",
-        "CaptureFrame",
-    } );
-
-    EXPECT_EQ( service.registered_rpc_count(), rpc_names.size() );
-    for( const auto name : rpc_names )
+    const auto* pool = google::protobuf::DescriptorPool::generated_pool();
+    const auto* svc  = pool->FindServiceByName(
+        std::string{ eventgrab::v1::EventGrabService::service_full_name() }
+    );
+    ASSERT_NE( svc, nullptr );
+    EXPECT_EQ( service.registered_rpc_count(),
+               static_cast<std::size_t>( svc->method_count() ) );
+    for( int index = 0; index < svc->method_count(); ++index )
     {
+        const std::string name = svc->method( index )->name();
         EXPECT_EQ( service.wrapped_rpc_count( name ), 1U ) << name;
+    }
+
+    {
+        eventgrab::v1::PushEventRequest  request;
+        eventgrab::v1::PushEventResponse response;
+        grpc::ServerContext              context;
+        static_cast<void>( service.PushEvent( &context, &request, &response ) );
+    }
+    {
+        eventgrab::v1::ListEventTypesRequest  request;
+        eventgrab::v1::ListEventTypesResponse response;
+        grpc::ServerContext                   context;
+        static_cast<void>( service.ListEventTypes( &context, &request, &response ) );
+    }
+    {
+        eventgrab::v1::EventFilter request;
+        grpc::ServerContext        context;
+        static_cast<void>( service.Subscribe( &context, &request, nullptr ) );
+    }
+    {
+        eventgrab::v1::SetClientContextRequest  request;
+        eventgrab::v1::SetClientContextResponse response;
+        grpc::ServerContext                     context;
+        static_cast<void>( service.SetClientContext( &context, &request, &response ) );
+    }
+    {
+        eventgrab::v1::ResolveNodeRequest  request;
+        eventgrab::v1::ResolveNodeResponse response;
+        grpc::ServerContext                context;
+        static_cast<void>( service.ResolveNode( &context, &request, &response ) );
+    }
+    {
+        eventgrab::v1::PerformActionRequest  request;
+        eventgrab::v1::PerformActionResponse response;
+        grpc::ServerContext                  context;
+        static_cast<void>( service.PerformAction( &context, &request, &response ) );
+    }
+    {
+        eventgrab::v1::CaptureFrameRequest  request;
+        eventgrab::v1::CaptureFrameResponse response;
+        grpc::ServerContext                 context;
+        static_cast<void>( service.CaptureFrame( &context, &request, &response ) );
+    }
+
+    for( int index = 0; index < svc->method_count(); ++index )
+    {
+        const std::string name = svc->method( index )->name();
+        EXPECT_EQ( service.admission_entry_count( name ), 1U )
+            << name
+            << " did not route through the single admission dispatcher exactly once";
     }
 }
 
@@ -247,6 +305,37 @@ TEST( PeerSessionRegistry,
     EXPECT_EQ( teardowns.back().first, "crashed-peer" );
     EXPECT_EQ( teardowns.back().second,
                std::vector<std::string>{ "owned-crash-resource" } );
+}
+
+TEST( PeerSessionRegistry,
+      DeliberateCloseTerminatesOwnedProcesses )
+{
+    grab::transport::PeerSessionRegistry registry;
+    static_cast<void>( registry.open( "proc-peer" ) );
+
+    auto child = grab::OwnedProcess::spawn(
+        std::to_array<std::string_view>( { "sleep", "1000" } )
+    );
+    ASSERT_TRUE( child.has_value() ) << child.error().message;
+    const auto pid = child->id().value;
+    ASSERT_TRUE(
+        registry.add_process( "proc-peer", "child", std::move( *child ) ).ok()
+    );
+
+    registry.deliberate_close( "proc-peer" );
+
+    bool gone = false;
+    for( int attempt = 0; attempt < processExitProbeAttempts && !gone; ++attempt )
+    {
+        // NOLINTNEXTLINE(misc-include-cleaner): POSIX kill is exposed by <csignal>.
+        if( ::kill( static_cast<pid_t>( pid ), 0 ) != 0 && errno == ESRCH )
+        {
+            gone = true;
+            break;
+        }
+        std::this_thread::sleep_for( processExitProbeInterval );
+    }
+    EXPECT_TRUE( gone ) << "owned child was leaked alive after session close";
 }
 
 TEST( PeerSessionRegistry,

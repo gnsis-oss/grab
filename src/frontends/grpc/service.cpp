@@ -1,6 +1,9 @@
 #include "codec/png.hpp"
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/proto_descriptor.hpp"
+#include "frontends/grpc/service.hpp"
 #include "grab/active_kind_probe.hpp"
 #include "grab/capture.hpp"
 #include "grab/command_descriptor.hpp"
@@ -14,9 +17,6 @@
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "grab/trace.hpp"
-#include "transport/codec.hpp"
-#include "transport/proto_descriptor.hpp"
-#include "transport/service.hpp"
 
 #include <algorithm>
 #include <array>
@@ -48,7 +48,8 @@ namespace grab::transport
     namespace
     {
 
-        constexpr auto admissionPollInterval = std::chrono::milliseconds{ 2 };
+        constexpr auto admissionPollInterval        = std::chrono::milliseconds{ 2 };
+        constexpr auto ownedProcessTerminationGrace = std::chrono::milliseconds{ 250 };
         constexpr std::string_view queueFullReason{
             "admission rejected: concurrency cap reached and bounded queue full",
         };
@@ -877,6 +878,18 @@ namespace grab::transport
     void
     PeerSessionRegistry::terminate_owned( std::vector<Resource>& resources ) noexcept
     {
+        for( auto& resource : resources )
+        {
+            if( resource.process.has_value() )
+            {
+                static_cast<void>(
+                    // Teardown is best-effort and cannot report failures from this
+                    // noexcept path.
+                    // NOLINTNEXTLINE(bugprone-unused-return-value)
+                    resource.process->terminate( ownedProcessTerminationGrace )
+                );
+            }
+        }
         resources.clear();
     }
 
@@ -1358,6 +1371,11 @@ namespace grab::transport
         const std::function<grpc::Status( grab::OperationContext& )>& work
     )
     {
+        {
+            const std::scoped_lock lock( admission_log_mutex_ );
+            ++admission_log_[std::string{ rpc_name }];
+        }
+
         if( wrapped_rpc_count( rpc_name ) != 1U )
         {
             return internal_error( "RPC is not registered with admission control" );
@@ -1383,6 +1401,20 @@ namespace grab::transport
         return static_cast<std::size_t>(
             std::count( registeredRpcNames.begin(), registeredRpcNames.end(), rpc_name )
         );
+    }
+
+    std::size_t
+    EventService::admission_entry_count( std::string_view rpc_name ) const noexcept
+    {
+        const std::scoped_lock lock( admission_log_mutex_ );
+        for( const auto& [name, count] : admission_log_ )
+        {
+            if( name == rpc_name )
+            {
+                return count;
+            }
+        }
+        return 0U;
     }
 
 }    // namespace grab::transport

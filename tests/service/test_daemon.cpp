@@ -2,13 +2,13 @@
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
 #include "fake/fake_runtime.hpp"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/daemon.hpp"
 #include "grab/event.hpp"
 #include "grab/result.hpp"
 #include "grab/role.hpp"
 #include "grab/session.hpp"
 #include "kernel/tree_fixtures.hpp"
-#include "service/daemon.hpp"
-#include "transport/codec.hpp"
 
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>

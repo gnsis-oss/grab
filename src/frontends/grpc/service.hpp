@@ -247,6 +247,10 @@ namespace grab::transport
             std::size_t
             wrapped_rpc_count( std::string_view rpc_name ) const noexcept;
 
+            [[nodiscard]]
+            std::size_t
+            admission_entry_count( std::string_view rpc_name ) const noexcept;
+
         private:
 
             class AdmissionController;
@@ -267,6 +271,8 @@ namespace grab::transport
             PeerSessionRegistry                            sessions_;
             mutable std::mutex                             client_context_mutex_;
             std::unordered_map<std::string, std::uint64_t> client_context_sequence_;
+            mutable std::mutex                             admission_log_mutex_;
+            std::unordered_map<std::string, std::size_t>   admission_log_;
     };
 
 }    // namespace grab::transport
