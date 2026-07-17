@@ -1,6 +1,7 @@
 #pragma once
 
 #include "grab/capture.hpp"
+#include "grab/event_bus.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
@@ -21,6 +22,13 @@ namespace grab::core
 
 }    // namespace grab::core
 
+namespace grab::spi
+{
+
+    class Runtime;
+
+}    // namespace grab::spi
+
 namespace grab
 {
 
@@ -37,6 +45,12 @@ namespace grab
             [[nodiscard]]
             static grab::Result<std::unique_ptr<Session>>
             open( SessionOptions options = {} );
+
+            // Compose a session driven by an externally-provided runtime instead
+            // of the default display stack (observation/daemon seam).
+            [[nodiscard]]
+            static grab::Result<std::unique_ptr<Session>>
+            open_owning_runtime( std::unique_ptr<grab::spi::Runtime> runtime );
 
             ~Session();
 
@@ -61,6 +75,21 @@ namespace grab
             [[nodiscard]]
             grab::Result<void>
             post( std::function<void()> fn );
+
+            // The session's live event bus (the composed core's bus, or a
+            // reactor-only fallback bus when no runtime is composed).
+            [[nodiscard]]
+            EventBus&
+            bus() noexcept;
+
+            // Start/stop continuous observation over the composed runtime's
+            // event source and tree deltas. No-op when no runtime is composed.
+            [[nodiscard]]
+            grab::Result<void>
+            start_observation();
+
+            void
+            stop_observation() noexcept;
 
             [[nodiscard]]
             Result<Match>

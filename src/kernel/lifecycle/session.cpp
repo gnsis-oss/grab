@@ -1,5 +1,6 @@
 #include "core/reactor.hpp"
 #include "grab/capture.hpp"
+#include "grab/context.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
@@ -8,6 +9,7 @@
 #include "kernel/lifecycle/session_errors.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/lifecycle/startup_signal.hpp"
+#include "spi/runtime.hpp"
 
 #include <atomic>
 #include <exception>
@@ -61,6 +63,19 @@ namespace grab
                 return core_.get();
             }
 
+            [[nodiscard]]
+            grab::EventBus&
+            bus() noexcept
+            {
+                return core_ != nullptr ? core_->bus() : fallback_bus_;
+            }
+
+            void
+            set_injected_runtime( std::unique_ptr<spi::Runtime> runtime )
+            {
+                injected_runtime_ = std::move( runtime );
+            }
+
         private:
 
             [[nodiscard]]
@@ -74,6 +89,8 @@ namespace grab
             grab::core::Reactor                             reactor_;
             std::thread                                     reactor_thread_;
             std::mutex                                      close_mutex_;
+            grab::EventBus                                  fallback_bus_;
+            std::unique_ptr<spi::Runtime>                   injected_runtime_;
             std::unique_ptr<kernel::lifecycle::SessionCore> core_;
             std::atomic_bool                                open_{ false };
     };
@@ -129,10 +146,21 @@ namespace grab
             return std::unexpected( std::move( error ) );
         }
 
-        // Compose the live stack when a display is available; without one the
-        // session stays reactor-only (composition diagnostics land with the
-        // AT-SPI attach task).
-        if( auto core = kernel::lifecycle::SessionCore::open( options_, &reactor_ ) )
+        // Compose the live stack. An injected runtime (observation/daemon seam)
+        // takes precedence; otherwise compose the display stack when available.
+        // Without either, the session stays reactor-only.
+        if( injected_runtime_ != nullptr )
+        {
+            if( auto core = kernel::lifecycle::SessionCore::open_owning(
+                    std::move( injected_runtime_ ),
+                    grab::OperationContext{}
+                ) )
+            {
+                core_ = std::move( *core );
+            }
+        }
+        else if( auto core =
+                     kernel::lifecycle::SessionCore::open( options_, &reactor_ ) )
         {
             core_ = std::move( *core );
         }
@@ -292,6 +320,45 @@ namespace grab
                       CaptureOptions       options )
     {
         return kernel::lifecycle::capture_verb( impl_->core(), target, options );
+    }
+
+    grab::Result<std::unique_ptr<Session>>
+    Session::open_owning_runtime( std::unique_ptr<grab::spi::Runtime> runtime )
+    {
+        auto session = std::unique_ptr<Session>( new Session( SessionOptions{} ) );
+        session->impl_->set_injected_runtime( std::move( runtime ) );
+        if( auto result = session->impl_->start(); !result.has_value() )
+        {
+            return std::unexpected( std::move( result.error() ) );
+        }
+        return session;
+    }
+
+    EventBus&
+    Session::bus() noexcept
+    {
+        return impl_->bus();
+    }
+
+    grab::Result<void>
+    Session::start_observation()
+    {
+        auto* const core = impl_->core();
+        if( core == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                               "session has no composed runtime for observation" );
+        }
+        return core->start_observation( grab::OperationContext{} );
+    }
+
+    void
+    Session::stop_observation() noexcept
+    {
+        if( auto* const core = impl_->core() )
+        {
+            core->stop_observation();
+        }
     }
 
 }    // namespace grab

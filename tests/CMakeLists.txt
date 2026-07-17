@@ -45,16 +45,12 @@ add_executable(grab_core_tests
     input/test_keymap.cpp
     input/test_input.cpp
     event/test_browser_bridge.cpp
-    event/test_source_registry.cpp
-    event/test_monitor_source.cpp
-    event/test_platform_factory.cpp
     event/test_event_descriptor.cpp
     event/test_payload_fields.cpp
     event/test_atspi.cpp
     event/test_state.cpp
     event/test_state_source.cpp
     event/test_evdev.cpp
-    event/test_xinput2.cpp
     event/test_window_x11.cpp
     notify/test_notifier.cpp
     transport/test_codec.cpp
@@ -87,6 +83,7 @@ add_executable(grab_kernel_tests
     kernel/capture/test_pacing_governor.cpp
     kernel/capture/test_tile_differ.cpp
     kernel/lifecycle/test_session_core.cpp
+    kernel/lifecycle/test_observation_pump.cpp
     kernel/lifecycle/test_session_verbs.cpp
     kernel/test_ui.cpp
     kernel/test_tree_store.cpp

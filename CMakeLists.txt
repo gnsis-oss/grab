@@ -50,9 +50,10 @@ add_library(grab_core STATIC
     src/core/reactor.cpp
     src/core/registry.cpp
     src/core/resolver.cpp
-    src/core/session.cpp
+    src/kernel/lifecycle/session.cpp
     src/core/space_graph.cpp
     src/kernel/lifecycle/session_impl.cpp
+    src/kernel/lifecycle/observation_pump.cpp
 )
 target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
 target_link_libraries(grab_core PRIVATE grab_vendor_l0)
@@ -133,12 +134,9 @@ add_library(grab_event STATIC
     src/event/atspi.cpp
     src/event/window_x11.cpp
     src/event/browser_bridge.cpp
-    src/event/source_registry.cpp
-    src/event/platform_factory.cpp
     src/event/state.cpp
     src/event/state_source.cpp
     src/event/evdev.cpp
-    src/event/xinput2.cpp
 )
 target_link_libraries(grab_event PUBLIC grab_core PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XINPUT PkgConfig::GRAB_DBUS_1)
 target_include_directories(grab_event PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)

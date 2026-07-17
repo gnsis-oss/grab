@@ -1,10 +1,12 @@
-#include "event/fake_source.hpp"
-#include "event/source.hpp"
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "fake/fake_runtime.hpp"
 #include "grab/event.hpp"
 #include "grab/result.hpp"
+#include "grab/role.hpp"
+#include "grab/session.hpp"
+#include "kernel/tree_fixtures.hpp"
 #include "service/daemon.hpp"
 #include "transport/codec.hpp"
 
@@ -54,6 +56,10 @@ namespace
     constexpr std::string_view persistedCategoryNeedle = R"("category":"input")";
     constexpr std::string_view persistedKeyCodeNeedle  = R"("key_code":30)";
     constexpr std::string_view persistedKeyNameNeedle  = R"("key_name":"A")";
+    constexpr std::string_view windowFocusTypeNeedle =
+        R"("type":"window.focus_changed")";
+    constexpr std::string_view injectedNodeNeedle = "987654321";
+    constexpr std::uint64_t    injectedNode       = 987'654'321U;
     constexpr std::string_view transportStartFailurePrefix =
         "failed to start transport server at unix:";
     constexpr auto             unaryDeadline       = std::chrono::seconds{ 2 };
@@ -68,10 +74,6 @@ namespace
     constexpr std::uint32_t    keyDownCode             = 30U;
     constexpr std::string_view keyDownName             = "A";
     constexpr auto             cancelledCode           = grpc::StatusCode::CANCELLED;
-    constexpr std::string_view firstSourceName         = "first";
-    constexpr std::string_view secondSourceName        = "second";
-    constexpr std::string_view failingSourceName       = "failing";
-    constexpr std::string_view sourceFailureMessage    = "source failed";
     constexpr std::size_t      invalidQueueDepth       = 0U;
     constexpr int              overwriteEnvironment    = 1;
 
@@ -333,66 +335,6 @@ namespace
     }
 
     [[nodiscard]]
-    grab::Result<void>
-    failed_source_start()
-    {
-        return grab::fail( grab::ErrorCode::ProviderFailed,
-                           std::string{ sourceFailureMessage } );
-    }
-
-    [[nodiscard]]
-    std::unique_ptr<grab::test::FakeSource>
-    make_source( std::string                  name,
-                 std::vector<grab::EventKind> kinds = {} )
-    {
-        return std::make_unique<grab::test::FakeSource>( std::move( name ),
-                                                         std::move( kinds ) );
-    }
-
-    [[nodiscard]]
-    std::vector<std::unique_ptr<grab::event::EventSource>>
-    make_source_list( std::vector<grab::test::FakeSource*>& sources_out )
-    {
-        auto first  = make_source( std::string{ firstSourceName } );
-        auto second = make_source( std::string{ secondSourceName } );
-
-        sources_out = { first.get(), second.get() };
-
-        std::vector<std::unique_ptr<grab::event::EventSource>> sources;
-        sources.emplace_back( std::move( first ) );
-        sources.emplace_back( std::move( second ) );
-        return sources;
-    }
-
-    [[nodiscard]]
-    std::vector<std::unique_ptr<grab::event::EventSource>>
-    make_degraded_source_list( std::vector<grab::test::FakeSource*>& sources_out )
-    {
-        auto first   = make_source( std::string{ firstSourceName } );
-        auto failing = make_source( std::string{ failingSourceName } );
-        auto second  = make_source( std::string{ secondSourceName } );
-        failing->set_start_result( failed_source_start() );
-
-        sources_out = { first.get(), failing.get(), second.get() };
-
-        std::vector<std::unique_ptr<grab::event::EventSource>> sources;
-        sources.emplace_back( std::move( first ) );
-        sources.emplace_back( std::move( failing ) );
-        sources.emplace_back( std::move( second ) );
-        return sources;
-    }
-
-    [[nodiscard]]
-    std::vector<std::unique_ptr<grab::event::EventSource>>
-    make_key_down_source_list()
-    {
-        std::vector<std::unique_ptr<grab::event::EventSource>> sources;
-        sources.emplace_back( make_source( std::string{ firstSourceName },
-                                           { grab::EventKind::KeyDown } ) );
-        return sources;
-    }
-
-    [[nodiscard]]
     std::unique_ptr<eventgrab::v1::EventGrabService::Stub>
     make_stub( const std::string& endpoint )
     {
@@ -501,34 +443,6 @@ namespace
     }
 
     [[nodiscard]]
-    const eventgrab::v1::EventTypeInfo*
-    find_type( const eventgrab::v1::ListEventTypesResponse& response,
-               eventgrab::v1::EventKind                     kind )
-    {
-        for( const auto& type : response.types() )
-        {
-            if( type.kind() == kind )
-            {
-                return &type;
-            }
-        }
-        return nullptr;
-    }
-
-    void
-    list_event_types_or_fail( eventgrab::v1::EventGrabService::Stub& stub,
-                              eventgrab::v1::ListEventTypesResponse& response )
-    {
-        grpc::ClientContext context;
-        context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
-
-        const eventgrab::v1::ListEventTypesRequest request;
-        const auto status = stub.ListEventTypes( &context, request, &response );
-
-        ASSERT_TRUE( status.ok() ) << status.error_message();
-    }
-
-    [[nodiscard]]
     bool
     stream_finished_cleanly( const grpc::Status& status ) noexcept
     {
@@ -603,6 +517,64 @@ namespace
         return false;
     }
 
+    [[nodiscard]]
+    bool
+    file_contains_window_focus( const std::filesystem::path& file )
+    {
+        std::ifstream input( file );
+        std::string   line;
+        while( std::getline( input, line ) )
+        {
+            if( line.contains( windowFocusTypeNeedle ) &&
+                line.contains( injectedNodeNeedle ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]]
+    bool
+    window_focus_present( const std::filesystem::path& dir )
+    {
+        std::error_code ec;
+        const bool      exists = std::filesystem::exists( dir, ec );
+        if( ec || !exists )
+        {
+            return false;
+        }
+        auto iter = std::filesystem::directory_iterator( dir, ec );
+        const std::filesystem::directory_iterator end;
+        while( !ec && iter != end )
+        {
+            const auto path = iter->path();
+            if( path.extension() ==
+                jsonlExtension &&
+                file_contains_window_focus( path ) )
+            {
+                return true;
+            }
+            iter.increment( ec );
+        }
+        return false;
+    }
+
+    [[nodiscard]]
+    bool
+    wait_for_window_focus( const std::filesystem::path& dir )
+    {
+        for( std::size_t attempt = 0U; attempt < persistenceAttempts; ++attempt )
+        {
+            if( window_focus_present( dir ) )
+            {
+                return true;
+            }
+            std::this_thread::sleep_for( persistencePollInterval );
+        }
+        return false;
+    }
+
 }    // namespace
 
 TEST( DaemonOptions,
@@ -648,7 +620,7 @@ TEST( DaemonOptions,
         .endpoint            = temp.endpoint(),
         .store_dir           = temp.store_dir(),
         .storage_queue_depth = invalidQueueDepth,
-        .source_factory      = {},
+        .session_factory     = {},
     } );
 
     ASSERT_FALSE( result.has_value() );
@@ -660,9 +632,9 @@ TEST( Daemon,
 {
     const TempDaemonDir temp;
     auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint       = temp.endpoint(),
-        .store_dir      = temp.store_dir(),
-        .source_factory = {},
+        .endpoint        = temp.endpoint(),
+        .store_dir       = temp.store_dir(),
+        .session_factory = {},
     } );
     if( transport_start_blocked( daemon_result ) )
     {
@@ -694,9 +666,9 @@ TEST( Daemon,
 {
     const TempDaemonDir temp;
     auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint       = temp.endpoint(),
-        .store_dir      = std::nullopt,
-        .source_factory = {},
+        .endpoint        = temp.endpoint(),
+        .store_dir       = std::nullopt,
+        .session_factory = {},
     } );
     if( transport_start_blocked( daemon_result ) )
     {
@@ -718,9 +690,9 @@ TEST( Daemon,
 {
     const TempDaemonDir temp;
     auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint       = temp.endpoint(),
-        .store_dir      = std::nullopt,
-        .source_factory = {},
+        .endpoint        = temp.endpoint(),
+        .store_dir       = std::nullopt,
+        .session_factory = {},
     } );
     if( transport_start_blocked( daemon_result ) )
     {
@@ -748,17 +720,23 @@ TEST( Daemon,
 }
 
 TEST( Daemon,
-      StartsAndStopsInjectedSources )
+      InjectedRuntimeEventReachesStorage )
 {
-    const TempDaemonDir                  temp;
-    std::vector<grab::test::FakeSource*> sources;
+    const TempDaemonDir         temp;
+    grab::testing::FakeRuntime* fake_ptr = nullptr;
 
     auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint       = temp.endpoint(),
-        .store_dir      = std::nullopt,
-        .source_factory = [&sources]
+        .endpoint        = temp.endpoint(),
+        .store_dir       = temp.store_dir(),
+        .session_factory = [&fake_ptr]() -> grab::Result<std::unique_ptr<grab::Session>>
         {
-            return make_source_list( sources );
+            auto fake = std::make_unique<grab::testing::FakeRuntime>();
+            fake->inject_snapshot( grab::testing::tree::snapshot(
+                1U,
+                { grab::testing::tree::node( 1U, grab::role::window ) }
+            ) );
+            fake_ptr = fake.get();
+            return grab::Session::open_owning_runtime( std::move( fake ) );
         },
     } );
     if( transport_start_blocked( daemon_result ) )
@@ -767,84 +745,22 @@ TEST( Daemon,
     }
     ASSERT_TRUE( is_ok( daemon_result ) );
     auto daemon = std::move( daemon_result ).value();
+    ASSERT_NE( fake_ptr, nullptr );
 
-    ASSERT_EQ( sources.size(), 2U );
-    EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Running );
-    EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Running );
-    EXPECT_EQ( sources.at( 0U )->start_calls(), 1U );
-    EXPECT_EQ( sources.at( 1U )->start_calls(), 1U );
+    grab::Event focus_event{};
+    focus_event.kind     = grab::EventKind::WindowFocusChanged;
+    focus_event.category = grab::EventCategory::Window;
+    focus_event.payload  = grab::Payload{
+        grab::GraphChange{
+                          .node            = injectedNode,
+                          .related         = 0U,
+                          .relation        = 0U,
+                          .previous_active = 0U,
+                          }
+    };
+    fake_ptr->event_source()->push_event( focus_event );
 
-    daemon.shutdown();
-
-    EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Stopped );
-    EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Stopped );
-    EXPECT_EQ( sources.at( 0U )->stop_calls(), 1U );
-    EXPECT_EQ( sources.at( 1U )->stop_calls(), 1U );
-}
-
-TEST( Daemon,
-      StartsWhenInjectedSourceFails )
-{
-    const TempDaemonDir                  temp;
-    std::vector<grab::test::FakeSource*> sources;
-
-    auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint       = temp.endpoint(),
-        .store_dir      = std::nullopt,
-        .source_factory = [&sources]
-        {
-            return make_degraded_source_list( sources );
-        },
-    } );
-    if( transport_start_blocked( daemon_result ) )
-    {
-        GTEST_SKIP() << daemon_result.error().message;
-    }
-    ASSERT_TRUE( is_ok( daemon_result ) );
-    auto daemon = std::move( daemon_result ).value();
-
-    ASSERT_EQ( sources.size(), 3U );
-    EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Running );
-    EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Failed );
-    EXPECT_EQ( sources.at( 2U )->state(), grab::event::SourceState::Running );
-
-    daemon.shutdown();
-
-    EXPECT_EQ( sources.at( 0U )->state(), grab::event::SourceState::Stopped );
-    EXPECT_EQ( sources.at( 1U )->state(), grab::event::SourceState::Failed );
-    EXPECT_EQ( sources.at( 2U )->state(), grab::event::SourceState::Stopped );
-}
-
-TEST( Daemon,
-      ListEventTypesReflectsInjectedSourceActivity )
-{
-    const TempDaemonDir temp;
-    auto daemon_result = grab::service::Daemon::start( grab::service::DaemonOptions{
-        .endpoint       = temp.endpoint(),
-        .store_dir      = std::nullopt,
-        .source_factory = []
-        {
-            return make_key_down_source_list();
-        },
-    } );
-    if( transport_start_blocked( daemon_result ) )
-    {
-        GTEST_SKIP() << daemon_result.error().message;
-    }
-    ASSERT_TRUE( is_ok( daemon_result ) );
-    auto                                  daemon = std::move( daemon_result ).value();
-    auto                                  stub   = make_stub( daemon.endpoint() );
-
-    eventgrab::v1::ListEventTypesResponse response;
-    list_event_types_or_fail( *stub, response );
-
-    const auto* key_down = find_type( response, eventgrab::v1::INPUT_KEY_DOWN );
-    ASSERT_NE( key_down, nullptr );
-    EXPECT_TRUE( key_down->active() );
-
-    const auto* state_snapshot = find_type( response, eventgrab::v1::STATE_SNAPSHOT );
-    ASSERT_NE( state_snapshot, nullptr );
-    EXPECT_FALSE( state_snapshot->active() );
+    EXPECT_TRUE( wait_for_window_focus( temp.store_dir() ) );
 
     daemon.shutdown();
 }

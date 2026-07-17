@@ -17,12 +17,12 @@ namespace grab
 
 }    // namespace grab
 
-namespace grab::event
+namespace grab
 {
 
-    class EventSource;
+    class Session;
 
-}    // namespace grab::event
+}    // namespace grab
 
 namespace grab::service
 {
@@ -40,8 +40,8 @@ namespace grab::service
             std::optional<std::filesystem::path> store_dir;
             std::size_t storage_queue_depth  = defaultStorageQueueDepth;
             std::size_t storage_buffer_limit = defaultStorageBufferLimit;
-            std::function<std::vector<std::unique_ptr<grab::event::EventSource>>()>
-                source_factory;
+            std::function<grab::Result<std::unique_ptr<grab::Session>>()>
+                session_factory;
     };
 
     class Daemon

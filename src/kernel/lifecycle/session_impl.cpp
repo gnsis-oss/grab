@@ -17,6 +17,7 @@
 #include "kernel/action/transaction.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "kernel/graph/tree_store.hpp"
+#include "kernel/lifecycle/observation_pump.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/query/evaluator.hpp"
 #include "kernel/query/snapshot_tree_nav.hpp"
@@ -89,10 +90,32 @@ namespace grab::kernel::lifecycle
         return *binding_pointer;
     }
 
+    RuntimeId
+    SessionCore::allocate_runtime_id() noexcept
+    {
+        return RuntimeId{ next_runtime_id_++ };
+    }
+
+    RuntimeId
+    SessionCore::runtime_id_at( std::size_t index ) const noexcept
+    {
+        if( index >= bindings_.size() )
+        {
+            return RuntimeId{};
+        }
+        return bindings_[index]->assigned_runtime;
+    }
+
     SessionCore::~SessionCore()
     {
         try
         {
+            // Join the pump's worker threads before tearing down the runtimes
+            // and bus they publish through.
+            if( pump_ != nullptr )
+            {
+                pump_->stop();
+            }
             // User-held subscriptions may outlive this core; their teardown must
             // not re-enter a destroyed runtime.
             bus_.set_demand_callback( {} );
@@ -222,13 +245,14 @@ namespace grab::kernel::lifecycle
             return;
         }
 
+        const auto atspi_runtime_id = allocate_runtime_id();
         auto runtime = std::make_unique<grab::drivers::semantic::atspi::AtspiRuntime>(
             *reactor,
             bus_,
             *registry_,
             grab::drivers::semantic::atspi::AtspiTreeSource::AccessibleEnumerator{},
             std::nullopt,
-            grab::RuntimeId{ ++next_runtime_id_ }
+            atspi_runtime_id
         );
         auto started = runtime->start( context );
         if( !started.has_value() )
@@ -241,7 +265,7 @@ namespace grab::kernel::lifecycle
             return;
         }
 
-        auto attached = attach( *runtime, context );
+        auto attached = attach( *runtime, context, atspi_runtime_id );
         if( !attached.has_value() )
         {
             runtime_diagnostics_.push_back( DiagnosticEntry{
@@ -261,6 +285,33 @@ namespace grab::kernel::lifecycle
     SessionCore::open_for_test()
     {
         return std::unique_ptr<SessionCore>( new SessionCore() );
+    }
+
+    Result<std::unique_ptr<SessionCore>>
+    SessionCore::open_owning( std::unique_ptr<spi::Runtime> runtime,
+                              const OperationContext&       context )
+    {
+        if( runtime == nullptr )
+        {
+            return fail( ErrorCode::InvalidArgument, "open_owning requires a runtime" );
+        }
+
+        auto started = runtime->start( context );
+        if( !started.has_value() )
+        {
+            return std::unexpected( std::move( started.error() ) );
+        }
+
+        auto core              = std::unique_ptr<SessionCore>( new SessionCore() );
+        core->owned_runtime_   = std::move( runtime );
+        core->primary_runtime_ = core->owned_runtime_.get();
+
+        auto attached          = core->attach( *core->owned_runtime_, context );
+        if( !attached.has_value() )
+        {
+            return std::unexpected( std::move( attached.error() ) );
+        }
+        return core;
     }
 
     Result<Match>
@@ -403,9 +454,20 @@ namespace grab::kernel::lifecycle
     }
 
     Result<void>
-    SessionCore::attach( spi::Runtime&           runtime,
-                         const OperationContext& context )
+    SessionCore::attach( spi::Runtime&            runtime,
+                         const OperationContext&  context,
+                         std::optional<RuntimeId> assigned_runtime )
     {
+        // Re-attaching an already-bound runtime (e.g. after a restart) is
+        // idempotent and preserves the session id already assigned to it.
+        for( const auto& existing : bindings_ )
+        {
+            if( existing->runtime == &runtime )
+            {
+                return {};
+            }
+        }
+
         auto* const source = runtime.tree_source();
         if( source == nullptr )
         {
@@ -421,7 +483,9 @@ namespace grab::kernel::lifecycle
             binding_is_new = true;
         }
 
-        auto drained = drain_source( *source, *binding->store, context );
+        binding->assigned_runtime = assigned_runtime.value_or( allocate_runtime_id() );
+
+        auto drained              = drain_source( *source, *binding->store, context );
         if( !drained.has_value() )
         {
             if( binding_is_new )
@@ -516,6 +580,77 @@ namespace grab::kernel::lifecycle
         return {};
     }
 
+    Result<void>
+    SessionCore::start_observation( const OperationContext& context )
+    {
+        if( pump_ != nullptr )
+        {
+            return {};
+        }
+
+        auto* const primary_source =
+            primary_runtime_ != nullptr ? primary_runtime_->event_source() : nullptr;
+
+        if( primary_source != nullptr )
+        {
+            // Demand-driven masks: input-kind subscriber counts toggle the event
+            // source's per-kind enablement.
+            bus_.set_demand_callback(
+                [primary_source]( EventKind kind, bool enabled )
+                {
+                    const spi::EventSpec spec{
+                        .name = std::string{ wire_name( kind ) },
+                    };
+                    if( enabled )
+                    {
+                        static_cast<void>(
+                            // NOLINTNEXTLINE(bugprone-unused-return-value)
+                            primary_source->enable( spec )
+                        );
+                    }
+                    else
+                    {
+                        static_cast<void>(
+                            // NOLINTNEXTLINE(bugprone-unused-return-value)
+                            primary_source->disable( spec )
+                        );
+                    }
+                }
+            );
+        }
+
+        auto pump = std::make_unique<ObservationPump>(
+            bus_,
+            [this]( const OperationContext& drain_context )
+            {
+                return pump_once( drain_context );
+            }
+        );
+        if( primary_source != nullptr )
+        {
+            pump->pump_event_source( *primary_source );
+        }
+        pump->start();
+
+        // Drain any tree deltas queued before the pump loop begins.
+        // NOLINTNEXTLINE(bugprone-unused-return-value)
+        static_cast<void>( pump_once( context ) );
+
+        pump_ = std::move( pump );
+        return {};
+    }
+
+    void
+    SessionCore::stop_observation()
+    {
+        if( pump_ != nullptr )
+        {
+            pump_->stop();
+            pump_.reset();
+        }
+        bus_.set_demand_callback( {} );
+    }
+
     void
     SessionCore::publish_tree_event( RuntimeBinding&          binding,
                                      const kernel::TreeEvent& event )
@@ -546,7 +681,7 @@ namespace grab::kernel::lifecycle
                                 },
                 .subject =
                     EventSubject{
-                                .runtime  = event.runtime,
+                                .runtime  = binding.assigned_runtime,
                                 .tree     = event.tree,
                                 .epoch    = event.epoch,
                                 .node     = event.node.value,
