@@ -3,6 +3,7 @@
 #include "grab/capture.hpp"
 #include "grab/context.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/ids.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
@@ -17,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -61,8 +63,9 @@ namespace grab::kernel::lifecycle
 
             [[nodiscard]]
             Result<void>
-            attach( spi::Runtime&           runtime,
-                    const OperationContext& context );
+            attach( spi::Runtime&            runtime,
+                    const OperationContext&  context,
+                    std::optional<RuntimeId> assigned_runtime = std::nullopt );
 
             [[nodiscard]]
             Result<Match>
@@ -122,14 +125,19 @@ namespace grab::kernel::lifecycle
             Result<void>
             pump_once( const OperationContext& context );
 
-        private:
+            // Session-assigned runtime id for the runtime bound at store index
+            // `index`, or a default RuntimeId when the index is out of range.
+            [[nodiscard]]
+            RuntimeId
+            runtime_id_at( std::size_t index ) const noexcept;
 
-            static constexpr std::uint32_t x11RuntimeIdSeed = 1U;
+        private:
 
             struct RuntimeBinding
             {
                     spi::Runtime*              runtime{};
                     spi::TreeSource*           source{};
+                    RuntimeId                  assigned_runtime{};
                     std::unique_ptr<TreeStore> store;
                     std::uint64_t              sink_batch_revision{};
                     std::uint64_t              sink_previous_revision{};
@@ -152,11 +160,15 @@ namespace grab::kernel::lifecycle
 
             [[nodiscard]]
             Result<std::size_t>
-                     drain_source( spi::TreeSource&        source,
-                                   TreeStore&              store,
-                                   const OperationContext& context );
+            drain_source( spi::TreeSource&        source,
+                          TreeStore&              store,
+                          const OperationContext& context );
 
-            EventBus bus_;
+            [[nodiscard]]
+            RuntimeId
+                                                         allocate_runtime_id() noexcept;
+
+            EventBus                                     bus_;
             std::vector<std::unique_ptr<RuntimeBinding>> bindings_;
             TargetRegistry                               owned_registry_;
             TargetRegistry*                              registry_{ &owned_registry_ };
@@ -166,16 +178,13 @@ namespace grab::kernel::lifecycle
             grab::drivers::desktop::x11::X11Runtime*     x11_runtime_{};
             std::vector<DiagnosticEntry>                 runtime_diagnostics_;
 
-            // X11Runtime mints RuntimeId{1} internally from its initial
-            // generation, so this seed accounts for it;
-            // compose_atspi_best_effort() increments the counter to allocate the
-            // next ID. IDs are distinct only for runtimes this session composes
-            // at open. A runtime restart re-mints IDs from its own counter and
-            // can still collide across runtimes; a session-level RuntimeId
-            // authority is deferred to Wave-4 semantic composition. Separate
-            // stores prevent storage collisions; only bus-event subject.runtime
-            // remains ambiguous after such restarts.
-            std::uint32_t next_runtime_id_{ x11RuntimeIdSeed };
+            // Monotonic session-scoped RuntimeId authority. Each attached
+            // runtime is assigned a distinct, stable id via allocate_runtime_id;
+            // publish_tree_event stamps it into subject.runtime so bus events
+            // disambiguate multi-runtime output regardless of a source's own
+            // restart-scoped id. Source-minted ids still drive per-store restart
+            // detection.
+            std::uint32_t                                next_runtime_id_{ 1U };
     };
 
     [[nodiscard]]

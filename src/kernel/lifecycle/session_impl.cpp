@@ -89,6 +89,22 @@ namespace grab::kernel::lifecycle
         return *binding_pointer;
     }
 
+    RuntimeId
+    SessionCore::allocate_runtime_id() noexcept
+    {
+        return RuntimeId{ next_runtime_id_++ };
+    }
+
+    RuntimeId
+    SessionCore::runtime_id_at( std::size_t index ) const noexcept
+    {
+        if( index >= bindings_.size() )
+        {
+            return RuntimeId{};
+        }
+        return bindings_[index]->assigned_runtime;
+    }
+
     SessionCore::~SessionCore()
     {
         try
@@ -222,13 +238,14 @@ namespace grab::kernel::lifecycle
             return;
         }
 
+        const auto atspi_runtime_id = allocate_runtime_id();
         auto runtime = std::make_unique<grab::drivers::semantic::atspi::AtspiRuntime>(
             *reactor,
             bus_,
             *registry_,
             grab::drivers::semantic::atspi::AtspiTreeSource::AccessibleEnumerator{},
             std::nullopt,
-            grab::RuntimeId{ ++next_runtime_id_ }
+            atspi_runtime_id
         );
         auto started = runtime->start( context );
         if( !started.has_value() )
@@ -241,7 +258,7 @@ namespace grab::kernel::lifecycle
             return;
         }
 
-        auto attached = attach( *runtime, context );
+        auto attached = attach( *runtime, context, atspi_runtime_id );
         if( !attached.has_value() )
         {
             runtime_diagnostics_.push_back( DiagnosticEntry{
@@ -403,9 +420,20 @@ namespace grab::kernel::lifecycle
     }
 
     Result<void>
-    SessionCore::attach( spi::Runtime&           runtime,
-                         const OperationContext& context )
+    SessionCore::attach( spi::Runtime&            runtime,
+                         const OperationContext&  context,
+                         std::optional<RuntimeId> assigned_runtime )
     {
+        // Re-attaching an already-bound runtime (e.g. after a restart) is
+        // idempotent and preserves the session id already assigned to it.
+        for( const auto& existing : bindings_ )
+        {
+            if( existing->runtime == &runtime )
+            {
+                return {};
+            }
+        }
+
         auto* const source = runtime.tree_source();
         if( source == nullptr )
         {
@@ -421,7 +449,9 @@ namespace grab::kernel::lifecycle
             binding_is_new = true;
         }
 
-        auto drained = drain_source( *source, *binding->store, context );
+        binding->assigned_runtime = assigned_runtime.value_or( allocate_runtime_id() );
+
+        auto drained              = drain_source( *source, *binding->store, context );
         if( !drained.has_value() )
         {
             if( binding_is_new )
@@ -546,7 +576,7 @@ namespace grab::kernel::lifecycle
                                 },
                 .subject =
                     EventSubject{
-                                .runtime  = event.runtime,
+                                .runtime  = binding.assigned_runtime,
                                 .tree     = event.tree,
                                 .epoch    = event.epoch,
                                 .node     = event.node.value,

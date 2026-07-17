@@ -143,6 +143,58 @@ TEST( SessionCore,
 }
 
 TEST( SessionCore,
+      SessionAssignsDistinctSubjectRuntimeIdsAcrossAttachedRuntimes )
+{
+    grab::testing::FakeRuntime fake_a;
+    grab::testing::FakeRuntime fake_b;
+    fake_a.inject_snapshot( grab::testing::tree::snapshot(
+        1U,
+        { grab::testing::tree::node( 1U, grab::role::window ) }
+    ) );
+    fake_b.inject_snapshot( grab::testing::tree::snapshot(
+        1U,
+        { grab::testing::tree::node( 2U, grab::role::window ) }
+    ) );
+
+    auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
+    ASSERT_NE( core, nullptr );
+
+    auto                         watch = core->bus().subscribe( grab::SubscriptionScope{
+        .kinds  = { grab::EventKind::NodeAdded },
+        .filter = {},
+    } );
+
+    const grab::OperationContext context{};
+    ASSERT_TRUE( core->attach( fake_a, context ).has_value() );
+    ASSERT_TRUE( core->attach( fake_b, context ).has_value() );
+
+    // Both fakes stamp their snapshots with the same SOURCE runtime id
+    // (fixtureRuntime). The session must still assign each attached runtime a
+    // distinct authority id, surfaced as a distinct subject.runtime.
+    const auto event_a = watch.try_pop();
+    ASSERT_TRUE( event_a.has_value() );
+    ASSERT_TRUE( event_a->subject.has_value() );
+
+    const auto event_b = watch.try_pop();
+    ASSERT_TRUE( event_b.has_value() );
+    ASSERT_TRUE( event_b->subject.has_value() );
+
+    const auto id_a = core->runtime_id_at( 0U );
+    const auto id_b = core->runtime_id_at( 1U );
+    EXPECT_NE( id_a, id_b );
+    EXPECT_EQ( event_a->subject->runtime, id_a );
+    EXPECT_EQ( event_b->subject->runtime, id_b );
+    EXPECT_NE( event_a->subject->runtime, event_b->subject->runtime );
+
+    // A runtime restart that re-attaches the same runtime object keeps its
+    // session id; it is not re-minted into a colliding value.
+    fake_a.restart();
+    ASSERT_TRUE( core->attach( fake_a, context ).has_value() );
+    EXPECT_EQ( core->runtime_id_at( 0U ), id_a );
+    EXPECT_NE( core->runtime_id_at( 0U ), core->runtime_id_at( 1U ) );
+}
+
+TEST( SessionCore,
       TwoAttachedRuntimesKeepIndependentStoresAndShareOneBus )
 {
     constexpr grab::RuntimeId      secondRuntime{ 9U };
@@ -220,12 +272,12 @@ TEST( SessionCore,
     const auto first_event = watch.try_pop();
     ASSERT_TRUE( first_event.has_value() );
     ASSERT_TRUE( first_event->subject.has_value() );
-    EXPECT_EQ( first_event->subject->runtime, grab::testing::tree::fixtureRuntime );
+    EXPECT_EQ( first_event->subject->runtime, core->runtime_id_at( 0U ) );
 
     const auto second_event = watch.try_pop();
     ASSERT_TRUE( second_event.has_value() );
     ASSERT_TRUE( second_event->subject.has_value() );
-    EXPECT_EQ( second_event->subject->runtime, secondRuntime );
+    EXPECT_EQ( second_event->subject->runtime, core->runtime_id_at( 1U ) );
     EXPECT_NE( first_event->subject->runtime, second_event->subject->runtime );
     EXPECT_FALSE( watch.try_pop().has_value() );
 
