@@ -1,6 +1,8 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "grab/context.hpp"
+#include "grab/drag.hpp"
+#include "grab/geometry/point.hpp"
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/trace.hpp"
@@ -56,13 +58,20 @@ namespace grab::spi
     {
         Click,
         TypeText,
+        Drag,
+        PressKey,
+        Activate,
     };
 
     struct ActionRequest
     {
-            ActionVerb  verb{ ActionVerb::Click };
-            Match       target{};
-            std::string text;
+            ActionVerb               verb{ ActionVerb::Click };
+            Match                    target{};
+            std::string              text{};
+            grab::geometry::Point    drag_from{};
+            grab::geometry::Point    drag_to{};
+            grab::input::DragOptions drag_options{};
+            std::string              key_name{};
     };
 
     class RouteReservation

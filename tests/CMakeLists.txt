@@ -43,7 +43,6 @@ add_executable(grab_core_tests
     screen/test_screen.cpp
     image/test_compare.cpp
     input/test_keymap.cpp
-    input/test_gestures.cpp
     input/test_input.cpp
     event/test_browser_bridge.cpp
     event/test_source_registry.cpp
@@ -59,7 +58,6 @@ add_executable(grab_core_tests
     event/test_window_x11.cpp
     notify/test_notifier.cpp
     input/test_locator.cpp
-    input/test_seat.cpp
     transport/test_codec.cpp
     storage/test_jsonl_sink.cpp
     service/test_daemon.cpp
@@ -114,6 +112,8 @@ add_executable(grab_driver_x11_tests
     drivers/x11/test_x11_input_correctness.cpp
     drivers/x11/test_x11_runtime.cpp
     drivers/x11/test_x11_tree_source.cpp
+    drivers/x11/test_x11_xtest_seat.cpp
+    drivers/x11/test_x11_drag_recipe.cpp
 )
 target_link_libraries(grab_driver_x11_tests PRIVATE
     grab_driver_x11

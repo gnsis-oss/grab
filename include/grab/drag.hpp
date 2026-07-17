@@ -9,6 +9,12 @@ namespace grab::input
 
     struct DragOptions
     {
+            enum class Path : std::uint8_t
+            {
+                Linear,
+                Cubic,
+            };
+
             static constexpr std::int32_t minimumInterpolationSteps = 1;
             static constexpr std::int32_t maximumInterpolationSteps =
                 std::numeric_limits<std::uint16_t>::max();
@@ -17,6 +23,7 @@ namespace grab::input
 
             std::int32_t              interpolation_steps = defaultInterpolationSteps;
             std::chrono::milliseconds step_dwell          = defaultStepDwell;
+            Path                      path                = Path::Linear;
     };
 
 }    // namespace grab::input

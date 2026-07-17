@@ -1,7 +1,7 @@
+#include "drivers/desktop/x11/x11_drag_recipe.hpp"
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/drag.hpp"
 #include "grab/result.hpp"
-#include "input/gestures.hpp"
-#include "input/seat.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -293,6 +293,7 @@ TEST( DragOptions,
     EXPECT_EQ( defaults.step_dwell, grab::input::DragOptions::defaultStepDwell );
     EXPECT_EQ( defaults.interpolation_steps, 16 );
     EXPECT_EQ( defaults.step_dwell, std::chrono::milliseconds{ 8 } );
+    EXPECT_EQ( defaults.path, grab::input::DragOptions::Path::Linear );
 
     constexpr grab::input::DragOptions customized{
         .interpolation_steps = customInterpolationSteps,
@@ -321,10 +322,10 @@ TEST( Gestures,
     };
 
     const auto drag_result =
-        grab::input::linear_drag( *seat,
-                                  { .x = dragFromX, .y = dragFromY },
-                                  { .x = dragToX, .y = dragToY },
-                                  options );
+        grab::drivers::desktop::x11::execute_drag( *seat,
+                                                   { .x = dragFromX, .y = dragFromY },
+                                                   { .x = dragToX, .y = dragToY },
+                                                   options );
     ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
 
     const std::vector<ObservedEvent> events = collect_pointer_events( observer.get() );
@@ -356,12 +357,14 @@ TEST( Gestures,
     const grab::input::DragOptions options{
         .interpolation_steps = interpolationSteps,
         .step_dwell          = stepDwell,
+        .path                = grab::input::DragOptions::Path::Cubic,
     };
 
-    const auto drag_result = grab::input::curve_drag( *seat,
-                                                      { .x = dragFromX, .y = dragFromY },
-                                                      { .x = dragToX, .y = dragToY },
-                                                      options );
+    const auto drag_result =
+        grab::drivers::desktop::x11::execute_drag( *seat,
+                                                   { .x = dragFromX, .y = dragFromY },
+                                                   { .x = dragToX, .y = dragToY },
+                                                   options );
     ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
 
     const std::vector<ObservedEvent> events = collect_pointer_events( observer.get() );
@@ -391,8 +394,12 @@ TEST( Gestures,
     auto seat = grab::input::Seat::open( xvfbDisplay );
     ASSERT_TRUE( seat.has_value() ) << seat.error().message;
 
-    const auto click_result =
-        grab::input::menu_click( *seat, { .x = menuItemX, .y = menuItemY } );
+    const grab::input::DragOptions click_options{ .interpolation_steps = 1 };
+    const auto                     click_result =
+        grab::drivers::desktop::x11::execute_drag( *seat,
+                                                   { .x = menuItemX, .y = menuItemY },
+                                                   { .x = menuItemX, .y = menuItemY },
+                                                   click_options );
     ASSERT_TRUE( click_result.has_value() ) << click_result.error().message;
 
     const std::vector<ObservedEvent> events = collect_pointer_events( observer.get() );

@@ -1,5 +1,7 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "grab/drag.hpp"
+#include "grab/geometry/point.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
 #include "grab/trace.hpp"
@@ -43,6 +45,25 @@ namespace grab
             std::string  text;
     };
 
-    using Action = std::variant<Click, TypeText>;
+    struct Drag
+    {
+            ActionTarget             target;
+            grab::geometry::Point    from;
+            grab::geometry::Point    to;
+            grab::input::DragOptions options;
+    };
+
+    struct PressKey
+    {
+            ActionTarget target;
+            std::string  key_name;
+    };
+
+    struct Activate
+    {
+            ActionTarget target;
+    };
+
+    using Action = std::variant<Click, TypeText, Drag, PressKey, Activate>;
 
 }    // namespace grab

@@ -1,5 +1,5 @@
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/result.hpp"
-#include "input/seat.hpp"
 
 #include <cstdint>
 #include <cstdlib>

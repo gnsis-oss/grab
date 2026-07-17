@@ -4,10 +4,10 @@
 #include "drivers/desktop/x11/x11_runtime.hpp"
 #include "drivers/desktop/x11/x11_topology_source.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/context.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
-#include "input/seat.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "platform/x11/xkb_keymap.hpp"
@@ -114,6 +114,10 @@ namespace grab::drivers::desktop::x11
         {
             event_source_->set_sink( pending_sink_ );
         }
+        activation_route_ = std::make_unique<X11ActivationRoute>( *tree_source_,
+                                                                  connection_.get(),
+                                                                  connection_.root(),
+                                                                  *event_source_ );
 
         // Same display authority the runtime connects to (DISPLAY env for now);
         // explicit display threading through the runtime is Task 8 scope.
@@ -149,6 +153,7 @@ namespace grab::drivers::desktop::x11
     X11Runtime::stop()
     {
         topology_source_.reset();
+        activation_route_.reset();
         event_source_.reset();
         capture_route_.reset();
         capture_route_error_.reset();
@@ -245,6 +250,14 @@ namespace grab::drivers::desktop::x11
         if( index == 1U )
         {
             return keyboard_route_.get();
+        }
+        if( index == 2U )
+        {
+            return nullptr;
+        }
+        if( index == 3U )
+        {
+            return activation_route_.get();
         }
         return nullptr;
     }

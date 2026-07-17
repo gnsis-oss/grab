@@ -1,5 +1,8 @@
 #include "drivers/desktop/x11/x11_runtime.hpp"
 #include "grab/context.hpp"
+#include "grab/ids.hpp"
+#include "grab/query.hpp"
+#include "spi/route.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -97,4 +100,53 @@ TEST( X11Runtime,
     ASSERT_TRUE( runtime.stop().has_value() );
     EXPECT_EQ( runtime.event_source(), nullptr );
     EXPECT_EQ( runtime.topology_source(), nullptr );
+}
+
+TEST( X11Runtime,
+      StartExposesActivationRoute )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    grab::drivers::desktop::x11::X11Runtime runtime;
+    const grab::OperationContext            context{
+        .deadline = grab::Deadline::unbounded(),
+    };
+
+    ASSERT_TRUE( runtime.start( context ).has_value() );
+    auto* const route = runtime.action_route( 3U );
+    ASSERT_NE( route, nullptr );
+
+    const grab::Match target{
+        .ref =
+            grab::WidgetRef{
+                            .runtime    = grab::RuntimeId{ 1U },
+                            .tree       = 1U,
+                            .epoch      = grab::TreeEpoch{ 1U },
+                            .node       = 1U,
+                            .generation = grab::NodeGeneration{ 1U },
+                            },
+        .mode               = grab::ConsistencyMode::Live,
+        .snapshot_revision  = 0U,
+        .matched_predicates = {},
+        .provenance         = {},
+    };
+    const grab::spi::ActionRequest activate{
+        .verb   = grab::spi::ActionVerb::Activate,
+        .target = target,
+    };
+    EXPECT_TRUE( route->reserve( activate, context ).has_value() );
+
+    const grab::spi::ActionRequest click{
+        .verb   = grab::spi::ActionVerb::Click,
+        .target = target,
+    };
+    EXPECT_FALSE( route->reserve( click, context ).has_value() );
+    EXPECT_EQ( runtime.action_route( 2U ), nullptr );
+
+    ASSERT_TRUE( runtime.stop().has_value() );
+    EXPECT_EQ( runtime.action_route( 3U ), nullptr );
 }

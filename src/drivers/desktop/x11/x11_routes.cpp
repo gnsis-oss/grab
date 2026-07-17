@@ -1,6 +1,16 @@
+#include "drivers/desktop/x11/x11_drag_recipe.hpp"
 #include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
+#include "grab/drag.hpp"
+#include "grab/geometry/point.hpp"
+#include "grab/query.hpp"
+#include "grab/ui.hpp"
+#include "kernel/action/wait_engine.hpp"
+#include "kernel/query/snapshot_tree_nav.hpp"
+#include "platform/x11/protocol.hpp"
+#include "spi/tree_source.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
@@ -13,11 +23,73 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include <xcb/xcb.h>
+#include <xcb/xproto.h>
 
 namespace grab::drivers::desktop::x11
 {
     namespace
     {
+
+        constexpr std::uint8_t  activationFormat32Bits    = 32U;
+        constexpr std::uint8_t  activationNoPropagate     = 0U;
+        constexpr std::uint32_t activationSourceNormal    = 1U;
+        constexpr std::uint32_t activationNoCurrentWindow = 0U;
+        constexpr std::uint32_t activationStackAbove      = XCB_STACK_MODE_ABOVE;
+        constexpr std::uint32_t activationEventMask =
+            static_cast<std::uint32_t>( XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY ) |
+            static_cast<std::uint32_t>( XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT );
+
+        template<typename Type>
+        using XcbOwned = std::unique_ptr<Type, decltype( &std::free )>;
+
+        template<typename Type>
+        [[nodiscard]]
+        XcbOwned<Type>
+        take_xcb_owned( Type* pointer ) noexcept
+        {
+            return XcbOwned<Type>{ pointer, &std::free };
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        check_request( xcb_connection_t* connection,
+                       xcb_void_cookie_t cookie,
+                       std::string_view  operation )
+        {
+            const auto error = take_xcb_owned( xcb_request_check( connection, cookie ) );
+            if( error != nullptr )
+            {
+                return grab::fail( grab::ErrorCode::ProtocolError,
+                                   std::string{ operation } + " failed" );
+            }
+            return {};
+        }
+
+        [[nodiscard]]
+        grab::Result<xcb_atom_t>
+        intern_atom( xcb_connection_t* connection,
+                     std::string_view  name,
+                     bool              only_if_exists )
+        {
+            xcb_generic_error_t* raw_error = nullptr;
+            const auto           reply     = take_xcb_owned( xcb_intern_atom_reply(
+                connection,
+                xcb_intern_atom( connection,
+                                 only_if_exists ? 1U : 0U,
+                                 static_cast<std::uint16_t>( name.size() ),
+                                 name.data() ),
+                &raw_error
+            ) );
+            const auto           error     = take_xcb_owned( raw_error );
+            if( error != nullptr || reply == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::ProtocolError,
+                                   "X11 activation atom lookup failed for " +
+                                       std::string{ name } );
+            }
+            return reply->atom;
+        }
 
         template<typename Value>
         struct IsVariant : std::false_type
@@ -292,7 +364,7 @@ namespace grab::drivers::desktop::x11
 
                 [[nodiscard]]
                 grab::Result<void>
-                verify( const grab::OperationContext& ) final
+                verify( const grab::OperationContext& ) override
                 {
                     return {};
                 }
@@ -402,6 +474,156 @@ namespace grab::drivers::desktop::x11
                 xcb_window_t      root_{};
                 X11InputSeat*     seat_{};
                 grab::WidgetRef   target_{};
+        };
+
+        class ActivationReservation final : public ReservationBase
+        {
+            public:
+
+                ActivationReservation( X11TreeSource&          source,
+                                       xcb_connection_t*       connection,
+                                       xcb_window_t            root,
+                                       grab::spi::EventSource& events,
+                                       grab::Match             match,
+                                       grab::WidgetRef         target_ref ) :
+                    source_( &source ),
+                    connection_( connection ),
+                    root_( root ),
+                    events_( &events ),
+                    match_( std::move( match ) ),
+                    target_ref_( target_ref )
+                {
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                commit( const grab::OperationContext& ) final
+                {
+                    const auto xid = source_->resolve_xid( target_ref_ );
+                    if( !xid )
+                    {
+                        return forward_error( xid );
+                    }
+
+                    if( connection_ == nullptr || root_ == XCB_WINDOW_NONE )
+                    {
+                        return failure<void>( grab::ErrorCode::CapabilityUnavailable,
+                                              "X11 connection is unavailable" );
+                    }
+
+                    auto atom =
+                        intern_atom( connection_,
+                                     grab::platform::x11::atom_name::netActiveWindow,
+                                     false );
+                    if( !atom.has_value() )
+                    {
+                        return std::unexpected( std::move( atom.error() ) );
+                    }
+
+                    const xcb_client_message_event_t event{
+                        .response_type = XCB_CLIENT_MESSAGE,
+                        .format        = activationFormat32Bits,
+                        .sequence      = 0U,
+                        .window        = *xid,
+                        .type          = *atom,
+                        .data          = xcb_client_message_data_t{
+                                                                   .data32 = {
+                                activationSourceNormal,
+                                XCB_CURRENT_TIME,
+                                activationNoCurrentWindow,
+                            }, },
+                    };
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+                    const auto* const raw_event =
+                        reinterpret_cast<const char*>( &event );
+                    auto send_result =
+                        check_request( connection_,
+                                       xcb_send_event_checked( connection_,
+                                                               activationNoPropagate,
+                                                               root_,
+                                                               activationEventMask,
+                                                               raw_event ),
+                                       "X11 active-window request" );
+                    if( !send_result.has_value() )
+                    {
+                        return send_result;
+                    }
+
+                    auto stack_result = check_request(
+                        connection_,
+                        xcb_configure_window_checked( connection_,
+                                                      *xid,
+                                                      XCB_CONFIG_WINDOW_STACK_MODE,
+                                                      &activationStackAbove ),
+                        "X11 window raise request"
+                    );
+                    if( !stack_result.has_value() )
+                    {
+                        return stack_result;
+                    }
+
+                    if( xcb_flush( connection_ ) <= 0 )
+                    {
+                        return failure<void>( grab::ErrorCode::ProtocolError,
+                                              "X11 window activation flush failed" );
+                    }
+
+                    return {};
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                verify( const grab::OperationContext& context ) final
+                {
+                    namespace ka            = grab::kernel::action;
+                    const auto       match  = match_;
+                    auto* const      source = source_;
+                    ka::NodeObserver observer =
+                        [source, match, context]() -> grab::Result<ka::NodeObservation>
+                    {
+                        auto snapshot = source->snapshot( match.ref.tree, context );
+                        if( !snapshot.has_value() )
+                        {
+                            return std::unexpected( std::move( snapshot.error() ) );
+                        }
+                        const grab::kernel::query::SnapshotTreeNav navigation{
+                            *snapshot
+                        };
+                        const auto         metadata = navigation.metadata();
+                        const grab::NodeId node{ match.ref.node };
+                        const bool         present = metadata.runtime ==
+                                                     match.ref.runtime &&
+                                                     metadata.tree ==
+                                                     match.ref.tree &&
+                                                     metadata.epoch ==
+                                                     match.ref.epoch &&
+                                                     navigation.contains( node ) &&
+                                                     navigation.generation( node ) ==
+                                                     match.ref.generation;
+                        return ka::NodeObservation{
+                            .present = present,
+                            .states  = present ? navigation.states( node ) : 0U,
+                            .detail  = present ? "activation target present"
+                                               : "activation target is stale or absent",
+                        };
+                    };
+                    auto                 predicate = ka::window_mapped( observer );
+                    const ka::WaitEngine engine{ context };
+                    return engine.wait( predicate,
+                                        ka::WaitParams{
+                                            .deadline = context.deadline,
+                                        },
+                                        *events_ );
+                }
+
+            private:
+
+                X11TreeSource*          source_{};
+                xcb_connection_t*       connection_{};
+                xcb_window_t            root_{};
+                grab::spi::EventSource* events_{};
+                grab::Match             match_{};
+                grab::WidgetRef         target_ref_{};
         };
 
         class KeyboardReservation final : public ReservationBase
@@ -526,6 +748,172 @@ namespace grab::drivers::desktop::x11
                 X11InputSeat* seat_{};
                 grab::Keymap* keymap_{};
                 std::string   text_;
+        };
+
+        class PointerDragReservation final : public ReservationBase
+        {
+            public:
+
+                PointerDragReservation( X11InputSeat&                   seat,
+                                        grab::geometry::Point           from,
+                                        grab::geometry::Point           to,
+                                        const grab::input::DragOptions& options ) :
+                    seat_( &seat ),
+                    from_( from ),
+                    to_( to ),
+                    options_( options )
+                {
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                commit( const grab::OperationContext& ) final
+                {
+                    return execute_drag( *seat_, from_, to_, options_ );
+                }
+
+            private:
+
+                X11InputSeat*            seat_{};
+                grab::geometry::Point    from_{};
+                grab::geometry::Point    to_{};
+                grab::input::DragOptions options_{};
+        };
+
+        class KeyReservation final : public ReservationBase
+        {
+            public:
+
+                KeyReservation( X11InputSeat& seat,
+                                grab::Keymap& keymap,
+                                std::string   key_name ) :
+                    seat_( &seat ),
+                    keymap_( &keymap ),
+                    key_name_( std::move( key_name ) )
+                {
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                commit( const grab::OperationContext& ) final
+                {
+                    const auto keystroke = keymap_->keystroke_for_key( key_name_ );
+                    if( !keystroke.has_value() )
+                    {
+                        return failure<void>( grab::ErrorCode::UnsupportedCharacter,
+                                              "named key is not available in keymap: " +
+                                                  key_name_ );
+                    }
+
+                    constexpr auto max_keycode =
+                        std::numeric_limits<std::uint8_t>::max();
+                    if( keystroke->keycode == 0U || keystroke->keycode > max_keycode )
+                    {
+                        return failure<void>(
+                            grab::ErrorCode::InvalidArgument,
+                            "X11 keycode is outside the supported range"
+                        );
+                    }
+
+                    std::uint32_t shift = 0U;
+                    if( keystroke->shift )
+                    {
+                        shift = keymap_->shift_keycode();
+                        if( shift == 0U || shift > max_keycode )
+                        {
+                            return failure<void>(
+                                grab::ErrorCode::UnsupportedCharacter,
+                                "keymap does not provide the required Shift modifier"
+                            );
+                        }
+                    }
+                    std::uint32_t altgr = 0U;
+                    if( keystroke->altgr )
+                    {
+                        altgr = keymap_->altgr_keycode();
+                        if( altgr == 0U || altgr > max_keycode )
+                        {
+                            return failure<void>(
+                                grab::ErrorCode::UnsupportedCharacter,
+                                "keymap does not provide the required AltGr modifier"
+                            );
+                        }
+                    }
+
+                    bool       begun = false;
+                    const auto send  = [this, &begun]( std::uint32_t keycode,
+                                                       bool press ) -> grab::Result<void>
+                    {
+                        begun = true;
+                        auto result =
+                            seat_->key( static_cast<std::uint8_t>( keycode ), press );
+                        if( !result )
+                        {
+                            return possibly_committed();
+                        }
+                        return {};
+                    };
+
+                    if( keystroke->shift )
+                    {
+                        auto result = send( shift, true );
+                        if( !result )
+                        {
+                            return result;
+                        }
+                    }
+                    if( keystroke->altgr )
+                    {
+                        auto result = send( altgr, true );
+                        if( !result )
+                        {
+                            return result;
+                        }
+                    }
+                    auto result = send( keystroke->keycode, true );
+                    if( !result )
+                    {
+                        return result;
+                    }
+                    result = send( keystroke->keycode, false );
+                    if( !result )
+                    {
+                        return result;
+                    }
+                    if( keystroke->altgr )
+                    {
+                        result = send( altgr, false );
+                        if( !result )
+                        {
+                            return result;
+                        }
+                    }
+                    if( keystroke->shift )
+                    {
+                        result = send( shift, false );
+                        if( !result )
+                        {
+                            return result;
+                        }
+                    }
+
+                    result = seat_->flush();
+                    if( !result )
+                    {
+                        if( begun )
+                        {
+                            return possibly_committed();
+                        }
+                        return result;
+                    }
+                    return {};
+                }
+
+            private:
+
+                X11InputSeat* seat_{};
+                grab::Keymap* keymap_{};
+                std::string   key_name_;
         };
 
     }    // namespace
@@ -695,30 +1083,39 @@ namespace grab::drivers::desktop::x11
     X11PointerRoute::reserve( const grab::spi::ActionRequest& action,
                               const grab::OperationContext& )
     {
-        if( action.verb != grab::spi::ActionVerb::Click )
+        if( action.verb == grab::spi::ActionVerb::Click )
         {
-            return failure<std::unique_ptr<grab::spi::RouteReservation>>(
-                grab::ErrorCode::CapabilityUnavailable,
-                "X11 pointer route only supports Click"
-            );
+            const auto target = widget_ref_from( action.target );
+            if( !target )
+            {
+                return failure<std::unique_ptr<grab::spi::RouteReservation>>(
+                    grab::ErrorCode::InvalidArgument,
+                    "X11 pointer route requires a WidgetRef target"
+                );
+            }
+
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<PointerReservation>( *source_,
+                                                      connection_,
+                                                      root_,
+                                                      *seat_,
+                                                      *target )
+            };
+        }
+        if( action.verb == grab::spi::ActionVerb::Drag )
+        {
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<PointerDragReservation>( *seat_,
+                                                          action.drag_from,
+                                                          action.drag_to,
+                                                          action.drag_options )
+            };
         }
 
-        const auto target = widget_ref_from( action.target );
-        if( !target )
-        {
-            return failure<std::unique_ptr<grab::spi::RouteReservation>>(
-                grab::ErrorCode::InvalidArgument,
-                "X11 pointer route requires a WidgetRef target"
-            );
-        }
-
-        return std::unique_ptr<grab::spi::RouteReservation>{
-            std::make_unique<PointerReservation>( *source_,
-                                                  connection_,
-                                                  root_,
-                                                  *seat_,
-                                                  *target )
-        };
+        return failure<std::unique_ptr<grab::spi::RouteReservation>>(
+            grab::ErrorCode::CapabilityUnavailable,
+            "X11 pointer route only supports Click and Drag"
+        );
     }
 
     X11KeyboardRoute::X11KeyboardRoute( X11TreeSource&    source,
@@ -740,17 +1137,65 @@ namespace grab::drivers::desktop::x11
         static_cast<void>( source_ );
         static_cast<void>( connection_ );
 
-        if( action.verb != grab::spi::ActionVerb::TypeText )
+        if( action.verb == grab::spi::ActionVerb::TypeText )
         {
-            return failure<std::unique_ptr<grab::spi::RouteReservation>>(
-                grab::ErrorCode::CapabilityUnavailable,
-                "X11 keyboard route only supports TypeText"
-            );
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<KeyboardReservation>( *seat_, keymap_, action.text )
+            };
+        }
+        if( action.verb == grab::spi::ActionVerb::PressKey )
+        {
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<KeyReservation>( *seat_, keymap_, action.key_name )
+            };
         }
 
-        return std::unique_ptr<grab::spi::RouteReservation>{
-            std::make_unique<KeyboardReservation>( *seat_, keymap_, action.text )
-        };
+        return failure<std::unique_ptr<grab::spi::RouteReservation>>(
+            grab::ErrorCode::CapabilityUnavailable,
+            "X11 keyboard route only supports TypeText and PressKey"
+        );
+    }
+
+    X11ActivationRoute::X11ActivationRoute( X11TreeSource&          source,
+                                            xcb_connection_t*       connection,
+                                            xcb_window_t            root,
+                                            grab::spi::EventSource& events ) noexcept :
+        source_( &source ),
+        connection_( connection ),
+        root_( root ),
+        events_( &events )
+    {
+    }
+
+    grab::Result<std::unique_ptr<grab::spi::RouteReservation>>
+    X11ActivationRoute::reserve( const grab::spi::ActionRequest& action,
+                                 const grab::OperationContext& )
+    {
+        if( action.verb == grab::spi::ActionVerb::Activate )
+        {
+            const auto target = widget_ref_from( action.target );
+            if( !target )
+            {
+                return failure<std::unique_ptr<grab::spi::RouteReservation>>(
+                    grab::ErrorCode::InvalidArgument,
+                    "X11 activation route requires a WidgetRef target"
+                );
+            }
+
+            return std::unique_ptr<grab::spi::RouteReservation>{
+                std::make_unique<ActivationReservation>( *source_,
+                                                         connection_,
+                                                         root_,
+                                                         *events_,
+                                                         action.target,
+                                                         *target )
+            };
+        }
+
+        return failure<std::unique_ptr<grab::spi::RouteReservation>>(
+            grab::ErrorCode::CapabilityUnavailable,
+            "X11 activation route only supports Activate"
+        );
     }
 
 }    // namespace grab::drivers::desktop::x11

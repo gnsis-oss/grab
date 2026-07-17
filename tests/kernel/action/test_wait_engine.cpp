@@ -133,3 +133,71 @@ TEST( WaitEngine,
     EXPECT_TRUE( result.has_value() );
     EXPECT_EQ( events.wait_count(), 1U );
 }
+
+TEST( WaitEngine,
+      WindowMappedSatisfiedWhenNodePresentAndVisible )
+{
+    grab::OperationContext context{
+        .deadline = grab::Deadline::after( waitBudget ),
+    };
+    grab::kernel::action::WaitEngine engine{ context };
+    grab::testing::FakeEventSource   events;
+    events.push_wakeup(
+        []()
+        {
+        }
+    );
+
+    const grab::kernel::action::NodeObserver observer =
+        []() -> grab::Result<grab::kernel::action::NodeObservation>
+    {
+        return grab::kernel::action::NodeObservation{
+            .present = true,
+            .states  = grab::state_mask( grab::NodeState::Visible ),
+            .detail  = "window observed",
+        };
+    };
+    auto       predicate = grab::kernel::action::window_mapped( observer );
+
+    const auto result    = engine.wait( predicate,
+                                        grab::kernel::action::WaitParams{
+                                            .deadline = context.deadline,
+                                        },
+                                        events );
+
+    EXPECT_TRUE( result.has_value() );
+}
+
+TEST( WaitEngine,
+      WindowMappedUnsatisfiedWhenNodeNotVisible )
+{
+    grab::OperationContext context{
+        .deadline = grab::Deadline::unbounded(),
+    };
+    grab::kernel::action::WaitEngine         engine{ context };
+    grab::testing::FakeEventSource           events;
+
+    const grab::kernel::action::NodeObserver observer =
+        []() -> grab::Result<grab::kernel::action::NodeObservation>
+    {
+        return grab::kernel::action::NodeObservation{
+            .present = true,
+            .states  = grab::state_mask( grab::NodeState::Enabled ),
+            .detail  = "window is not on screen",
+        };
+    };
+    auto       predicate = grab::kernel::action::window_mapped( observer );
+
+    const auto result = engine.wait( predicate,
+                                     grab::kernel::action::WaitParams{
+                                         .deadline =
+                                             grab::Deadline{
+                                                            .at = std::chrono::steady_clock::now(),
+                                                            },
+    },
+                                     events );
+
+    ASSERT_FALSE( result.has_value() );
+    EXPECT_EQ( result.error().code, grab::ErrorCode::DeadlineExceeded );
+    EXPECT_NE( result.error().message.find( "window_mapped" ), std::string::npos );
+}

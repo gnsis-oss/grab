@@ -1,12 +1,12 @@
+#include "drivers/desktop/x11/x11_drag_recipe.hpp"
+#include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "grab/drag.hpp"
 #include "grab/input.hpp"
 #include "grab/keymap.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
 #include "grab/window_match.hpp"
-#include "input/gestures.hpp"
 #include "input/locator.hpp"
-#include "input/seat.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "platform/x11/xkb_keymap.hpp"
 
@@ -416,7 +416,10 @@ namespace grab
         {
             return std::unexpected( std::move( state.error() ) );
         }
-        return grab::input::linear_drag( ( *state )->seat_, from, to, options );
+        return grab::drivers::desktop::x11::execute_drag( ( *state )->seat_,
+                                                          from,
+                                                          to,
+                                                          options );
     }
 
     grab::Result<void>
@@ -655,10 +658,14 @@ namespace grab
             return std::unexpected( std::move( to_y.error() ) );
         }
 
-        return grab::input::curve_drag( ( *state )->seat_,
-                                        grab::input::Point{ .x = *from_x, .y = *from_y },
-                                        grab::input::Point{ .x = *to_x, .y = *to_y },
-                                        options );
+        grab::input::DragOptions curve_options = options;
+        curve_options.path                     = grab::input::DragOptions::Path::Cubic;
+        return grab::drivers::desktop::x11::execute_drag(
+            ( *state )->seat_,
+            grab::input::Point{ .x = *from_x, .y = *from_y },
+            grab::input::Point{ .x = *to_x, .y = *to_y },
+            curve_options
+        );
     }
 
 }    // namespace grab
