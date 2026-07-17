@@ -1,4 +1,2 @@
 # format: <repo-relative dir>=<max total LOC across *.cpp/*.hpp>
 # shrink-only: purge waves lower these numbers; deleting a dir deletes its line.
-src/input=495
-src/screen=351
