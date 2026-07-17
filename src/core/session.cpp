@@ -265,6 +265,12 @@ namespace grab
         return kernel::lifecycle::resolve_verb( impl_->core(), locator, cardinality );
     }
 
+    grab::Result<NodeInfo>
+    Session::describe( const Match& match )
+    {
+        return kernel::lifecycle::describe_verb( impl_->core(), match );
+    }
+
     grab::Result<Subscription>
     Session::watch( SubscriptionScope scope,
                     QueueOptions      options )

@@ -4,15 +4,11 @@
 #include "grab/input.hpp"
 #include "grab/keymap.hpp"
 #include "grab/result.hpp"
-#include "grab/space.hpp"
-#include "grab/window_match.hpp"
-#include "input/locator.hpp"
 #include "platform/x11/xcb_connection.hpp"
 #include "platform/x11/xkb_keymap.hpp"
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -22,7 +18,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace grab
 {
@@ -33,12 +28,10 @@ namespace grab
 
             Impl( grab::input::Seat           seat,
                   std::optional<grab::Keymap> keymap,
-                  grab::input::WindowLocator  locator,
                   std::string                 display,
                   bool                        server_keymap ) noexcept :
                 seat_( std::move( seat ) ),
                 keymap_( std::move( keymap ) ),
-                locator_( std::move( locator ) ),
                 display_( std::move( display ) ),
                 server_keymap_( server_keymap )
             {
@@ -54,7 +47,6 @@ namespace grab
 
             grab::input::Seat           seat_;
             std::optional<grab::Keymap> keymap_;
-            grab::input::WindowLocator  locator_;
             std::string                 display_;
             bool                        server_keymap_ = false;
     };
@@ -62,9 +54,7 @@ namespace grab
     namespace
     {
 
-        constexpr std::size_t maximumModifierCount  = 2U;
-        constexpr double      minimumWindowFraction = 0.0;
-        constexpr double      maximumWindowFraction = 1.0;
+        constexpr std::size_t maximumModifierCount = 2U;
 
         [[nodiscard]]
         grab::Result<void>
@@ -209,50 +199,6 @@ namespace grab
             return release_modifiers( seat, modifiers, modifier_count );
         }
 
-        [[nodiscard]]
-        grab::Result<std::int16_t>
-        coordinate_from_fraction( double           origin,
-                                  double           size,
-                                  double           fraction,
-                                  std::string_view axis )
-        {
-            if( !std::isfinite( fraction ) ||
-                fraction <
-                minimumWindowFraction ||
-                fraction > maximumWindowFraction )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   std::string{ axis } +
-                                       " fraction must be between 0 and 1" );
-            }
-            if( !std::isfinite( origin ) )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   std::string{ axis } +
-                                       " window origin must be finite" );
-            }
-            if( !std::isfinite( size ) || size < 1.0 )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   std::string{ axis } +
-                                       " window extent must be at least one" );
-            }
-
-            const double maximum_offset = size - 1.0;
-            const double absolute = std::round( origin + ( fraction * maximum_offset ) );
-            if( absolute <
-                static_cast<double>( std::numeric_limits<std::int16_t>::min() ) ||
-                absolute >
-                static_cast<double>( std::numeric_limits<std::int16_t>::max() ) )
-            {
-                return grab::fail( grab::ErrorCode::InvalidArgument,
-                                   std::string{ axis } +
-                                       " coordinate is outside int16 range" );
-            }
-
-            return static_cast<std::int16_t>( absolute );
-        }
-
     }    // namespace
 
     Input::Input( std::unique_ptr<Impl> impl ) noexcept :
@@ -299,15 +245,8 @@ namespace grab
             keymap.emplace( std::move( *explicit_keymap ) );
         }
 
-        auto locator = grab::input::WindowLocator::open( display );
-        if( !locator.has_value() )
-        {
-            return std::unexpected( std::move( locator.error() ) );
-        }
-
         return Input{ std::make_unique<Impl>( std::move( *seat ),
                                               std::move( keymap ),
-                                              std::move( *locator ),
                                               display == nullptr
                                                   ? std::string{}
                                                   : std::string{ display },
@@ -551,121 +490,6 @@ namespace grab
             return key_result;
         }
         return ( *state )->seat_.flush();
-    }
-
-    grab::Result<void>
-    Input::activate( const grab::input::LocatedWindow& win )
-    {
-        auto state = require_impl();
-        if( !state.has_value() )
-        {
-            return std::unexpected( std::move( state.error() ) );
-        }
-        return ( *state )->locator_.activate( win );
-    }
-
-    grab::Result<grab::input::LocatedWindow>
-    Input::locate( const std::vector<std::string>& wm_class_candidates,
-                   std::string_view                title )
-    {
-        auto state = require_impl();
-        if( !state.has_value() )
-        {
-            return std::unexpected( std::move( state.error() ) );
-        }
-        return ( *state )->locator_.locate( wm_class_candidates, title );
-    }
-
-    grab::Result<void>
-    Input::click_in_window( const grab::input::LocatedWindow& win,
-                            double                            frac_x,
-                            double                            frac_y,
-                            std::uint8_t                      button )
-    {
-        auto state = require_impl();
-        if( !state.has_value() )
-        {
-            return std::unexpected( std::move( state.error() ) );
-        }
-
-        if( win.trust == grab::TransformTrust::Untrusted )
-        {
-            return grab::fail( grab::ErrorCode::GeometryUntrusted,
-                               "window geometry is unavailable" );
-        }
-
-        auto x = coordinate_from_fraction( win.bounds.x, win.bounds.w, frac_x, "x" );
-        if( !x.has_value() )
-        {
-            return std::unexpected( std::move( x.error() ) );
-        }
-
-        auto y = coordinate_from_fraction( win.bounds.y, win.bounds.h, frac_y, "y" );
-        if( !y.has_value() )
-        {
-            return std::unexpected( std::move( y.error() ) );
-        }
-
-        return click_at( *x, *y, button );
-    }
-
-    grab::Result<void>
-    Input::drag_curve_in_window( const grab::input::LocatedWindow& win,
-                                 double                            source_x,
-                                 double                            source_y,
-                                 double                            destination_x,
-                                 double                            destination_y,
-                                 const grab::input::DragOptions&   options )
-    {
-        auto state = require_impl();
-        if( !state.has_value() )
-        {
-            return std::unexpected( std::move( state.error() ) );
-        }
-
-        if( win.trust == grab::TransformTrust::Untrusted )
-        {
-            return grab::fail( grab::ErrorCode::GeometryUntrusted,
-                               "window geometry is unavailable" );
-        }
-
-        auto from_x =
-            coordinate_from_fraction( win.bounds.x, win.bounds.w, source_x, "source x" );
-        if( !from_x.has_value() )
-        {
-            return std::unexpected( std::move( from_x.error() ) );
-        }
-        auto from_y =
-            coordinate_from_fraction( win.bounds.y, win.bounds.h, source_y, "source y" );
-        if( !from_y.has_value() )
-        {
-            return std::unexpected( std::move( from_y.error() ) );
-        }
-        auto to_x = coordinate_from_fraction( win.bounds.x,
-                                              win.bounds.w,
-                                              destination_x,
-                                              "destination x" );
-        if( !to_x.has_value() )
-        {
-            return std::unexpected( std::move( to_x.error() ) );
-        }
-        auto to_y = coordinate_from_fraction( win.bounds.y,
-                                              win.bounds.h,
-                                              destination_y,
-                                              "destination y" );
-        if( !to_y.has_value() )
-        {
-            return std::unexpected( std::move( to_y.error() ) );
-        }
-
-        grab::input::DragOptions curve_options = options;
-        curve_options.path                     = grab::input::DragOptions::Path::Cubic;
-        return grab::drivers::desktop::x11::execute_drag(
-            ( *state )->seat_,
-            grab::input::Point{ .x = *from_x, .y = *from_y },
-            grab::input::Point{ .x = *to_x, .y = *to_y },
-            curve_options
-        );
     }
 
 }    // namespace grab

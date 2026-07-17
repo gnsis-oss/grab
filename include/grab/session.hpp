@@ -68,6 +68,10 @@ namespace grab
                      Cardinality    cardinality = Cardinality::ExactlyOne );
 
             [[nodiscard]]
+            Result<NodeInfo>
+            describe( const Match& match );
+
+            [[nodiscard]]
             Result<Subscription>
             watch( SubscriptionScope scope,
                    QueueOptions      options = {} );

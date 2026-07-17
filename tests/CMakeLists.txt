@@ -57,7 +57,6 @@ add_executable(grab_core_tests
     event/test_xinput2.cpp
     event/test_window_x11.cpp
     notify/test_notifier.cpp
-    input/test_locator.cpp
     transport/test_codec.cpp
     storage/test_jsonl_sink.cpp
     service/test_daemon.cpp
