@@ -1,7 +1,7 @@
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
+#include "kernel/events/event_bus.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

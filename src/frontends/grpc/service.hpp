@@ -2,8 +2,8 @@
 
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "grab/context.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/process_ref.hpp"
+#include "kernel/events/event_bus.hpp"
 
 #include <atomic>
 #include <chrono>

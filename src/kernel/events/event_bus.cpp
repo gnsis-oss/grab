@@ -1,8 +1,8 @@
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
+#include "kernel/events/event_bus.hpp"
 
 #include <algorithm>
 #include <atomic>

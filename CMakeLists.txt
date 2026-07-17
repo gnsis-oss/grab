@@ -38,20 +38,20 @@ add_library(grab_vendor_l0 INTERFACE)
 target_include_directories(grab_vendor_l0 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/vendor/l0)
 
 add_library(grab_core STATIC
-    src/core/monitor.cpp
-    src/core/context.cpp
-    src/core/doctor.cpp
-    src/core/event_bus.cpp
-    src/core/id_factory.cpp
-    src/core/posix_open.c
-    src/core/permission.cpp
-    src/core/process_ref.cpp
-    src/core/prober.cpp
-    src/core/reactor.cpp
-    src/core/registry.cpp
-    src/core/resolver.cpp
+    src/spi/monitor.cpp
+    src/kernel/lifecycle/context.cpp
+    src/kernel/routing/doctor.cpp
+    src/kernel/events/event_bus.cpp
+    src/kernel/identity/id_factory.cpp
+    src/kernel/support/posix_open.c
+    src/spi/permission.cpp
+    src/kernel/lifecycle/process_ref.cpp
+    src/kernel/routing/prober.cpp
+    src/kernel/scheduling/reactor.cpp
+    src/kernel/routing/registry.cpp
+    src/kernel/routing/resolver.cpp
     src/kernel/lifecycle/session.cpp
-    src/core/space_graph.cpp
+    src/kernel/presentation/space_graph.cpp
     src/kernel/lifecycle/session_impl.cpp
     src/kernel/lifecycle/observation_pump.cpp
 )

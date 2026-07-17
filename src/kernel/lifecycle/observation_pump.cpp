@@ -1,6 +1,6 @@
 #include "grab/context.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/lifecycle/observation_pump.hpp"
 #include "spi/event_source.hpp"
 

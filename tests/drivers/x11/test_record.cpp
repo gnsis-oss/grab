@@ -1,6 +1,6 @@
-#include "core/reactor.hpp"
 #include "drivers/desktop/x11/record.hpp"
 #include "grab/result.hpp"
+#include "kernel/scheduling/reactor.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

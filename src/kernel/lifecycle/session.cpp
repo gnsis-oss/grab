@@ -1,14 +1,14 @@
-#include "core/reactor.hpp"
 #include "grab/capture.hpp"
 #include "grab/context.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/lifecycle/session_errors.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/lifecycle/startup_signal.hpp"
+#include "kernel/scheduling/reactor.hpp"
 #include "spi/runtime.hpp"
 
 #include <atomic>

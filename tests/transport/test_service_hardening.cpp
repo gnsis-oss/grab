@@ -1,6 +1,6 @@
 #include "frontends/grpc/service.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/process_ref.hpp"
+#include "kernel/events/event_bus.hpp"
 
 #include <google/protobuf/descriptor.h>
 #include <grpcpp/create_channel.h>

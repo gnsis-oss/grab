@@ -8,7 +8,6 @@ context.hpp
 drag.hpp
 enum_table.hpp
 event.hpp
-event_bus.hpp
 event_descriptor.hpp
 geometry.hpp
 geometry/curve.hpp
@@ -38,5 +37,4 @@ trace.hpp
 ui.hpp
 version.hpp
 watch.hpp
-window_match.hpp
 workspace.hpp

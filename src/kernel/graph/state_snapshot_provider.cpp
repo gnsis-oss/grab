@@ -1,5 +1,5 @@
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/graph/state_snapshot_provider.hpp"
 
 #include <chrono>

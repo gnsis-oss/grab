@@ -1,9 +1,9 @@
 #pragma once
 
-#include "core/environment.hpp"
-#include "core/provider.hpp"
 #include "grab/result.hpp"
 #include "grab/workspace.hpp"
+#include "kernel/routing/provider.hpp"
+#include "kernel/support/environment.hpp"
 #include "session/provider.hpp"
 
 #include <memory>

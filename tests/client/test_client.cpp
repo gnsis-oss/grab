@@ -7,7 +7,6 @@
 #include "frontends/grpc/server.hpp"
 #include "grab/capture.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
@@ -17,6 +16,7 @@
 #include "grab/session.hpp"
 #include "grab/trace.hpp"
 #include "grab/ui.hpp"
+#include "kernel/events/event_bus.hpp"
 
 #include <grpcpp/security/server_credentials.h>
 #include <grpcpp/server.h>

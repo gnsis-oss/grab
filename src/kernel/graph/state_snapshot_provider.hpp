@@ -1,6 +1,6 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
-#include "grab/event_bus.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/graph/state_manager.hpp"
 
 #include <mutex>

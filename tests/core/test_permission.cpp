@@ -1,4 +1,4 @@
-#include "core/permission.hpp"
+#include "spi/permission.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

@@ -4,9 +4,9 @@
 #include "drivers/desktop/x11/x11_topology_source.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/origin.hpp"
 #include "grab/session.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
 #include "spi/event_source.hpp"
 

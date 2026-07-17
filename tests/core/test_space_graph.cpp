@@ -1,6 +1,6 @@
-#include "core/space_graph.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/presentation/space_graph.hpp"
 
 #include <gtest/gtest.h>
 

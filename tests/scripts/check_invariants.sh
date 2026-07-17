@@ -31,7 +31,7 @@ while IFS= read -r file; do
 done < <(grep -rlE 'sleep_for|usleep\(|nanosleep\(' src --include='*.cpp' --include='*.hpp')
 
 # 4. kill()/killpg() calls outside process_ref.cpp
-if grep -rnE '\b(kill|killpg)\(' src --include='*.cpp' | grep -vE 'core/process_ref\.cpp'; then
+if grep -rnE '\b(kill|killpg)\(' src --include='*.cpp' | grep -vE 'kernel/lifecycle/process_ref\.cpp'; then
     note "raw kill/killpg outside process_ref"; fi
 
 # 5. kernel must be platform-free (dir may not exist yet)

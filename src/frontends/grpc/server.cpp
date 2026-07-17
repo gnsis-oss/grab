@@ -2,8 +2,8 @@
 
 #include "frontends/grpc/server.hpp"
 #include "frontends/grpc/service.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/result.hpp"
+#include "kernel/events/event_bus.hpp"
 
 #include <grpcpp/security/server_credentials.h>
 #include <grpcpp/server_builder.h>

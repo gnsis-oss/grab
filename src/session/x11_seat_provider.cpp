@@ -1,11 +1,11 @@
-#include "core/environment.hpp"
-#include "core/provider.hpp"
 #include "drivers/desktop/x11/xcb_connection.hpp"
 #include "drivers/desktop/x11/xi_seat.hpp"
 #include "grab/capability.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/workspace.hpp"
+#include "kernel/routing/provider.hpp"
+#include "kernel/support/environment.hpp"
 #include "session/provider.hpp"
 #include "session/x11_seat_provider.hpp"
 

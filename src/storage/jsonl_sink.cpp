@@ -1,10 +1,10 @@
-#include "core/permission.hpp"
 #include "grab/event.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/ids.hpp"
 #include "grab/origin.hpp"
 #include "grab/payload_fields.hpp"
 #include "grab/result.hpp"
+#include "spi/permission.hpp"
 #include "storage/jsonl_sink.hpp"
 
 #include <algorithm>

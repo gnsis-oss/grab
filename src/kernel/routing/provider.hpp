@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/environment.hpp"
 #include "grab/capability.hpp"
+#include "kernel/support/environment.hpp"
 
 #include <string>
 #include <vector>

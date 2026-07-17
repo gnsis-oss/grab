@@ -1,4 +1,3 @@
-#include "core/vendor_adapt.hpp"
 #include "grab/ids.hpp"
 #include "grab/relation.hpp"
 #include "grab/result.hpp"
@@ -7,6 +6,7 @@
 #include "grab/trace.hpp"
 #include "grab/ui.hpp"
 #include "kernel/graph/tree_store.hpp"
+#include "kernel/support/vendor_adapt.hpp"
 #include "spi/tree_source.hpp"
 
 #include <algorithm>

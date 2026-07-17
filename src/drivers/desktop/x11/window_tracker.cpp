@@ -1,10 +1,10 @@
-#include "core/reactor.hpp"
 #include "drivers/desktop/x11/protocol.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
+#include "kernel/events/event_bus.hpp"
+#include "kernel/scheduling/reactor.hpp"
 
 #include <algorithm>
 #include <chrono>

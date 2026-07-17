@@ -9,12 +9,12 @@
 #include "frontends/grpc/service.hpp"
 #include "grab/active_kind_probe.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/locator.hpp"
 #include "grab/role.hpp"
 #include "grab/session.hpp"
 #include "grab/ui.hpp"
+#include "kernel/events/event_bus.hpp"
 
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>

@@ -1,4 +1,3 @@
-#include "core/id_factory.hpp"
 #include "grab/context.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
@@ -8,6 +7,7 @@
 #include "grab/ui.hpp"
 #include "kernel/action/transaction.hpp"
 #include "kernel/action/wait_engine.hpp"
+#include "kernel/identity/id_factory.hpp"
 #include "kernel/query/evaluator.hpp"
 #include "kernel/query/snapshot_tree_nav.hpp"
 #include "spi/event_source.hpp"

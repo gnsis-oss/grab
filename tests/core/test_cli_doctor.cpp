@@ -1,4 +1,4 @@
-#include "core/registry.hpp"
+#include "kernel/routing/registry.hpp"
 
 #include <gtest/gtest.h>
 

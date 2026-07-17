@@ -1,7 +1,7 @@
-#include "core/log.hpp"
-#include "core/provider.hpp"
-#include "core/registry.hpp"
 #include "grab/capability.hpp"
+#include "kernel/routing/provider.hpp"
+#include "kernel/routing/registry.hpp"
+#include "kernel/support/log.hpp"
 
 #include <algorithm>
 #include <cassert>

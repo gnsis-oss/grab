@@ -1,8 +1,8 @@
-#include "core/id_factory.hpp"
 #include "grab/capture.hpp"
 #include "grab/ids.hpp"
 #include "grab/image.hpp"
 #include "grab/space.hpp"
+#include "kernel/identity/id_factory.hpp"
 
 #include <cstddef>
 #include <cstdint>

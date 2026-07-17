@@ -1,4 +1,4 @@
-#include "core/log.hpp"
+#include "kernel/support/log.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
