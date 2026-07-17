@@ -47,8 +47,6 @@ add_executable(grab_core_tests
     event/test_browser_bridge.cpp
     event/test_event_descriptor.cpp
     event/test_payload_fields.cpp
-    event/test_state.cpp
-    event/test_state_source.cpp
     notify/test_notifier.cpp
     transport/test_codec.cpp
     storage/test_jsonl_sink.cpp
@@ -82,6 +80,8 @@ add_executable(grab_kernel_tests
     kernel/lifecycle/test_session_core.cpp
     kernel/lifecycle/test_observation_pump.cpp
     kernel/lifecycle/test_session_verbs.cpp
+    kernel/graph/test_state_manager.cpp
+    kernel/graph/test_state_snapshot_provider.cpp
     kernel/test_ui.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp

@@ -37,6 +37,7 @@ namespace
     constexpr std::string_view activeChildChanged = "active_child.changed";
     constexpr auto             coalesceClass      = grab::CoalescingClass::Coalesce;
     constexpr auto             noReplayPolicy     = grab::ReplayPolicy::None;
+    constexpr auto             currentSetPolicy   = grab::ReplayPolicy::CurrentSet;
 
     static_assert( grab::detail::eventDescriptors.size() == descriptorCount );
     static_assert( grab::category_of( keyDownKind ) == inputCategory );
@@ -95,4 +96,5 @@ TEST( EventDescriptor,
     EXPECT_EQ( grab::wire_name( activeChildChangedKind ), activeChildChanged );
     EXPECT_EQ( grab::coalescing_class_of( nodeChangedKind ), coalesceClass );
     EXPECT_EQ( grab::replay_policy_of( nodeAddedKind ), noReplayPolicy );
+    EXPECT_EQ( grab::replay_policy_of( windowCreatedKind ), currentSetPolicy );
 }

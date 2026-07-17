@@ -113,7 +113,7 @@ namespace grab
             event_descriptor( EventKind::WindowCreated,
                               EventCategory::Window,
                               "window.created",
-                              ReplayPolicy::None,
+                              ReplayPolicy::CurrentSet,
                               CoalescingClass::NeverDrop ),
             event_descriptor( EventKind::WindowClosed,
                               EventCategory::Window,

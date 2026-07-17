@@ -1,4 +1,4 @@
-#pragma once
+#pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "grab/event.hpp"
 #include "grab/pid.hpp"
@@ -49,6 +49,10 @@ namespace grab::event
             [[nodiscard]]
             grab::Event
             snapshot( double timestamp ) const;
+
+            [[nodiscard]]
+            std::vector<grab::Event>
+            open_window_events( double timestamp ) const;
 
             void
             publish_snapshot( grab::EventBus& bus,

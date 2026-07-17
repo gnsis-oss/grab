@@ -83,6 +83,8 @@ add_library(grab_kernel STATIC
     src/kernel/capture/tile_differ.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp
+    src/kernel/graph/state_manager.cpp
+    src/kernel/graph/state_snapshot_provider.cpp
     src/kernel/query/evaluator.cpp
     src/kernel/query/locator.cpp
     src/kernel/query/snapshot_tree_nav.cpp
@@ -132,8 +134,6 @@ target_compile_features(grab_input PUBLIC cxx_std_23)
 
 add_library(grab_event STATIC
     src/event/browser_bridge.cpp
-    src/event/state.cpp
-    src/event/state_source.cpp
 )
 target_link_libraries(grab_event PUBLIC grab_core PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XINPUT PkgConfig::GRAB_DBUS_1)
 target_include_directories(grab_event PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
