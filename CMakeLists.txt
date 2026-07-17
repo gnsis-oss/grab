@@ -61,7 +61,7 @@ target_link_libraries(grab_core PRIVATE grab_vendor_l0)
 # The static-library cycles through grab_kernel and both drivers are intentional; CMake supports cycles among STATIC libraries.
 target_link_libraries(grab_core PRIVATE grab_driver_x11)
 target_link_libraries(grab_core PRIVATE grab_driver_atspi)
-# The core->driver_atspi->event->core component needs three repetitions because atspi.cpp.o is only pulled in the second pass and still needs Reactor from grab_core.
+# The core->driver_atspi->kernel->core component needs three repetitions because atspi_monitor.cpp.o is only pulled in the second pass and still needs Reactor from grab_core.
 set_target_properties(grab_core PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
 target_include_directories(grab_core PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
@@ -131,7 +131,6 @@ target_include_directories(grab_input PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/comp
 target_compile_features(grab_input PUBLIC cxx_std_23)
 
 add_library(grab_event STATIC
-    src/event/atspi.cpp
     src/event/window_x11.cpp
     src/event/browser_bridge.cpp
     src/event/state.cpp
@@ -207,16 +206,18 @@ target_include_directories(grab_driver_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_x11 PUBLIC cxx_std_23)
 
 add_library(grab_driver_atspi STATIC
+    src/drivers/semantic/atspi/atspi_monitor.cpp
     src/drivers/semantic/atspi/atspi_runtime.cpp
     src/drivers/semantic/atspi/atspi_tree_source.cpp
 )
 target_link_libraries(grab_driver_atspi
     PUBLIC
         grab_kernel
-        grab_event
+        # atspi_monitor.hpp exposes <dbus/dbus.h> types, so consumers of the
+        # driver header need the D-Bus include path.
+        PkgConfig::GRAB_DBUS_1
     PRIVATE
         grab_vendor_l0
-        PkgConfig::GRAB_DBUS_1
 )
 target_include_directories(grab_driver_atspi PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_atspi PUBLIC cxx_std_23)

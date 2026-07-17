@@ -47,7 +47,6 @@ add_executable(grab_core_tests
     event/test_browser_bridge.cpp
     event/test_event_descriptor.cpp
     event/test_payload_fields.cpp
-    event/test_atspi.cpp
     event/test_state.cpp
     event/test_state_source.cpp
     event/test_evdev.cpp
@@ -138,6 +137,7 @@ target_include_directories(grab_integration_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/tests)
 
 add_executable(grab_driver_atspi_tests
+    drivers/atspi/test_atspi.cpp
     drivers/atspi/test_atspi_mapping.cpp
     drivers/atspi/test_atspi_alias.cpp
     drivers/atspi/test_atspi_runtime.cpp

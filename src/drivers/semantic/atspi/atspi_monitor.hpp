@@ -3,11 +3,16 @@
 #include "grab/event.hpp"
 #include "grab/result.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <dbus/dbus.h>
+#include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace grab
 {
@@ -41,6 +46,42 @@ namespace grab::event
     decode_atspi_signal( const AtspiSignal& signal,
                          double             timestamp );
 
+    // Refcounted, demand-driven AT-SPI event registration. acquire()/release() track a
+    // per-event demand count; the injected registrar performs the actual D-Bus
+    // RegisterEvent (enable==true) / DeregisterEvent (enable==false) only on the
+    // 0->1 and 1->0 transitions. Thread-safe.
+    class AtspiEventRegistry
+    {
+        public:
+
+            using Registrar =
+                std::function<grab::Result<void>( std::string_view atspi_event,
+                                                  bool             enable )>;
+
+            explicit AtspiEventRegistry( Registrar registrar ) noexcept;
+
+            // 0->1 transition invokes registrar(name, true) and returns its Result;
+            // subsequent acquires just bump the count and return {}.
+            [[nodiscard]]
+            grab::Result<void>
+            acquire( std::string_view atspi_event );
+
+            // 1->0 transition invokes registrar(name, false); best-effort (errors
+            // swallowed).
+            void
+            release( std::string_view atspi_event ) noexcept;
+
+            [[nodiscard]]
+            std::size_t
+            demand( std::string_view atspi_event ) const noexcept;
+
+        private:
+
+            Registrar                                       registrar_;
+            mutable std::mutex                              mutex_;
+            std::map<std::string, std::size_t, std::less<>> refcounts_;
+    };
+
     class AtspiMonitor
     {
         public:
@@ -61,6 +102,16 @@ namespace grab::event
 
             void
             stop() noexcept;
+
+            // Acquire/release demand for the full built-in AT-SPI event set. Called by
+            // the runtime when subscriber demand for accessibility kinds
+            // appears/disappears.
+            [[nodiscard]]
+            grab::Result<void>
+            enable_events();
+
+            void
+            disable_events() noexcept;
 
         private:
 

@@ -1,6 +1,6 @@
 #include "core/ascii.hpp"
 #include "core/reactor.hpp"
-#include "event/atspi.hpp"
+#include "drivers/semantic/atspi/atspi_monitor.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <dbus/dbus.h>
 #include <expected>
@@ -40,13 +41,14 @@ namespace grab::event
                                                  static_cast<std::uint32_t>( EPOLLHUP );
         constexpr const char*   a11yBusName    = "org.a11y.Bus";
         constexpr const char*   a11yBusPath    = "/org/a11y/bus";
-        constexpr const char*   a11yBusInterface     = "org.a11y.Bus";
-        constexpr const char*   getAddressMethod     = "GetAddress";
-        constexpr const char*   registryName         = "org.a11y.atspi.Registry";
-        constexpr const char*   registryPath         = "/org/a11y/atspi/registry";
-        constexpr const char*   registryInterface    = "org.a11y.atspi.Registry";
-        constexpr const char*   registerEventMethod  = "RegisterEvent";
-        constexpr const char*   objectEventInterface = "org.a11y.atspi.Event.Object";
+        constexpr const char*   a11yBusInterface      = "org.a11y.Bus";
+        constexpr const char*   getAddressMethod      = "GetAddress";
+        constexpr const char*   registryName          = "org.a11y.atspi.Registry";
+        constexpr const char*   registryPath          = "/org/a11y/atspi/registry";
+        constexpr const char*   registryInterface     = "org.a11y.atspi.Registry";
+        constexpr const char*   registerEventMethod   = "RegisterEvent";
+        constexpr const char*   deregisterEventMethod = "DeregisterEvent";
+        constexpr const char*   objectEventInterface  = "org.a11y.atspi.Event.Object";
         constexpr const char*   objectEventMatch =
             "type='signal',interface='org.a11y.atspi.Event.Object'";
         constexpr std::string_view stateChangedMember = "StateChanged";
@@ -317,14 +319,84 @@ namespace grab::event
 
     }    // namespace
 
+    AtspiEventRegistry::AtspiEventRegistry( Registrar registrar ) noexcept :
+        registrar_( std::move( registrar ) )
+    {
+    }
+
+    grab::Result<void>
+    AtspiEventRegistry::acquire( std::string_view atspi_event )
+    {
+        const std::scoped_lock lock{ mutex_ };
+        const auto             refcount =
+            refcounts_.try_emplace( std::string{ atspi_event }, 0U ).first;
+        ++refcount->second;
+        if( refcount->second != 1U || !registrar_ )
+        {
+            return {};
+        }
+
+        auto registered = registrar_( atspi_event, true );
+        if( !registered.has_value() )
+        {
+            refcounts_.erase( refcount );
+        }
+        return registered;
+    }
+
+    void
+    AtspiEventRegistry::release( std::string_view atspi_event ) noexcept
+    {
+        try
+        {
+            const std::scoped_lock lock{ mutex_ };
+            const auto             refcount = refcounts_.find( atspi_event );
+            if( refcount == refcounts_.end() || refcount->second == 0U )
+            {
+                return;
+            }
+
+            --refcount->second;
+            if( refcount->second != 0U )
+            {
+                return;
+            }
+
+            refcounts_.erase( refcount );
+            if( registrar_ )
+            {
+                [[maybe_unused]]
+                const auto deregistered = registrar_( atspi_event, false );
+            }
+        }
+        catch( ... )
+        {
+            // Deregistration is best-effort and release() must not throw.
+            return;
+        }
+    }
+
+    std::size_t
+    AtspiEventRegistry::demand( std::string_view atspi_event ) const noexcept
+    {
+        const std::scoped_lock lock{ mutex_ };
+        const auto             refcount = refcounts_.find( atspi_event );
+        if( refcount == refcounts_.end() )
+        {
+            return 0U;
+        }
+        return refcount->second;
+    }
+
     struct AtspiMonitor::State : std::enable_shared_from_this<State>
     {
-            std::mutex                     mutex;
-            grab::core::Reactor*           reactor    = nullptr;
-            DBusConnection*                connection = nullptr;
-            grab::EventBus*                bus        = nullptr;
-            bool                           active     = true;
-            std::vector<WatchRegistration> watches;
+            std::mutex                          mutex;
+            grab::core::Reactor*                reactor    = nullptr;
+            DBusConnection*                     connection = nullptr;
+            grab::EventBus*                     bus        = nullptr;
+            std::unique_ptr<AtspiEventRegistry> registry;
+            bool                                active = true;
+            std::vector<WatchRegistration>      watches;
     };
 
     namespace
@@ -567,16 +639,48 @@ namespace grab::event
 
         [[nodiscard]]
         grab::Result<void>
-        register_events( DBusConnection* connection )
+        deregister_event( DBusConnection*  connection,
+                          std::string_view event_name )
         {
-            for( const std::string_view event_name : registeredEvents )
+            const DbusMessage request{
+                dbus_message_new_method_call( registryName,
+                                              registryPath,
+                                              registryInterface,
+                                              deregisterEventMethod )
+            };
+            if( request == nullptr )
             {
-                auto registered = register_event( connection, event_name );
-                if( !registered.has_value() )
-                {
-                    return registered;
-                }
+                return grab::fail( grab::ErrorCode::InternalFault,
+                                   "AT-SPI DeregisterEvent request allocation failed" );
             }
+
+            DBusMessageIter iterator{};
+            dbus_message_iter_init_append( request.get(), &iterator );
+            const std::string event_string{ event_name };
+            const char*       event_text = event_string.c_str();
+            if( dbus_message_iter_append_basic(
+                    &iterator,
+                    DBUS_TYPE_STRING,
+                    static_cast<const void*>( &event_text )
+                ) == 0 )
+            {
+                return grab::fail( grab::ErrorCode::InternalFault,
+                                   "AT-SPI DeregisterEvent argument allocation failed" );
+            }
+
+            DbusError         reply_error;
+            const DbusMessage reply{
+                dbus_connection_send_with_reply_and_block( connection,
+                                                           request.get(),
+                                                           dbusCallTimeoutMs,
+                                                           &reply_error.value )
+            };
+            if( reply == nullptr )
+            {
+                return std::unexpected( dbus_device_error( "AT-SPI DeregisterEvent",
+                                                           reply_error ) );
+            }
+
             return {};
         }
 
@@ -822,12 +926,6 @@ namespace grab::event
             return std::unexpected( std::move( connection.error() ) );
         }
 
-        auto registered = register_events( connection->get() );
-        if( !registered.has_value() )
-        {
-            return std::unexpected( std::move( registered.error() ) );
-        }
-
         auto matched = add_object_event_match( connection->get() );
         if( !matched.has_value() )
         {
@@ -869,8 +967,60 @@ namespace grab::event
                                "AT-SPI D-Bus watch registration failed" );
         }
 
+        DBusConnection* const registry_connection = connection->get();
+        state->registry                           = std::make_unique<AtspiEventRegistry>(
+            [registry_connection]( std::string_view event_name,
+                                   bool             enable ) -> grab::Result<void>
+            {
+                if( enable )
+                {
+                    return register_event( registry_connection, event_name );
+                }
+                return deregister_event( registry_connection, event_name );
+            }
+        );
         state->connection = connection->release();
         return AtspiMonitor{ reactor, std::move( state ) };
+    }
+
+    grab::Result<void>
+    AtspiMonitor::enable_events()
+    {
+        if( state_ == nullptr || state_->registry == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                               "AT-SPI event registry is unavailable" );
+        }
+
+        std::optional<grab::Error> first_error;
+        for( const std::string_view event_name : registeredEvents )
+        {
+            auto acquired = state_->registry->acquire( event_name );
+            if( !acquired.has_value() && !first_error.has_value() )
+            {
+                first_error.emplace( std::move( acquired.error() ) );
+            }
+        }
+
+        if( first_error.has_value() )
+        {
+            return std::unexpected( std::move( *first_error ) );
+        }
+        return {};
+    }
+
+    void
+    AtspiMonitor::disable_events() noexcept
+    {
+        if( state_ == nullptr || state_->registry == nullptr )
+        {
+            return;
+        }
+
+        for( const std::string_view event_name : registeredEvents )
+        {
+            state_->registry->release( event_name );
+        }
     }
 
     void
