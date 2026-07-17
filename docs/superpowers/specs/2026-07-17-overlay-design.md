@@ -18,12 +18,15 @@ an agent, later, over the wire) can *see* what grab observes and does: where a
 locator resolved, what a synthesized drag actually did, whether motion was
 physical or injected.
 
-**Design law:** the kernel owns everything about drawing; platform providers
-only blit. The platform contract is a rasterized ARGB frame + damage rects.
-This is what makes the same debug code portable across X11, Wayland
-compositors, win32, and macOS: the per-platform shim is ~100 lines of
-"present a buffer", and every drawing feature added later costs the backends
-nothing.
+**Design law:** the kernel owns the *vocabulary and the scene truth* —
+abstract, space-tagged shape records with declarative lifetime/animation
+policies. **Rendering and time belong to the delegate**: the per-platform
+provider receives scene deltas and draws them with whatever is native there
+(an ARGB X11 window today; the GNOME Shell stage, Direct2D, or CoreAnimation
+elsewhere), animating fades on its own frame clock. grab never runs a render
+loop and never ships pixels across a boundary; the same debug code is the
+same *scene*, not the same rasterization. Rendering fidelity may differ per
+delegate; semantics may not.
 
 ## 2. Non-goals (this spec)
 
@@ -42,18 +45,23 @@ nothing.
 
 ## 3. Kernel: `src/kernel/presentation/`
 
-Three platform-free components, unit-testable without any display.
+Platform-free components, unit-testable without any display.
 
-### 3.1 `overlay_scene.{hpp,cpp}` — retained scene
+### 3.1 `overlay_scene.{hpp,cpp}` — retained scene (source of truth)
 
 - Verbs: `add(Shape) -> ShapeId`, `update(ShapeId, Shape)`, `remove(ShapeId)`,
   `clear()`. `ShapeId` is generation-scoped like every other grab id.
 - Z-order: insertion order within two bands (`Band::Annotation` below
   `Band::Trail`), explicit `z` override per shape.
-- Lifetime policy per shape (closed enum): `Persistent`, `Ttl{ms}`,
-  `Fade{ms}` (alpha ramps to zero, then auto-remove).
-- Damage: every mutation and every fade tick yields minimal damage rects;
-  the scene never forces full-frame redraws in steady state.
+- Lifetime policy per shape (closed enum, **declarative — the delegate owns
+  time**): `Persistent`, `Ttl{ms}`, `Fade{ms}` (alpha ramps to zero, then
+  auto-removes). The scene records policies; it does not tick them. Expiry
+  bookkeeping in the scene is lazy (a `Ttl`/`Fade` shape is considered gone
+  after its deadline for query/resync purposes, no timer needed).
+- Output: an ordered stream of `SceneDelta`s (`Upsert{ShapeId, Shape}`,
+  `Remove{ShapeId}`, `Clear`), plus `snapshot()` returning the full live
+  scene for delegate (re)attachment — same resync semantics as TreeStore
+  (gap ⇒ full snapshot). Upserts are idempotent by id+generation.
 
 ### 3.2 Primitive vocabulary (closed, table-driven)
 
@@ -72,46 +80,59 @@ The scene transforms into the surface's space through the space graph at
 rasterization time. Untagged coordinates do not exist in the API (invariant
 #3); "draw this Match's bounds" is provenance-correct by construction.
 
-### 3.3 `overlay_raster.{hpp,cpp}` — rasterizer
+### 3.3 `overlay_raster.{hpp,cpp}` — reference renderer (a library, not the contract)
 
-In-tree anti-aliased scanline rasterizer producing the premultiplied-ARGB
-`grab::Image` frame + damage rects. No new dependencies (dependency policy:
-the PNG codec precedent — we own pixel code). Golden-frame tested (§9).
+In-tree anti-aliased scanline rasterizer: scene → premultiplied-ARGB
+`grab::Image` + damage rects. It is **not** part of the SPI — it exists for
+delegates that have no native scene graph (the X11 delegate uses it
+internally) and as the normative rendering reference for golden-frame tests
+(§9). No new dependencies (dependency policy: the PNG codec precedent — we
+own pixel code).
 
 ### 3.4 `trail_animator.{hpp,cpp}` — the trail as a scene client
 
 Consumes origin-stamped pointer-motion events from the bus subscription
-surface; appends fading `Path` segments into the `Trail` band:
-red = `EventOrigin::Physical`, blue = `EventOrigin::InjectedSelf`
-(defaults; CLI-overridable). Default fade 1200 ms, width 3 px. Motion
-coalescing on the bus under backpressure is acceptable and intentionally
-visible — the trail shows what subscribers actually see.
+surface; appends `Path` segments carrying `Fade{fade_ms}` into the `Trail`
+band: red = `EventOrigin::Physical`, blue = `EventOrigin::InjectedSelf`
+(defaults; CLI-overridable). Default fade 1200 ms, width 3 px. The animator
+emits at motion rate and never ticks a frame — fading is the delegate's job.
+Motion coalescing on the bus under backpressure is acceptable and
+intentionally visible — the trail shows what subscribers actually see.
 
 ### 3.5 Pacing
 
-Frame tick (target 60 Hz, damage-gated: skip when no damage) rides the
-existing `PacingGovernor` + reactor timer. No raw sleeps (invariant #14).
+The kernel runs **no render loop**. A delegate that must self-render (X11)
+drives its own frame tick (target 60 Hz, damage-gated) with the existing
+`PacingGovernor` + reactor timer inside the driver. No raw sleeps
+(invariant #14) — the rule binds delegates too.
 
-## 4. SPI: `src/spi/overlay_surface.hpp`
+## 4. SPI: `src/spi/overlay_delegate.hpp`
 
 ```cpp
-class OverlaySurface
+class OverlayDelegate
 {
   public:
-    virtual Result<void> open( geometry::Size size, CoordinateSpaceId space ) = 0;
-    virtual Result<void> present( const Image& argb_premultiplied,
-                                  std::span<const geometry::Rectangle> damage ) = 0;
+    virtual Result<void> open( CoordinateSpaceId space ) = 0;
+    virtual Result<void> apply( std::span<const SceneDelta> deltas ) = 0;
+    virtual Result<void> resync( const SceneSnapshot& scene ) = 0;
     virtual void         close() = 0;
 };
 ```
 
-- `open` declares the surface's coordinate space (its transform is registered
-  in the space graph by the providing runtime).
-- `present` blits only the damage; the full frame is available for providers
-  that cannot partial-blit.
-- The surface is click-through and top-most by contract; a provider that
-  cannot guarantee both must not register the capability.
-- `Runtime` gains `virtual OverlaySurface* overlay_surface()` (nullptr when
+- The contract is the **abstract scene**, not pixels: shape records with
+  style, space-tagged geometry, and declarative lifetime/animation policies.
+  How they become pixels — and on whose frame clock they fade — is entirely
+  the delegate's business (mutter-composited ARGB window, GNOME Shell stage,
+  Direct2D, CoreAnimation).
+- `open` declares the delegate's coordinate space (its transform is
+  registered in the space graph by the providing runtime); the kernel
+  transforms shape geometry into that space before `apply`.
+- `resync` replaces delegate state with a full snapshot — used at attach and
+  after any gap (same law as TreeStore: gap ⇒ resnapshot, never a diff
+  guess).
+- The rendered surface is click-through and top-most by contract; a delegate
+  that cannot guarantee both must not register the capability.
+- `Runtime` gains `virtual OverlayDelegate* overlay_delegate()` (nullptr when
   unsupported), symmetric with `InputSeat*`/`TreeSource*`.
 
 ## 5. Capability + resolution
@@ -138,13 +159,16 @@ shows it like any other capability).
 
 ## 7. Providers (folder abstraction)
 
+Every delegate renders the abstract scene with its native machinery; only
+delegates lacking a native scene graph reuse the in-tree reference renderer.
+
 | Path | Mechanism | Status |
 |---|---|---|
-| `src/drivers/desktop/x11/overlay_surface.cpp` | ARGB override-redirect window on the composited screen; `_NET_WM_STATE_ABOVE`; XFixes empty *input* region (click-through); XShm blit; on unredirected/fullscreen contexts falls back to full-frame present | **Phase 1 (now)** |
-| `src/drivers/desktop/wayland/layer_shell_surface.cpp` | `zwlr_layer_shell_v1` overlay layer + `wl_shm`, empty input region | later (KDE/wlroots) |
-| `src/drivers/desktop/wayland/gnome_shell_bridge.cpp` | thin JS GNOME Shell extension drawing on the Clutter stage, fed damage-limited frames over the daemon socket; the extension owns zero logic | later (with WP10) |
-| `src/drivers/desktop/win32/layered_overlay.cpp` | `WS_EX_LAYERED\|WS_EX_TRANSPARENT\|WS_EX_TOPMOST` + `UpdateLayeredWindow` | later |
-| `src/drivers/desktop/macos/overlay_window.cpp` | borderless `NSWindow` at overlay window level, `ignoresMouseEvents` | later |
+| `src/drivers/desktop/x11/overlay_delegate.cpp` | ARGB override-redirect window on the composited screen; `_NET_WM_STATE_ABOVE`; XFixes empty *input* region (click-through); renders via the reference renderer + XShm blit on its own PacingGovernor-driven tick | **Phase 1 (now)** |
+| `src/drivers/desktop/wayland/gnome_shell_delegate.cpp` | thin JS GNOME Shell extension drawing/animating on the Clutter stage (native fades); receives **scene deltas** over the daemon socket; the extension owns rendering, zero semantics; serves GNOME X11 *and* Wayland | later (with WP10) |
+| `src/drivers/desktop/wayland/layer_shell_delegate.cpp` | `zwlr_layer_shell_v1` overlay layer + `wl_shm`, empty input region; reference renderer + own tick | later (KDE/wlroots) |
+| `src/drivers/desktop/win32/overlay_delegate.cpp` | `WS_EX_LAYERED\|WS_EX_TRANSPARENT\|WS_EX_TOPMOST`; renders scene natively via Direct2D (its own fades) | later |
+| `src/drivers/desktop/macos/overlay_delegate.cpp` | borderless `NSWindow` at overlay level, `ignoresMouseEvents`; CoreAnimation layers animate fades natively | later |
 
 The X11 provider must handle: RandR geometry changes (reopen at new size,
 space graph updated), compositor absence (no ARGB visual → typed
@@ -152,7 +176,7 @@ space graph updated), compositor absence (no ARGB visual → typed
 overlay by default — seeing the annotation in the screenshot is usually the
 point. An opt-out (`capture --without-overlay`, implemented as hide →
 capture → show around the capture critical section via a `set_visible()`
-on the surface) is Phase 2.
+on the delegate) is Phase 2.
 
 ## 8. Error handling
 
@@ -164,19 +188,26 @@ per invariant #15.
 
 ## 9. Testing
 
-1. **Scene unit tests** — id/generation semantics, lifetime policies, damage
-   minimality (mutating one shape damages only its bounds union).
-2. **Rasterizer golden frames** — scripted scenes rendered and compared
-   against committed PNGs (decoded by our own codec); antialiasing tolerance
-   band documented in the test.
-3. **Trail animator** — scripted motion event sequences (both origins) →
-   expected segment set; coalescing-under-backpressure behavior pinned.
-4. **Ring-3 self-verifying (Xvfb)** — the flagship test: open a session,
+1. **Scene unit tests** — id/generation semantics, delta emission order,
+   lazy expiry, `snapshot()`/resync equivalence (applying the delta stream
+   and applying the snapshot yield the same scene).
+2. **Delegate conformance (fake delegate)** — a recording `OverlayDelegate`
+   asserts the SPI contract from the consumer side: idempotent upserts,
+   gap ⇒ resync, space-transformed geometry.
+3. **Reference renderer golden frames** — scripted scenes rendered and
+   compared against committed PNGs (decoded by our own codec); antialiasing
+   tolerance band documented in the test. Golden frames bind the *reference
+   renderer only* — native delegates may differ in fidelity, never in
+   which shapes exist where.
+4. **Trail animator** — scripted motion event sequences (both origins) →
+   expected segment set with `Fade` policies; coalescing-under-backpressure
+   behavior pinned.
+5. **Ring-3 self-verifying (Xvfb)** — the flagship test: open a session,
    draw a rect via the public API, run the trail, synthesize a drag through
    grab's own input path, capture through grab's own capture path, assert
    rect pixels and blue trail pixels along the drag line. Overlay, input,
    and capture dogfooded in one test.
-5. **Invariant CI** — `overlay.hpp` added to the public-header allowlist in
+6. **Invariant CI** — `overlay.hpp` added to the public-header allowlist in
    the same commit that creates it; kernel-platform-free rule already covers
    `src/kernel/presentation/`.
 
