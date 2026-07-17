@@ -1,5 +1,5 @@
-#include "core/monitor.hpp"
 #include "kernel/support/environment.hpp"
+#include "spi/monitor.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

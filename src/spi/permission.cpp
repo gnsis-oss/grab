@@ -1,7 +1,7 @@
-#include "core/permission.hpp"
 #include "grab/result.hpp"
 #include "kernel/support/posix_mkstemp.hpp"
 #include "kernel/support/posix_open.h"
+#include "spi/permission.hpp"
 
 #include <algorithm>
 #include <cerrno>
