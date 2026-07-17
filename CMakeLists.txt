@@ -43,7 +43,7 @@ add_library(grab_core STATIC
     src/kernel/routing/doctor.cpp
     src/core/event_bus.cpp
     src/kernel/identity/id_factory.cpp
-    src/core/posix_open.c
+    src/kernel/support/posix_open.c
     src/core/permission.cpp
     src/kernel/lifecycle/process_ref.cpp
     src/kernel/routing/prober.cpp

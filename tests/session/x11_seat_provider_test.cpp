@@ -1,6 +1,6 @@
-#include "core/environment.hpp"
 #include "grab/capability.hpp"
 #include "grab/workspace.hpp"
+#include "kernel/support/environment.hpp"
 #include "session/x11_seat_provider.hpp"
 
 // clang-format off

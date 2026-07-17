@@ -1,7 +1,7 @@
-#include "core/log.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/workspace.hpp"
+#include "kernel/support/log.hpp"
 #include "session/manager.hpp"
 #include "session/provider.hpp"
 #include "session/record.hpp"

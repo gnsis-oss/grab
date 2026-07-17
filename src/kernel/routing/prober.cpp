@@ -1,6 +1,6 @@
-#include "core/environment.hpp"
-#include "core/posix_open.h"
 #include "kernel/routing/prober.hpp"
+#include "kernel/support/environment.hpp"
+#include "kernel/support/posix_open.h"
 
 #include <algorithm>
 #include <filesystem>

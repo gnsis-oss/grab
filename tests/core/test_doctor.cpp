@@ -1,8 +1,8 @@
-#include "core/environment.hpp"
 #include "core/fake_provider.hpp"
 #include "grab/capability.hpp"
 #include "kernel/routing/doctor.hpp"
 #include "kernel/routing/registry.hpp"
+#include "kernel/support/environment.hpp"
 
 #include <gtest/gtest.h>
 #include <memory>

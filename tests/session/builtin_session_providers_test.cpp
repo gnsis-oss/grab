@@ -1,5 +1,5 @@
-#include "core/environment.hpp"
 #include "grab/workspace.hpp"
+#include "kernel/support/environment.hpp"
 #include "session/builtin_session_providers.hpp"
 #include "session/selection.hpp"
 

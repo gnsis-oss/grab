@@ -1,11 +1,11 @@
-#include "core/environment.hpp"
-#include "core/log.hpp"
 #include "grab/capability.hpp"
 #include "grab/enum_table.hpp"
 #include "kernel/routing/doctor.hpp"
 #include "kernel/routing/provider.hpp"
 #include "kernel/routing/registry.hpp"
 #include "kernel/routing/resolver.hpp"
+#include "kernel/support/environment.hpp"
+#include "kernel/support/log.hpp"
 
 #include <algorithm>
 #include <array>

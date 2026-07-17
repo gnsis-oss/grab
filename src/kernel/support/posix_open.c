@@ -1,4 +1,4 @@
-#include "core/posix_open.h"
+#include "kernel/support/posix_open.h"
 
 #include <errno.h>
 #include <fcntl.h>

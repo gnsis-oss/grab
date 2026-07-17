@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/ascii.hpp"
+#include "kernel/support/ascii.hpp"
 
 #include <algorithm>
 #include <string>
