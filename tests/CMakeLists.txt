@@ -74,7 +74,7 @@ add_executable(grab_kernel_tests
     kernel/action/test_wait_engine.cpp
     kernel/capture/test_damage_hint_auditor.cpp
     kernel/capture/test_inject_gate.cpp
-    kernel/capture/test_pacing_governor.cpp
+    kernel/scheduling/test_pacing_governor.cpp
     kernel/capture/test_tile_differ.cpp
     kernel/lifecycle/test_session_core.cpp
     kernel/lifecycle/test_observation_pump.cpp

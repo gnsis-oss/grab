@@ -1,10 +1,10 @@
 #include "grab/result.hpp"
-#include "kernel/capture/pacing_governor.hpp"
+#include "kernel/scheduling/pacing_governor.hpp"
 
 #include <chrono>
 #include <cstdint>
 
-namespace grab::kernel::capture
+namespace grab::kernel::scheduling
 {
     namespace
     {
@@ -47,4 +47,4 @@ namespace grab::kernel::capture
         return from + interval_;
     }
 
-}    // namespace grab::kernel::capture
+}    // namespace grab::kernel::scheduling

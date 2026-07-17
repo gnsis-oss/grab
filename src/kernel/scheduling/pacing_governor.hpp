@@ -5,7 +5,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace grab::kernel::capture
+namespace grab::kernel::scheduling
 {
 
     // Single source of truth for frame pacing: turns a target frame rate into
@@ -33,4 +33,4 @@ namespace grab::kernel::capture
             std::chrono::nanoseconds interval_;
     };
 
-}    // namespace grab::kernel::capture
+}    // namespace grab::kernel::scheduling

@@ -79,7 +79,7 @@ add_library(grab_kernel STATIC
     src/kernel/action/wait_engine.cpp
     src/kernel/capture/damage_hint_auditor.cpp
     src/kernel/capture/inject_gate.cpp
-    src/kernel/capture/pacing_governor.cpp
+    src/kernel/scheduling/pacing_governor.cpp
     src/kernel/capture/tile_differ.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp

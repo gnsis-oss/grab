@@ -3,7 +3,7 @@
 #include "grab/capture.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
-#include "kernel/capture/pacing_governor.hpp"
+#include "kernel/scheduling/pacing_governor.hpp"
 #include "kernel/scheduling/reactor.hpp"
 
 #include <array>
@@ -405,7 +405,7 @@ namespace grab::screen
                 }
 
                 auto governor_result =
-                    grab::kernel::capture::PacingGovernor::for_fps( options.fps );
+                    grab::kernel::scheduling::PacingGovernor::for_fps( options.fps );
                 if( !governor_result.has_value() )
                 {
                     return std::unexpected( std::move( governor_result.error() ) );
@@ -931,14 +931,14 @@ namespace grab::screen
                 }
             }
 
-            mutable std::mutex                                   mutex;
-            grab::core::Reactor*                                 reactor = nullptr;
-            grab::drivers::desktop::x11::X11CaptureRoute         route;
-            RecordOptions                                        options;
-            std::optional<grab::kernel::capture::PacingGovernor> governor;
-            std::uint32_t                                        width  = 0U;
-            std::uint32_t                                        height = 0U;
-            std::uint32_t              max_frames                       = noFrameLimit;
+            mutable std::mutex                                      mutex;
+            grab::core::Reactor*                                    reactor = nullptr;
+            grab::drivers::desktop::x11::X11CaptureRoute            route;
+            RecordOptions                                           options;
+            std::optional<grab::kernel::scheduling::PacingGovernor> governor;
+            std::uint32_t                                           width  = 0U;
+            std::uint32_t                                           height = 0U;
+            std::uint32_t              max_frames     = noFrameLimit;
             std::uint32_t              frame_count    = noFramesWritten;
             std::int64_t               next_pts       = firstPresentationTime;
             AVPixelFormat              source_pix     = AV_PIX_FMT_NONE;
