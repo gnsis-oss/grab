@@ -1,50 +1,54 @@
-#include "core/reactor.hpp"
-#include "event/evdev.hpp"
+#include "drivers/device/evdev/evdev_source.hpp"
+#include "grab/context.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
+#include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
+#include "spi/event_source.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <expected>
 #include <fcntl.h>
+#include <functional>
 #include <iterator>
 #include <linux/input.h>
 #include <linux/input-event-codes.h>
 #include <memory>
 #include <mutex>
+#include <poll.h>
+#include <set>
 #include <string>
 #include <string_view>
-#include <sys/epoll.h>    // IWYU pragma: keep
 #include <sys/types.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
-namespace grab::event
+namespace grab::drivers::device::evdev
 {
     namespace
     {
 
-        constexpr int           invalidFd         = -1;
-        constexpr int           noError           = 0;
-        constexpr int           posixFailure      = -1;
-        constexpr int           openFlags         = O_RDONLY | O_NONBLOCK | O_CLOEXEC;
-        constexpr int           keyReleaseValue   = 0;
-        constexpr int           keyPressValue     = 1;
-        constexpr int           keyRepeatValue    = 2;
-        constexpr ssize_t       endOfFile         = 0;
-        constexpr std::uint64_t noToken           = 0U;
-        constexpr std::uint32_t noEvents          = 0U;
-        constexpr std::size_t   readChunkBytes    = 4'096U;
-        constexpr double        microsecondsInSec = 1'000'000.0;
-        constexpr std::uint32_t readableEvents = static_cast<std::uint32_t>( EPOLLIN ) |
-                                                 static_cast<std::uint32_t>( EPOLLERR ) |
-                                                 static_cast<std::uint32_t>( EPOLLHUP );
+        constexpr int         invalidFd         = -1;
+        constexpr int         noError           = 0;
+        constexpr int         posixFailure      = -1;
+        constexpr int         openFlags         = O_RDONLY | O_NONBLOCK | O_CLOEXEC;
+        constexpr int         keyReleaseValue   = 0;
+        constexpr int         keyPressValue     = 1;
+        constexpr int         keyRepeatValue    = 2;
+        constexpr ssize_t     endOfFile         = 0;
+        constexpr std::size_t readChunkBytes    = 4'096U;
+        constexpr double      microsecondsInSec = 1'000'000.0;
+        constexpr decltype( pollfd::revents ) noPollEvents            = 0;
+        constexpr std::size_t                 pollTargetCount         = 1U;
+        constexpr std::int64_t                minimumPollMilliseconds = 1;
+        constexpr std::int64_t                maximumPollMilliseconds = 1'000;
 
         struct ReadResult
         {
@@ -199,16 +203,6 @@ namespace grab::event
             }
         }
 
-        void
-        publish_pending_events( grab::EventBus&           bus,
-                                std::vector<grab::Event>& events ) noexcept
-        {
-            for( auto& event : events )
-            {
-                bus.publish( std::move( event ) );
-            }
-        }
-
         [[nodiscard]]
         ReadResult
         read_once( int                         input_fd,
@@ -232,134 +226,24 @@ namespace grab::event
             }
         }
 
-    }    // namespace
-
-    struct EvdevMonitor::State
-    {
-            std::mutex        mutex;
-            int               fd  = invalidFd;
-            grab::EventBus*   bus = nullptr;
-            std::vector<char> buffer;
-            bool              active = true;
-    };
-
-    EvdevMonitor::EvdevMonitor( grab::core::Reactor&   reactor,
-                                std::uint64_t          token,
-                                std::shared_ptr<State> state ) noexcept :
-        reactor_( &reactor ),
-        token_( token ),
-        state_( std::move( state ) )
-    {
-    }
-
-    EvdevMonitor::~EvdevMonitor()
-    {
-        stop();
-    }
-
-    EvdevMonitor::EvdevMonitor( EvdevMonitor&& other ) noexcept :
-        reactor_( std::exchange( other.reactor_,
-                                 nullptr ) ),
-        token_( std::exchange( other.token_,
-                               noToken ) ),
-        state_( std::move( other.state_ ) )
-    {
-    }
-
-    EvdevMonitor&
-    EvdevMonitor::operator=( EvdevMonitor&& other ) noexcept
-    {
-        if( this != &other )
+        void
+        drain_available( int                       input_fd,
+                         std::vector<char>&        buffer,
+                         bool&                     active,
+                         std::vector<grab::Event>& pending )
         {
-            stop();
-            reactor_ = std::exchange( other.reactor_, nullptr );
-            token_   = std::exchange( other.token_, noToken );
-            state_   = std::move( other.state_ );
-        }
-        return *this;
-    }
-
-    grab::Result<EvdevMonitor>
-    EvdevMonitor::open_device( const std::string&   path,
-                               grab::core::Reactor& reactor,
-                               grab::EventBus&      bus )
-    {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): POSIX open(2).
-        const int fd = ::open( path.c_str(), openFlags );
-        if( fd == posixFailure )
-        {
-            return std::unexpected( posix_device_error( "open evdev device", errno ) );
-        }
-
-        auto monitor = adopt_fd( fd, reactor, bus );
-        if( !monitor.has_value() )
-        {
-            const auto close_result = ::close( fd );
-            static_cast<void>( close_result );
-            return std::unexpected( std::move( monitor.error() ) );
-        }
-
-        return monitor;
-    }
-
-    grab::Result<EvdevMonitor>
-    EvdevMonitor::adopt_fd( int                  fd,
-                            grab::core::Reactor& reactor,
-                            grab::EventBus&      bus )
-    {
-        if( fd == invalidFd )
-        {
-            return grab::fail( grab::ErrorCode::InvalidArgument, "evdev fd is invalid" );
-        }
-
-        auto nonblocking = set_nonblocking( fd );
-        if( !nonblocking.has_value() )
-        {
-            return std::unexpected( std::move( nonblocking.error() ) );
-        }
-
-        auto state = std::make_shared<State>();
-        state->fd  = fd;
-        state->bus = &bus;
-
-        const auto token =
-            reactor.add_fd( fd,
-                            static_cast<std::uint32_t>( EPOLLIN ),
-                            [state]( std::uint32_t event_mask )
-                            {
-                                EvdevMonitor::handle_fd( state, event_mask );
-                            } );
-
-        return EvdevMonitor{ reactor, token, std::move( state ) };
-    }
-
-    void
-    EvdevMonitor::handle_fd( const std::shared_ptr<State>& state,
-                             std::uint32_t                 events )
-    {
-        if( ( events & readableEvents ) == noEvents )
-        {
-            return;
-        }
-
-        std::vector<grab::Event> pending_events;
-        grab::EventBus*          bus = nullptr;
-        {
-            const std::scoped_lock lock( state->mutex );
-            if( !state->active || state->fd == invalidFd || state->bus == nullptr )
+            if( !active )
             {
                 return;
             }
 
-            bus = state->bus;
-
             std::array<char, readChunkBytes> chunk{};
             while( true )
             {
-                const ReadResult read_result = read_once( state->fd, chunk );
+                const ReadResult read_result = read_once( input_fd, chunk );
                 if( read_result.bytes_read == endOfFile )
                 {
-                    state->active = false;
+                    active = false;
                     break;
                 }
 
@@ -369,84 +253,211 @@ namespace grab::event
                         EAGAIN &&
                         read_result.error_number != EWOULDBLOCK )
                     {
-                        state->active = false;
-                        state->buffer.clear();
+                        active = false;
+                        buffer.clear();
                     }
                     break;
                 }
 
-                state->buffer.insert(
-                    state->buffer.end(),
+                buffer.insert(
+                    buffer.end(),
                     chunk.begin(),
                     std::next( chunk.begin(),
                                static_cast<std::ptrdiff_t>( read_result.bytes_read ) )
                 );
-                drain_complete_records( state->buffer, pending_events );
-            }
-
-            if( ( events & static_cast<std::uint32_t>( EPOLLERR | EPOLLHUP ) ) !=
-                noEvents )
-            {
-                state->active = false;
-            }
-
-            if( !state->active )
-            {
-                state->buffer.clear();
+                drain_complete_records( buffer, pending );
             }
         }
 
-        if( bus != nullptr )
-        {
-            publish_pending_events( *bus, pending_events );
-        }
+    }    // namespace
+
+    EvdevSource::EvdevSource( int fd ) noexcept :
+        fd_{ fd }
+    {
     }
 
-    void
-    EvdevMonitor::stop() noexcept
+    EvdevSource::~EvdevSource()
     {
-        grab::core::Reactor* const reactor = std::exchange( reactor_, nullptr );
-        const std::uint64_t        token   = std::exchange( token_, noToken );
-        auto                       state   = std::move( state_ );
-
-        if( reactor != nullptr && token != noToken )
+        if( fd_ != invalidFd )
         {
-            bool remove_failed = false;
-            try
-            {
-                reactor->remove_fd( token );
-            }
-            catch( ... )
-            {
-                remove_failed = true;
-            }
-            static_cast<void>( remove_failed );
-        }
-
-        if( state == nullptr )
-        {
-            return;
-        }
-
-        int fd = invalidFd;
-        try
-        {
-            const std::scoped_lock lock( state->mutex );
-            state->active = false;
-            state->bus    = nullptr;
-            fd            = std::exchange( state->fd, invalidFd );
-            state->buffer.clear();
-        }
-        catch( ... )
-        {
-            return;
-        }
-
-        if( fd != invalidFd )
-        {
-            const auto close_result = ::close( fd );
+            const auto close_result = ::close( fd_ );
             static_cast<void>( close_result );
         }
     }
 
-}    // namespace grab::event
+    grab::Result<std::unique_ptr<EvdevSource>>
+    EvdevSource::open_device( const std::string& path )
+    {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): POSIX open(2).
+        const int fd = ::open( path.c_str(), openFlags );
+        if( fd == posixFailure )
+        {
+            return std::unexpected( posix_device_error( "open evdev device", errno ) );
+        }
+
+        auto source = adopt_fd( fd );
+        if( !source )
+        {
+            const auto close_result = ::close( fd );
+            static_cast<void>( close_result );
+            return std::unexpected( std::move( source.error() ) );
+        }
+
+        return source;
+    }
+
+    grab::Result<std::unique_ptr<EvdevSource>>
+    EvdevSource::adopt_fd( int fd )
+    {
+        if( fd == invalidFd )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument, "evdev fd is invalid" );
+        }
+
+        auto nonblocking = set_nonblocking( fd );
+        if( !nonblocking )
+        {
+            return std::unexpected( std::move( nonblocking.error() ) );
+        }
+
+        return std::unique_ptr<EvdevSource>{ new EvdevSource{ fd } };
+    }
+
+    void
+    EvdevSource::set_sink( EventSink sink )
+    {
+        std::scoped_lock lock{ sink_mutex_ };
+        sink_ = std::move( sink );
+    }
+
+    grab::Result<void>
+    EvdevSource::enable( const grab::spi::EventSpec& spec )
+    {
+        if( spec.name.empty() )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "evdev event name is empty" );
+        }
+
+        const std::scoped_lock lock{ state_mutex_ };
+        enabled_.insert( spec.name );
+        return {};
+    }
+
+    grab::Result<void>
+    EvdevSource::disable( const grab::spi::EventSpec& spec )
+    {
+        const std::scoped_lock lock{ state_mutex_ };
+        enabled_.erase( spec.name );
+        return {};
+    }
+
+    grab::Result<void>
+    EvdevSource::wait_for_event( const grab::spi::EventSpec&   spec,
+                                 const grab::OperationContext& context,
+                                 std::chrono::nanoseconds      maximum_wait )
+    {
+        if( maximum_wait < std::chrono::nanoseconds::zero() )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "evdev maximum wait is negative" );
+        }
+
+        auto checked = context.check();
+        if( !checked )
+        {
+            return std::unexpected( std::move( checked.error() ) );
+        }
+
+        const auto wake_at = std::chrono::steady_clock::now() +
+                             std::min( maximum_wait, context.deadline.remaining() );
+        const auto relevant_kind = grab::wire_kind( spec.name );
+
+        for( ;; )
+        {
+            checked = context.check();
+            if( !checked )
+            {
+                return std::unexpected( std::move( checked.error() ) );
+            }
+
+            std::vector<grab::Event> pending;
+            bool                     active{};
+            int                      input_fd = invalidFd;
+            {
+                const std::scoped_lock lock{ state_mutex_ };
+                input_fd = fd_;
+                drain_available( input_fd, buffer_, active_, pending );
+                active = active_;
+            }
+
+            bool relevant{};
+            if( !pending.empty() )
+            {
+                EventSink sink_copy;
+                {
+                    const std::scoped_lock lock{ sink_mutex_ };
+                    sink_copy = sink_;
+                }
+                if( sink_copy )
+                {
+                    for( auto& event : pending )
+                    {
+                        relevant =
+                            relevant || !relevant_kind || event.kind == *relevant_kind;
+                        sink_copy( std::move( event ) );
+                    }
+                }
+            }
+
+            if( relevant )
+            {
+                return {};
+            }
+            if( !active )
+            {
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
+                                   "evdev device closed" );
+            }
+
+            checked = context.check();
+            if( !checked )
+            {
+                return std::unexpected( std::move( checked.error() ) );
+            }
+
+            const auto now = std::chrono::steady_clock::now();
+            if( now >= wake_at )
+            {
+                // The wait engine re-checks its predicate after this budget-only wake.
+                return {};
+            }
+
+            pollfd poll_target{
+                .fd      = input_fd,
+                .events  = static_cast<decltype( pollfd::events )>( POLLIN ),
+                .revents = noPollEvents,
+            };
+            const auto         remaining              = wake_at - now;
+            const std::int64_t remaining_milliseconds = static_cast<std::int64_t>(
+                std::chrono::ceil<std::chrono::milliseconds>( remaining ).count()
+            );
+            const int timeout_milliseconds =
+                static_cast<int>( std::clamp( remaining_milliseconds,
+                                              minimumPollMilliseconds,
+                                              maximumPollMilliseconds ) );
+            const int ready =
+                ::poll( &poll_target, pollTargetCount, timeout_milliseconds );
+            if( ready < noError && errno == EINTR )
+            {
+                continue;
+            }
+            if( ready < noError )
+            {
+                return std::unexpected( posix_device_error( "poll evdev device",
+                                                            errno ) );
+            }
+        }
+    }
+
+}    // namespace grab::drivers::device::evdev

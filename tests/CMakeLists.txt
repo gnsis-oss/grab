@@ -49,7 +49,6 @@ add_executable(grab_core_tests
     event/test_payload_fields.cpp
     event/test_state.cpp
     event/test_state_source.cpp
-    event/test_evdev.cpp
     event/test_window_x11.cpp
     notify/test_notifier.cpp
     transport/test_codec.cpp
@@ -152,6 +151,18 @@ target_include_directories(grab_driver_atspi_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests)
 gtest_discover_tests(grab_driver_atspi_tests DISCOVERY_MODE PRE_TEST)
+
+add_executable(grab_driver_evdev_tests
+    drivers/device/evdev/test_evdev_source.cpp
+)
+target_link_libraries(grab_driver_evdev_tests PRIVATE
+    grab_driver_evdev
+    GTest::gtest_main
+)
+target_include_directories(grab_driver_evdev_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_driver_evdev_tests)
 
 # A7: self-provision the Xvfb displays the X-backed suites use so `ctest` is
 # self-contained (no manually-started display). Opt-out with -DGRAB_TEST_PROVISION_XVFB=OFF.

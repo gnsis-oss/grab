@@ -135,7 +135,6 @@ add_library(grab_event STATIC
     src/event/browser_bridge.cpp
     src/event/state.cpp
     src/event/state_source.cpp
-    src/event/evdev.cpp
 )
 target_link_libraries(grab_event PUBLIC grab_core PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XINPUT PkgConfig::GRAB_DBUS_1)
 target_include_directories(grab_event PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
@@ -204,6 +203,13 @@ target_link_libraries(grab_driver_x11
 )
 target_include_directories(grab_driver_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_x11 PUBLIC cxx_std_23)
+
+add_library(grab_driver_evdev STATIC
+    src/drivers/device/evdev/evdev_source.cpp
+)
+target_link_libraries(grab_driver_evdev PUBLIC grab_core)
+target_include_directories(grab_driver_evdev PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_driver_evdev PUBLIC cxx_std_23)
 
 add_library(grab_driver_atspi STATIC
     src/drivers/semantic/atspi/atspi_monitor.cpp
