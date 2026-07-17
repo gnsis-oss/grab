@@ -2,11 +2,11 @@
 
 #include "drivers/desktop/x11/injection_ledger.hpp"
 #include "drivers/desktop/x11/x11_capture_route.hpp"
+#include "drivers/desktop/x11/xcb_connection.hpp"
 #include "grab/event.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
 #include "kernel/graph/target_registry.hpp"
-#include "platform/x11/xcb_connection.hpp"
 #include "spi/runtime.hpp"
 
 #include <cstddef>

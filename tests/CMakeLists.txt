@@ -67,6 +67,7 @@ add_executable(grab_core_tests
 )
 target_link_libraries(grab_core_tests PRIVATE grab_core grab_vendor_l0 grab_codec grab_screen grab_image grab_event grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
 target_compile_definitions(grab_core_tests PRIVATE GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs")
 include(GoogleTest)
 
@@ -205,9 +206,9 @@ target_include_directories(grab_session_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${
 gtest_discover_tests(grab_session_tests)
 
 add_executable(grab_x11_tests
-    x11/xcb_reply_test.cpp
-    x11/xkb_keymap_test.cpp
-    x11/xi_seat_test.cpp
+    drivers/x11/xcb_reply_test.cpp
+    drivers/x11/xkb_keymap_test.cpp
+    drivers/x11/xi_seat_test.cpp
     session/x11_seat_provider_test.cpp
     session/builtin_session_providers_test.cpp
 )
