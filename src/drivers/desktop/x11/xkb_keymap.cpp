@@ -1,7 +1,7 @@
+#include "drivers/desktop/x11/xcb_connection.hpp"
+#include "drivers/desktop/x11/xkb_keymap.hpp"
 #include "grab/keymap.hpp"
 #include "grab/result.hpp"
-#include "platform/x11/xcb_connection.hpp"
-#include "platform/x11/xkb_keymap.hpp"
 
 #include <algorithm>
 #include <array>

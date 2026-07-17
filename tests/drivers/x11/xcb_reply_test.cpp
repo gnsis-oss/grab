@@ -1,4 +1,4 @@
-#include "platform/x11/xcb_reply.hpp"
+#include "drivers/desktop/x11/xcb_reply.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

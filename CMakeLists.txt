@@ -126,6 +126,7 @@ add_library(grab_input STATIC
 )
 target_link_libraries(grab_input PUBLIC grab_core grab_driver_x11 grab_input_x11 PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XTEST)
 target_include_directories(grab_input PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_include_directories(grab_input PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/compat/x11_relocation_shim)
 target_compile_features(grab_input PUBLIC cxx_std_23)
 
 add_library(grab_event STATIC
@@ -141,6 +142,7 @@ add_library(grab_event STATIC
 )
 target_link_libraries(grab_event PUBLIC grab_core PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XINPUT PkgConfig::GRAB_DBUS_1)
 target_include_directories(grab_event PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_include_directories(grab_event PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/compat/x11_relocation_shim)
 target_compile_features(grab_event PUBLIC cxx_std_23)
 
 add_library(grab_notify STATIC
@@ -166,8 +168,8 @@ target_include_directories(grab_session PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_session PUBLIC cxx_std_23)
 
 add_library(grab_platform_x11 STATIC
-    src/platform/x11/xcb_connection.cpp
-    src/platform/x11/xi_seat.cpp
+    src/drivers/desktop/x11/xcb_connection.cpp
+    src/drivers/desktop/x11/xi_seat.cpp
     src/session/x11_seat_provider.cpp
     src/session/builtin_session_providers.cpp
 )
@@ -222,7 +224,7 @@ target_include_directories(grab_driver_atspi PUBLIC ${CMAKE_CURRENT_LIST_DIR}/sr
 target_compile_features(grab_driver_atspi PUBLIC cxx_std_23)
 
 add_library(grab_input_x11 STATIC
-    src/platform/x11/xkb_keymap.cpp
+    src/drivers/desktop/x11/xkb_keymap.cpp
 )
 target_link_libraries(grab_input_x11 PUBLIC grab_platform_x11
     PkgConfig::GRAB_XKBCOMMON PkgConfig::GRAB_XKBCOMMON_X11)

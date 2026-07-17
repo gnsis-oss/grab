@@ -1,5 +1,5 @@
+#include "drivers/desktop/x11/xcb_connection.hpp"
 #include "grab/result.hpp"
-#include "platform/x11/xcb_connection.hpp"
 
 #include <string>
 #include <string_view>

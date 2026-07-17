@@ -1,7 +1,7 @@
+#include "drivers/desktop/x11/xcb_connection.hpp"
+#include "drivers/desktop/x11/xcb_reply.hpp"
+#include "drivers/desktop/x11/xi_seat.hpp"
 #include "grab/result.hpp"
-#include "platform/x11/xcb_connection.hpp"
-#include "platform/x11/xcb_reply.hpp"
-#include "platform/x11/xi_seat.hpp"
 
 #include <cstdint>
 #include <cstring>

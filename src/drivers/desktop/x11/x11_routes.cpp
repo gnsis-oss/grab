@@ -1,3 +1,4 @@
+#include "drivers/desktop/x11/protocol.hpp"
 #include "drivers/desktop/x11/x11_drag_recipe.hpp"
 #include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
@@ -7,7 +8,6 @@
 #include "grab/ui.hpp"
 #include "kernel/action/wait_engine.hpp"
 #include "kernel/query/snapshot_tree_nav.hpp"
-#include "platform/x11/protocol.hpp"
 #include "spi/tree_source.hpp"
 
 #include <chrono>

@@ -1,5 +1,5 @@
-#include "platform/x11/xcb_connection.hpp"
-#include "platform/x11/xi_seat.hpp"
+#include "drivers/desktop/x11/xcb_connection.hpp"
+#include "drivers/desktop/x11/xi_seat.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
