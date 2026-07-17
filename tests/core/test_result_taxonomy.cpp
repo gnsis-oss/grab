@@ -8,6 +8,13 @@ TEST( ResultTaxonomy,
 {
     EXPECT_EQ( grab::category_of( grab::ErrorCode::StaleNode ),
                grab::ErrorCategory::Target );
+    EXPECT_EQ( grab::name_of( grab::ErrorCode::StaleShape ), "stale_shape" );
+    EXPECT_EQ( grab::category_of( grab::ErrorCode::StaleShape ),
+               grab::ErrorCategory::Target );
+    EXPECT_EQ( grab::default_disposition_of( grab::ErrorCode::StaleShape ),
+               grab::ErrorDisposition::RetrySame );
+    EXPECT_EQ( grab::retry_class_of( grab::ErrorCode::StaleShape ),
+               grab::RetryClass::ResolveOnly );
     EXPECT_EQ( grab::category_of( grab::ErrorCode::PossiblyCommitted ),
                grab::ErrorCategory::Action );
     EXPECT_EQ( grab::category_of( grab::ErrorCode::QueueGap ),

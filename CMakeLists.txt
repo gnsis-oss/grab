@@ -85,6 +85,7 @@ add_library(grab_kernel STATIC
     src/kernel/graph/target_registry.cpp
     src/kernel/graph/state_manager.cpp
     src/kernel/graph/state_snapshot_provider.cpp
+    src/kernel/presentation/overlay_scene.cpp
     src/kernel/query/evaluator.cpp
     src/kernel/query/locator.cpp
     src/kernel/query/snapshot_tree_nav.cpp

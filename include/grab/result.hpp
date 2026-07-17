@@ -46,6 +46,7 @@ namespace grab
         StaleWindow           = 0X03'01,
         GeometryUntrusted     = 0X03'02,
         StaleNode             = 0X03'03,
+        StaleShape            = 0X03'0D,
         TreeResynced          = 0X03'04,
         RuntimeRestarted      = 0X03'05,
         TargetDetached        = 0X03'06,
@@ -97,7 +98,7 @@ namespace grab
     namespace detail
     {
 
-        inline constexpr std::size_t errorCodeCount = 45U;
+        inline constexpr std::size_t errorCodeCount = 46U;
 
         [[nodiscard]]
         constexpr ErrorDescriptor
@@ -179,6 +180,11 @@ namespace grab
                               RetryClass::Never ),
             error_descriptor( ErrorCode::StaleNode,
                               "stale_node",
+                              ErrorCategory::Target,
+                              ErrorDisposition::RetrySame,
+                              RetryClass::ResolveOnly ),
+            error_descriptor( ErrorCode::StaleShape,
+                              "stale_shape",
                               ErrorCategory::Target,
                               ErrorDisposition::RetrySame,
                               RetryClass::ResolveOnly ),

@@ -26,7 +26,7 @@ namespace
     constexpr int              answer                   = 42;
     constexpr auto             windowNotFoundCode   = grab::ErrorCode::WindowNotFound;
     constexpr std::string_view missingWindowMessage = "no such window";
-    constexpr std::size_t      errorDescriptorCount = 45U;
+    constexpr std::size_t      errorDescriptorCount = 46U;
 
 }    // namespace
 
