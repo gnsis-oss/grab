@@ -1,4 +1,4 @@
-#include "cli/common.hpp"
+#include "frontends/cli/common.hpp"
 #include "grab/command_descriptor.hpp"
 
 // clang-format off

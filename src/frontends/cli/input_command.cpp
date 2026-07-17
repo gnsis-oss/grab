@@ -1,5 +1,5 @@
-#include "cli/common.hpp"
-#include "cli/input_command.hpp"
+#include "frontends/cli/common.hpp"
+#include "frontends/cli/input_command.hpp"
 #include "grab/drag.hpp"
 #include "grab/geometry/point.hpp"
 #include "grab/input.hpp"

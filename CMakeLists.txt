@@ -278,9 +278,9 @@ target_include_directories(grab_service PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_service PUBLIC cxx_std_23)
 
 add_executable(grab_cli
-    src/cli/main.cpp
-    src/cli/input_command.cpp
-    src/cli/session_command.cpp
+    src/frontends/cli/main.cpp
+    src/frontends/cli/input_command.cpp
+    src/frontends/cli/session_command.cpp
 )
 set_target_properties(grab_cli PROPERTIES OUTPUT_NAME grab)
 target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_service
