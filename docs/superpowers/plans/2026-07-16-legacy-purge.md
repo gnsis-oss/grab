@@ -247,6 +247,21 @@ Public header purge (allowlist shrinks to the §12 list + blessed WP0 additions 
 
 **Final gate:** `src/{core,event,input,platform}` do not exist; `legacy_budget.txt` is empty and both it and its check are removed from the ratchet script (allowlist check stays permanently); `check_invariants.sh` gains the kernel-platform-free rule for the new subdirs; full suite green; authorship single-identity across the whole purge range.
 
+> **Final gate CLOSED (2026-07-17).** Residue after Wave 6 was the two facade
+> impls still living in budgeted dirs. Ruling on their location: both are
+> X11-bound compositions of driver primitives (`Input` = XTest seat + xkb
+> keymap + drag recipe; `Screen` = X11 capture route + xcb EWMH active-window),
+> so their named concern is the X11 driver — relocated as
+> `src/drivers/desktop/x11/{input_facade,screen_facade}.cpp` with CMake targets
+> and link edges unchanged (kernel stays platform-free; public headers
+> `input.hpp`/`screen.hpp` stay allowlisted facades). `src/screen` dissolved
+> along with the gate's named four. Budget file + ratchet check deleted; the
+> permanent allowlist check moved to `tests/scripts/check_public_headers.sh`
+> (ctest `grab_public_header_allowlist`). The kernel-platform-free rule already
+> covers every Wave-6 subdir (`check_invariants.sh` rule 5, recursive). Suite:
+> 425 tests green (the 3 known Xvfb/daemon-socket parallel flakes pass
+> serially). Authorship: single identity verified over the full purge range.
+
 ## Explicitly out of scope (additions, not purge)
 
 `facet.hpp`/`application.hpp` contracts, safety policy, `PinnedTarget`, provider pushdown, PixelDensity, Wayland/agent phases — tracked by the canonical plan, not this document. This plan only removes what the audit proved replaced-but-undeleted, and wires exactly as much as deletion requires.
