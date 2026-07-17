@@ -1,7 +1,13 @@
 # Spec: overlay — click-through annotation surface (scene, rasterizer, trail)
 
 - **Date:** 2026-07-17
-- **Status:** approved design (brainstorm with user); implementation plan to follow
+- **Status:** rev3 — Codex (`gpt-5.6-sol`) adversarial review: 27 findings, 24
+  folded (revisioned delta envelope, lifetime metadata, X11 stacking/compositor
+  corrections, capture matrix, flush fence, ownership ruling), 1 rejected
+  (public-header allowlist check *does* exist: `check_public_headers.sh`), 2
+  partially accepted (no Phase-1 multi-client broker — per-Session ownership
+  instead; "top-most" contract qualified rather than dropped). Awaiting user
+  approval; implementation plan to follow.
 - **Relation to the canonical architecture:** an *addition* under the
   2026-07-13 canonical spec's rules — new named kernel concern, new SPI
   surface, new capability row, one public header (allowlist addition). It
@@ -49,36 +55,60 @@ Platform-free components, unit-testable without any display.
 
 ### 3.1 `overlay_scene.{hpp,cpp}` — retained scene (source of truth)
 
-- Verbs: `add(Shape) -> ShapeId`, `update(ShapeId, Shape)`, `remove(ShapeId)`,
-  `clear()`. `ShapeId` is generation-scoped like every other grab id.
+- Verbs (all `[[nodiscard]] Result`-returning): `add(Shape) -> Result<ShapeId>`,
+  `update(ShapeId, Shape) -> Result<void>`, `remove(ShapeId) -> Result<void>`,
+  `clear()`. `ShapeId = {scene_epoch, slot}`; `clear()` atomically increments
+  the epoch, so every pre-clear id yields a typed staleness error on reuse
+  (table-backed code, reusing the existing staleness family if a fitting code
+  exists, else one new descriptor row per invariant #15).
+- **Revisions:** every mutation gets a monotonically increasing `revision`
+  within the current epoch. `update` does not reset a shape's lifetime unless
+  the lifetime policy itself is replaced.
 - Z-order: insertion order within two bands (`Band::Annotation` below
-  `Band::Trail`), explicit `z` override per shape.
-- Lifetime policy per shape (closed enum, **declarative — the delegate owns
-  time**): `Persistent`, `Ttl{ms}`, `Fade{ms}` (alpha ramps to zero, then
-  auto-removes). The scene records policies; it does not tick them. Expiry
-  bookkeeping in the scene is lazy (a `Ttl`/`Fade` shape is considered gone
-  after its deadline for query/resync purposes, no timer needed).
-- Output: an ordered stream of `SceneDelta`s (`Upsert{ShapeId, Shape}`,
-  `Remove{ShapeId}`, `Clear`), plus `snapshot()` returning the full live
-  scene for delegate (re)attachment — same resync semantics as TreeStore
-  (gap ⇒ full snapshot). Upserts are idempotent by id+generation.
+  `Band::Trail`), explicit `z` override *within* a band only; ties break by
+  insertion order.
+- Lifetime policy per shape (closed enum): `Persistent`, `Ttl{ms}`,
+  `Fade{ms}`. **The kernel owns logical time; delegates own scheduling**:
+  each non-persistent shape record carries kernel-stamped `started_at`
+  (session-monotonic ms) alongside its policy, so a delegate — including one
+  attaching mid-life via resync — computes remaining duration instead of
+  restarting it. The scene does not tick timers; expiry is bookkept via a
+  deadline index drained opportunistically on every mutation/query (bounding
+  retained state even for a motion-rate trail; revision and staleness
+  semantics are preserved for drained shapes).
+- Output: an ordered stream of enveloped `SceneDelta`s —
+  `{scene_epoch, revision, Upsert{ShapeId, Shape} | Remove{ShapeId} | Clear}` —
+  plus `snapshot()` returning the full live scene stamped
+  `{scene_epoch, through_revision}`. Consumers must apply revisions
+  contiguously within an epoch; any discontinuity or epoch change is a gap ⇒
+  full `resync` (same law as TreeStore), resuming deltas after
+  `through_revision`. Duplicate or older revisions are ignored (this, not
+  bare id+generation, is what makes upserts idempotent and replay-safe).
 
 ### 3.2 Primitive vocabulary (closed, table-driven)
 
 | Shape | Geometry | Notes |
 |---|---|---|
-| `Path` | polyline points and/or beziers (`geometry/curve.hpp` forms) | open or closed |
+| `Path` | ordered command list `Move / Line / Bezier / Close` (bezier control points per `geometry/curve.hpp` forms) | open or closed; the closed grammar, not "points and/or curves" |
 | `Rect` | `geometry/rectangle.hpp` | |
 | `Ellipse` | center + radii | circle = equal radii |
 | `Polygon` | point list, closed | |
 
 Style on every shape: stroke `{color RGBA, width px}`, optional fill
-`{color RGBA}`. Alpha is part of color; the surface is premultiplied ARGB.
+`{color RGBA}`. **Rendering rules are closed so delegates cannot diverge
+semantically:** fill rule = nonzero winding; stroke caps/joins = round;
+stroke width is *device-space* pixels (unscaled by geometry transforms);
+fade interpolation = linear alpha over the remaining duration; invalid
+geometry (NaN/inf, negative radii, empty path) is rejected at `add`/`update`
+with `InvalidArgument`, never passed to a delegate.
 
-**Coordinates:** every point/rect in a shape carries its `CoordinateSpaceId`.
-The scene transforms into the surface's space through the space graph at
-rasterization time. Untagged coordinates do not exist in the API (invariant
-#3); "draw this Match's bounds" is provenance-correct by construction.
+**Coordinates:** every point/rect in a shape carries its `CoordinateSpaceId`;
+untagged coordinates do not exist in the API (invariant #3). **The transform
+boundary is `apply`:** the kernel transforms all geometry into the delegate's
+declared space through the space graph *before* emitting deltas — delegates
+never see foreign spaces. Affine transforms with rotation/shear lower `Rect`,
+`Ellipse`, and `Polygon` to `Path` at the boundary; axis-aligned scale +
+translation keep their shape type.
 
 ### 3.3 `overlay_raster.{hpp,cpp}` — reference renderer (a library, not the contract)
 
@@ -98,13 +128,23 @@ band: red = `EventOrigin::Physical`, blue = `EventOrigin::InjectedSelf`
 emits at motion rate and never ticks a frame — fading is the delegate's job.
 Motion coalescing on the bus under backpressure is acceptable and
 intentionally visible — the trail shows what subscribers actually see.
+The animator consumes the subscription variant honestly: a `QueueGapMarker`,
+an origin change, or a coordinate-space/generation change **breaks the path**
+— it never fabricates a segment connecting samples across a discontinuity.
+Scene mutation happens via reactor handoff, never inside the subscription
+callback.
 
 ### 3.5 Pacing
 
 The kernel runs **no render loop**. A delegate that must self-render (X11)
-drives its own frame tick (target 60 Hz, damage-gated) with the existing
-`PacingGovernor` + reactor timer inside the driver. No raw sleeps
-(invariant #14) — the rule binds delegates too.
+drives its own frame tick (target 60 Hz) with `PacingGovernor` + reactor
+timer inside the driver. Damage gating must treat **every active fade as
+continuing damage** and schedule `Ttl` expiry deadlines as timer events —
+naive "no new deltas ⇒ no redraw" gating would freeze animations. Ticks
+advance from the prior deadline (no drift). No raw sleeps (invariant #14) —
+the rule binds delegates too. Named-concern hygiene: `PacingGovernor`
+relocates from `src/kernel/capture/` to `src/kernel/scheduling/` in Phase 1
+so presentation does not include a capture concern; capture re-points.
 
 ## 4. SPI: `src/spi/overlay_delegate.hpp`
 
@@ -112,12 +152,24 @@ drives its own frame tick (target 60 Hz, damage-gated) with the existing
 class OverlayDelegate
 {
   public:
-    virtual Result<void> open( CoordinateSpaceId space ) = 0;
-    virtual Result<void> apply( std::span<const SceneDelta> deltas ) = 0;
-    virtual Result<void> resync( const SceneSnapshot& scene ) = 0;
-    virtual void         close() = 0;
+    virtual ~OverlayDelegate() = default;
+    [[nodiscard]] virtual Result<void> open( CoordinateSpaceId space ) = 0;
+    [[nodiscard]] virtual Result<void> apply( std::span<const SceneDelta> deltas ) = 0;
+    [[nodiscard]] virtual Result<void> resync( const SceneSnapshot& scene ) = 0;
+    [[nodiscard]] virtual Result<void> flush( Revision through ) = 0;
+    virtual void                       close() = 0;
 };
 ```
+
+Lifecycle and threading contract: state machine
+`Closed → open → Synced ↔ Desynced → close` with idempotent `close`;
+delegates must consume or deep-copy spans before returning; calls arrive
+serialized on the session's reactor thread (X11 affinity). **Failure rule:**
+any `apply` failure marks the delegate desynchronized — further deltas are
+rejected until an atomic `resync` succeeds. Public API success means *scene
+acceptance*, not pixels; `flush(revision)` is the presentation fence — it
+returns once everything up to `revision` is actually presented (the ring-3
+test fences before capturing; no sleep-and-hope).
 
 - The contract is the **abstract scene**, not pixels: shape records with
   style, space-tagged geometry, and declarative lifetime/animation policies.
@@ -130,30 +182,54 @@ class OverlayDelegate
 - `resync` replaces delegate state with a full snapshot — used at attach and
   after any gap (same law as TreeStore: gap ⇒ resnapshot, never a diff
   guess).
-- The rendered surface is click-through and top-most by contract; a delegate
-  that cannot guarantee both must not register the capability.
-- `Runtime` gains `virtual OverlayDelegate* overlay_delegate()` (nullptr when
-  unsupported), symmetric with `InputSeat*`/`TreeSource*`.
+- The rendered surface is **click-through unconditionally** (a delegate that
+  cannot guarantee it must not register the capability) and **top-most within
+  what its platform can promise** — on X11 that means above all *managed*
+  windows with restacking on stacking changes; absolute precedence over other
+  override-redirect/security windows is not promised anywhere and the
+  contract says so.
+- `Runtime` gains `[[nodiscard]] virtual OverlayDelegate* overlay_delegate()
+  { return nullptr; }` — exact existing optional-accessor form, symmetric
+  with `InputSeat*`/`TreeSource*`.
+- **Ownership (Phase 1 ruling):** one scene per `Session`; the session leases
+  its runtime's delegate for the session lifetime; `clear()` clears *that
+  session's* scene only. Two sessions in one process get independent
+  scenes/windows; cross-session or cross-client merged ordering is explicitly
+  a non-goal until the daemon owns a broker-scene (Phase 2, where per-client
+  namespaces and connection-death cleanup are specified). The CLI is simply a
+  session holder.
 
 ## 5. Capability + resolution
 
-New row `Capability::Overlay` in the existing enum/table. Resolution goes
-through the provider registry like capture/input; failure surfaces the
-existing `ErrorCode::CapabilityUnavailable` with resolver reasons (doctor
-shows it like any other capability).
+New row `Capability::Overlay` in the existing enum/table (name string
+`capability::overlay`). Resolution goes through the provider registry like
+capture/input, with real availability probing at registration: on X11 the
+prerequisites are an ARGB32 XRender visual, XFixes shape-input support, and
+a live compositing manager (`_NET_WM_CM_Sn` selection *ownership*, not
+merely an ARGB visual). Failure surfaces the existing
+`ErrorCode::CapabilityUnavailable` with resolver reasons (doctor shows it
+like any other capability).
 
 ## 6. Public API + CLI
 
 - New public header `include/grab/overlay.hpp` (allowlist addition):
-  `session.overlay() -> Result<Overlay&>` exposing the scene verbs and shape
-  types. Shape geometry uses the existing public `geometry/*` and space
-  vocabulary. Nothing in the header names a platform.
+  `session.overlay() -> Result<Overlay&>` exposing the scene verbs.
+  **Type home rule (public headers cannot include `src/`):** the shape/style/
+  lifetime *value types* and the `SceneDelta`/`SceneSnapshot` envelopes are
+  defined in this public header (the `event.hpp` pattern — vocabulary as
+  public value types); `src/spi/overlay_delegate.hpp` and the kernel scene
+  include the public header, never the reverse. Only scene storage/algorithms
+  live in `src/kernel/presentation/`. Nothing public names a platform.
 - CLI (`src/frontends/cli/overlay_command.cpp`):
   - `grab overlay trail [--color --injected-color --fade-ms --width]` — runs
     the animator until interrupted. `grab trail` is an alias.
   - `grab overlay rect|ellipse|path --at ... [--ttl ms | --fade ms | --hold]`
-    — one-shot annotations (`--hold` keeps the process alive holding
-    persistent shapes until Ctrl-C).
+    — one-shot annotations. **Lifetime rule:** a one-shot verb keeps the
+    session (and thus the delegate window) alive until its shape's
+    `Ttl`/`Fade` policy completes, then exits; default when no policy flag is
+    given is `--ttl 3000`. `--hold` keeps `Persistent` shapes up until
+    Ctrl-C. Annotations never silently vanish at process exit before their
+    declared lifetime.
 - Frontends compose public services only; no driver includes (dependency
   rule, CI-checked).
 
@@ -164,27 +240,40 @@ delegates lacking a native scene graph reuse the in-tree reference renderer.
 
 | Path | Mechanism | Status |
 |---|---|---|
-| `src/drivers/desktop/x11/overlay_delegate.cpp` | ARGB override-redirect window on the composited screen; `_NET_WM_STATE_ABOVE`; XFixes empty *input* region (click-through); renders via the reference renderer + XShm blit on its own PacingGovernor-driven tick | **Phase 1 (now)** |
+| `src/drivers/desktop/x11/overlay_delegate.cpp` | override-redirect ARGB32 (XRender-picked visual + matching colormap) window; **self-restacks to top on stacking-change events** (`_NET_WM_STATE_ABOVE` is meaningless on unmanaged windows and is not used); XFixes zero-rect `ShapeInput` region applied after *every* window (re)creation (click-through); renders via the reference renderer, converted once into the visual's native `XImage` layout (masks/byte-order/stride), XShm blit with `XPutImage` fallback when MIT-SHM is absent; own PacingGovernor-driven tick; renderer keeps prior-frame state so damage = union of old+new bounds and removed shapes are cleared to transparent (no ghosts) | **Phase 1 (now)** |
 | `src/drivers/desktop/wayland/gnome_shell_delegate.cpp` | thin JS GNOME Shell extension drawing/animating on the Clutter stage (native fades); receives **scene deltas** over the daemon socket; the extension owns rendering, zero semantics; serves GNOME X11 *and* Wayland | later (with WP10) |
 | `src/drivers/desktop/wayland/layer_shell_delegate.cpp` | `zwlr_layer_shell_v1` overlay layer + `wl_shm`, empty input region; reference renderer + own tick | later (KDE/wlroots) |
 | `src/drivers/desktop/win32/overlay_delegate.cpp` | `WS_EX_LAYERED\|WS_EX_TRANSPARENT\|WS_EX_TOPMOST`; renders scene natively via Direct2D (its own fades) | later |
 | `src/drivers/desktop/macos/overlay_delegate.cpp` | borderless `NSWindow` at overlay level, `ignoresMouseEvents`; CoreAnimation layers animate fades natively | later |
 
-The X11 provider must handle: RandR geometry changes (reopen at new size,
-space graph updated), compositor absence (no ARGB visual → typed
-`CapabilityUnavailable`, never a black rectangle). Captures include the
-overlay by default — seeing the annotation in the screenshot is usually the
-point. An opt-out (`capture --without-overlay`, implemented as hide →
-capture → show around the capture critical section via a `set_visible()`
-on the delegate) is Phase 2.
+The X11 delegate must additionally handle:
+
+- **Compositor lifecycle, not just presence.** Capability requires
+  `_NET_WM_CM_Sn` selection *ownership* at open (an ARGB visual alone proves
+  nothing) and the owner is monitored afterward: if compositing is lost while
+  mapped, the delegate immediately unmaps, reports desynchronized, and the
+  capability goes unavailable — a fullscreen ARGB window without a compositor
+  renders opaque, and "never a black rectangle" is a hard rule.
+- **RandR as an atomic topology transaction:** update/bump the coordinate
+  space, recreate the window at the new geometry, reapply the zero-rect
+  input region, then full `resync` with retransformed geometry and
+  full-surface damage. Retained shapes survive; their pixels are recomputed.
+- **Capture matrix (corrected claim):** only *display* capture of the
+  composited output includes the overlay; per-window capture
+  (XComposite named-window pixmap) of a target window **never** contains the
+  sibling overlay window. The spec claims inclusion only for display capture;
+  window captures are documented as overlay-free. The Phase-2 opt-out
+  (`capture --without-overlay` via hide → capture → show with a
+  `set_visible()` on the delegate) therefore applies to display capture only.
 
 ## 8. Error handling
 
-Existing taxonomy only: `CapabilityUnavailable` (no provider / no compositor),
-`DisplayUnavailable`, plus typed staleness on `ShapeId` reuse after `clear()`
-(generation mismatch). No new error codes anticipated; if implementation
-finds a gap, the code is added to the descriptor table with disposition data
-per invariant #15.
+Existing taxonomy where it fits: `CapabilityUnavailable` (no provider /
+no compositor / no XFixes shape-input), `DisplayUnavailable`,
+`InvalidArgument` (rejected geometry), plus typed staleness on `ShapeId`
+use after `clear()` (`scene_epoch` mismatch) — reuse an existing staleness
+code if one fits, else one new table-backed row with disposition data per
+invariant #15.
 
 ## 9. Testing
 
@@ -202,12 +291,24 @@ per invariant #15.
 4. **Trail animator** — scripted motion event sequences (both origins) →
    expected segment set with `Fade` policies; coalescing-under-backpressure
    behavior pinned.
-5. **Ring-3 self-verifying (Xvfb)** — the flagship test: open a session,
-   draw a rect via the public API, run the trail, synthesize a drag through
-   grab's own input path, capture through grab's own capture path, assert
-   rect pixels and blue trail pixels along the drag line. Overlay, input,
-   and capture dogfooded in one test.
-6. **Invariant CI** — `overlay.hpp` added to the public-header allowlist in
+5. **Ring-3 self-verifying (Xvfb + compositor)** — the flagship test.
+   **Bare Xvfb has no compositor, so the positive test would fail by
+   construction**; the fixture therefore runs Xvfb *plus* a compositing
+   manager (`picom` or `xcompmgr`, whichever the fixture finds — a test-only
+   dependency, recorded as such; test skips with a clear reason if neither
+   exists). Flow: open a session, draw a rect via the public API, run the
+   trail, synthesize a drag through grab's own input path, `flush()` the
+   presentation fence, capture via **display capture** (per the capture
+   matrix), assert rect pixels and blue trail pixels along the drag line —
+   and assert a sentinel window beneath the overlay *received* the drag
+   (click-through proven, not assumed). Overlay, input, and capture
+   dogfooded in one test.
+6. **Ring-3 negative (bare Xvfb)** — no compositor ⇒ resolution yields
+   `CapabilityUnavailable` with the compositor reason; nothing is mapped.
+7. **RandR resize (Xvfb + compositor)** — resize the virtual output
+   mid-scene; assert retained shapes reappear at retransformed positions and
+   the input region is still empty.
+8. **Invariant CI** — `overlay.hpp` added to the public-header allowlist in
    the same commit that creates it; kernel-platform-free rule already covers
    `src/kernel/presentation/`.
 
