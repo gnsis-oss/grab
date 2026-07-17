@@ -82,6 +82,7 @@ add_executable(grab_kernel_tests
     kernel/graph/test_state_manager.cpp
     kernel/graph/test_state_snapshot_provider.cpp
     kernel/test_ui.cpp
+    kernel/test_overlay_delegate_contract.cpp
     kernel/test_overlay_scene.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp

@@ -14,6 +14,7 @@ namespace grab::spi
 {
 
     class EventSource;
+    class OverlayDelegate;
     class TopologySource;
     class TreeSource;
 
@@ -71,6 +72,13 @@ namespace grab::spi
             [[nodiscard]]
             virtual EventSource*
             event_source()
+            {
+                return nullptr;
+            }
+
+            [[nodiscard]]
+            virtual OverlayDelegate*
+            overlay_delegate()
             {
                 return nullptr;
             }
