@@ -2,6 +2,8 @@
 #include "client/loopback_transport.hpp"
 #include "client/unix_socket_transport.hpp"
 #include "drivers/desktop/x11/enumerate.hpp"
+#include "eventgrab/v1/events.pb.h"
+#include "eventgrab/v1/service.grpc.pb.h"
 #include "frontends/grpc/server.hpp"
 #include "grab/capture.hpp"
 #include "grab/event.hpp"
@@ -16,10 +18,15 @@
 #include "grab/trace.hpp"
 #include "grab/ui.hpp"
 
+#include <grpcpp/security/server_credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+
 // clang-format off
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -28,9 +35,11 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <variant>
+#include <vector>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 // clang-format on
@@ -41,6 +50,9 @@ namespace
     constexpr std::string_view unixEndpointPrefix = "unix:";
     constexpr std::string_view transportStartFailurePrefix =
         "failed to start transport server at unix:";
+    constexpr int  unknownEventKind         = 99'999;
+    constexpr auto subscriptionDrainTimeout = std::chrono::seconds{ 2 };
+    constexpr auto subscriptionPollInterval = std::chrono::milliseconds{ 5 };
 
     class TempSocket
     {
@@ -82,6 +94,40 @@ namespace
 
             std::filesystem::path root_;
             std::string           endpoint_;
+    };
+
+    class UnknownEventInjectingService final
+        : public eventgrab::v1::EventGrabService::Service
+    {
+        public:
+
+            grpc::Status
+            Subscribe( grpc::ServerContext*,
+                       const eventgrab::v1::EventFilter*,
+                       grpc::ServerWriter<eventgrab::v1::Event>* writer ) override
+            {
+                writer->SendInitialMetadata();
+
+                eventgrab::v1::Event first;
+                first.set_kind( eventgrab::v1::NODE_ADDED );
+                first.set_category( eventgrab::v1::EVENT_CATEGORY_WINDOW );
+                first.mutable_graph_change()->set_node( 1U );
+                static_cast<void>( writer->Write( first ) );
+
+                eventgrab::v1::Event unknown;
+                unknown.set_kind(
+                    static_cast<eventgrab::v1::EventKind>( unknownEventKind )
+                );
+                static_cast<void>( writer->Write( unknown ) );
+
+                eventgrab::v1::Event second;
+                second.set_kind( eventgrab::v1::NODE_REMOVED );
+                second.set_category( eventgrab::v1::EVENT_CATEGORY_WINDOW );
+                second.mutable_graph_change()->set_node( 2U );
+                static_cast<void>( writer->Write( second ) );
+
+                return grpc::Status::OK;
+            }
     };
 
     TEST( ClientLoopbackTransport,
@@ -183,6 +229,59 @@ namespace
         EXPECT_EQ( key.name, "shift" );
 
         server->shutdown();
+    }
+
+    TEST( UnixSocketTransport,
+          ToleratesUndecodableEventWithoutKillingStream )
+    {
+        const TempSocket             temp;
+        UnknownEventInjectingService service;
+        grpc::ServerBuilder          builder;
+        builder.AddListeningPort( temp.endpoint(), grpc::InsecureServerCredentials() );
+        builder.RegisterService( &service );
+        auto server = builder.BuildAndStart();
+        if( server == nullptr )
+        {
+            GTEST_SKIP() << "failed to start test server at " << temp.endpoint();
+        }
+
+        grab::client::Client client{
+            std::make_unique<grab::client::UnixSocketTransport>( temp.endpoint() )
+        };
+        auto subscription = client.subscribe( grab::EventFilter{} );
+        ASSERT_TRUE( subscription.has_value() ) << subscription.error().message;
+        auto& stream = *subscription;
+        ASSERT_NE( stream, nullptr );
+
+        std::vector<grab::SubscriptionEvent> delivered;
+        const auto                           deadline =
+            std::chrono::steady_clock::now() + subscriptionDrainTimeout;
+        while( delivered.size() < 2U && std::chrono::steady_clock::now() < deadline )
+        {
+            auto next = stream->try_next();
+            ASSERT_TRUE( next.has_value() ) << next.error().message;
+            if( next->has_value() )
+            {
+                delivered.emplace_back( std::move( **next ) );
+            }
+            if( delivered.size() < 2U )
+            {
+                std::this_thread::sleep_for( subscriptionPollInterval );
+            }
+        }
+
+        ASSERT_EQ( delivered.size(), 2U );
+        ASSERT_TRUE( std::holds_alternative<grab::Event>( delivered[0] ) );
+        ASSERT_TRUE( std::holds_alternative<grab::Event>( delivered[1] ) );
+        EXPECT_EQ( std::get<grab::Event>( delivered[0] ).kind,
+                   grab::EventKind::NodeAdded );
+        EXPECT_EQ( std::get<grab::Event>( delivered[1] ).kind,
+                   grab::EventKind::NodeRemoved );
+        EXPECT_EQ( stream->dropped_events(), 1U );
+
+        stream.reset();
+        server->Shutdown();
+        server->Wait();
     }
 
     TEST( ClientErrors,

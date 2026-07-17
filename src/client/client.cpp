@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <limits>
@@ -150,6 +151,17 @@ namespace grab::client
                                                "subscription replay failed" );
                         }
                         return registration_->stream->try_next();
+                    }
+
+                    [[nodiscard]]
+                    std::uint64_t
+                    dropped_events() const noexcept override
+                    {
+                        if( registration_->stream == nullptr )
+                        {
+                            return 0U;
+                        }
+                        return registration_->stream->dropped_events();
                     }
 
                 private:

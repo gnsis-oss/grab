@@ -10,6 +10,7 @@
 #include "grab/result.hpp"
 #include "grab/trace.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -26,6 +27,13 @@ namespace grab::client
             [[nodiscard]]
             virtual grab::Result<std::optional<grab::SubscriptionEvent>>
             try_next() = 0;
+
+            [[nodiscard]]
+            virtual std::uint64_t
+            dropped_events() const noexcept
+            {
+                return 0U;
+            }
     };
 
     using SubscriptionHandle = std::unique_ptr<SubscriptionStream>;
