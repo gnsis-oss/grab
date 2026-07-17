@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/provider.hpp"
 #include "grab/capability.hpp"
+#include "kernel/routing/provider.hpp"
 
 #include <string>
 #include <utility>

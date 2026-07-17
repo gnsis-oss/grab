@@ -1,10 +1,10 @@
 #pragma once
 
-#include "core/provider.hpp"
 #include "grab/capability.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "grab/workspace.hpp"
+#include "kernel/routing/provider.hpp"
 #include "session/provider.hpp"
 
 #include <array>

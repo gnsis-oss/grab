@@ -2,10 +2,6 @@
 #include "client/loopback_transport.hpp"
 #include "client/unix_socket_transport.hpp"
 #include "codec/png.hpp"
-#include "core/doctor.hpp"
-#include "core/prober.hpp"
-#include "core/reactor.hpp"
-#include "core/registry.hpp"
 #include "drivers/desktop/x11/window_match.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
@@ -31,6 +27,10 @@
 #include "grab/trace.hpp"
 #include "grab/ui.hpp"
 #include "image/compare.hpp"
+#include "kernel/routing/doctor.hpp"
+#include "kernel/routing/prober.hpp"
+#include "kernel/routing/registry.hpp"
+#include "kernel/scheduling/reactor.hpp"
 #include "notify/notifier.hpp"
 
 #include <charconv>

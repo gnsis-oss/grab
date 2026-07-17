@@ -1,10 +1,10 @@
-#include "core/reactor.hpp"
 #include "drivers/desktop/x11/record.hpp"
 #include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "grab/capture.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 #include "kernel/capture/pacing_governor.hpp"
+#include "kernel/scheduling/reactor.hpp"
 
 #include <array>
 #include <bit>

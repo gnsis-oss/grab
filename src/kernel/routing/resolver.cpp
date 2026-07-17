@@ -1,10 +1,10 @@
 #include "core/environment.hpp"
 #include "core/log.hpp"
-#include "core/provider.hpp"
-#include "core/registry.hpp"
-#include "core/resolver.hpp"
 #include "grab/capability.hpp"
 #include "grab/result.hpp"
+#include "kernel/routing/provider.hpp"
+#include "kernel/routing/registry.hpp"
+#include "kernel/routing/resolver.hpp"
 
 #include <algorithm>
 #include <cstddef>

@@ -1,10 +1,10 @@
 #include "core/ascii.hpp"
-#include "core/reactor.hpp"
 #include "drivers/semantic/atspi/atspi_monitor.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
+#include "kernel/scheduling/reactor.hpp"
 
 #include <algorithm>
 #include <array>

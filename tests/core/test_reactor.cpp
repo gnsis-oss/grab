@@ -1,5 +1,5 @@
-#include "core/reactor.hpp"
 #include "grab/result.hpp"
+#include "kernel/scheduling/reactor.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

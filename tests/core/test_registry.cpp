@@ -1,6 +1,6 @@
 #include "core/fake_provider.hpp"
-#include "core/registry.hpp"
 #include "grab/capability.hpp"
+#include "kernel/routing/registry.hpp"
 
 #include <gtest/gtest.h>
 #include <memory>

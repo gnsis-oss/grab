@@ -1,10 +1,10 @@
 #include "core/environment.hpp"
 #include "core/fake_provider.hpp"
-#include "core/provider.hpp"
-#include "core/registry.hpp"
-#include "core/resolver.hpp"
 #include "grab/capability.hpp"
 #include "grab/result.hpp"
+#include "kernel/routing/provider.hpp"
+#include "kernel/routing/registry.hpp"
+#include "kernel/routing/resolver.hpp"
 
 #include <gtest/gtest.h>
 #include <memory>

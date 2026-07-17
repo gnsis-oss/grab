@@ -1,5 +1,5 @@
-#include "core/reactor.hpp"
 #include "grab/result.hpp"
+#include "kernel/scheduling/reactor.hpp"
 
 #include <algorithm>
 #include <array>

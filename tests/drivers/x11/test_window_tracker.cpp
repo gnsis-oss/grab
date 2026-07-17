@@ -1,8 +1,8 @@
-#include "core/reactor.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/result.hpp"
+#include "kernel/scheduling/reactor.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

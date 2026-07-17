@@ -1,10 +1,10 @@
-#include "core/reactor.hpp"
 #include "drivers/semantic/webextension/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/payload_fields.hpp"
 #include "grab/result.hpp"
+#include "kernel/scheduling/reactor.hpp"
 
 #include <algorithm>
 #include <array>

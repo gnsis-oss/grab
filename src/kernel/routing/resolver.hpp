@@ -1,8 +1,8 @@
 #pragma once
 
-#include "core/registry.hpp"
 #include "grab/capability.hpp"
 #include "grab/result.hpp"
+#include "kernel/routing/registry.hpp"
 
 #include <compare>
 #include <cstdint>
