@@ -42,6 +42,8 @@ namespace
     constexpr std::string_view     missingOutputName       = "eDP-1";
     constexpr std::uint64_t        captureSnapshotRevision = 1U;
     constexpr std::uint64_t        captureWindowNodeId     = 1U;
+    constexpr grab::SpaceRect
+        describeBounds{ .x = 40.0, .y = 60.0, .w = 320.0, .h = 220.0 };
 
     [[nodiscard]]
     grab::UiSnapshot
@@ -56,6 +58,45 @@ namespace
             grab::UiProvenance{
                                                                                  .runtime  = runtime,.revision = performRevision,
                                                                                  },
+        };
+        std::vector<grab::UiNodeRecord> nodes{ node };
+        std::vector<grab::NodeId>       roots{ node.id };
+        return grab::UiSnapshot::from_records(
+            grab::UiSnapshotMetadata{
+                .runtime  = runtime,
+                .tree     = performTree,
+                .epoch    = performEpoch,
+                .revision = performRevision,
+                .complete = true,
+            },
+            std::move( nodes ),
+            std::move( roots ),
+            {}
+        );
+    }
+
+    [[nodiscard]]
+    grab::UiSnapshot
+    describe_snapshot( grab::RuntimeId runtime )
+    {
+        std::vector<grab::UiProperty> properties{
+            grab::UiProperty{
+                             .id   = grab::property::bounds,
+                             .read = grab::PropertyRead{
+                    .state = grab::PropertyRead::State::Present,
+                    .value = describeBounds,
+                }, },
+        };
+        const auto node = grab::UiNodeRecord{
+            performNode,
+            performGeneration,
+            grab::role::window,
+            grab::state_mask( grab::NodeState::Visible ) | grab::NodeState::Enabled,
+            std::move( properties ),
+            grab::UiProvenance{
+                               .runtime  = runtime,
+                               .revision = performRevision,
+                               },
         };
         std::vector<grab::UiNodeRecord> nodes{ node };
         std::vector<grab::NodeId>       roots{ node.id };
@@ -207,6 +248,59 @@ TEST( SessionVerbs,
     ASSERT_FALSE( receipt.has_value() );
     EXPECT_EQ( receipt.error().code, grab::ErrorCode::Cancelled );
     EXPECT_EQ( route.commit_count(), noRouteCommits );
+}
+
+TEST( SessionVerbs,
+      DescribeReturnsResolvedNodeBoundsAndStates )
+{
+    grab::testing::FakeRuntime fake;
+    fake.inject_snapshot( describe_snapshot( fake.runtime_id() ) );
+
+    auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
+    ASSERT_NE( core, nullptr );
+    const grab::OperationContext context{};
+    ASSERT_TRUE( core->attach( fake, context ).has_value() );
+
+    const auto match = core->resolve( grab::sel::role( grab::role::window ),
+                                      grab::Cardinality::ExactlyOne );
+    ASSERT_TRUE( match.has_value() );
+
+    const auto info = core->describe( *match );
+    ASSERT_TRUE( info.has_value() ) << info.error().message;
+    EXPECT_EQ( info->bounds.x, describeBounds.x );
+    EXPECT_EQ( info->bounds.y, describeBounds.y );
+    EXPECT_EQ( info->bounds.w, describeBounds.w );
+    EXPECT_EQ( info->bounds.h, describeBounds.h );
+    EXPECT_EQ( info->role, grab::role::window );
+    EXPECT_TRUE( grab::has_state( info->states, grab::NodeState::Visible ) );
+    EXPECT_TRUE( grab::has_state( info->states, grab::NodeState::Enabled ) );
+}
+
+TEST( SessionVerbs,
+      DescribeMissingNodeReturnsNoMatch )
+{
+    grab::testing::FakeRuntime fake;
+    fake.inject_snapshot( describe_snapshot( fake.runtime_id() ) );
+
+    auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
+    ASSERT_NE( core, nullptr );
+    const grab::OperationContext context{};
+    ASSERT_TRUE( core->attach( fake, context ).has_value() );
+
+    grab::Match absent{};
+    absent.ref.node       = 999U;
+    absent.ref.generation = performGeneration;
+    const auto info       = core->describe( absent );
+    ASSERT_FALSE( info.has_value() );
+    EXPECT_EQ( info.error().code, grab::ErrorCode::NoMatch );
+}
+
+TEST( SessionVerbs,
+      DescribeVerbOnNullCoreReturnsCapabilityUnavailable )
+{
+    const auto info = grab::kernel::lifecycle::describe_verb( nullptr, grab::Match{} );
+    ASSERT_FALSE( info.has_value() );
+    EXPECT_EQ( info.error().code, grab::ErrorCode::CapabilityUnavailable );
 }
 
 // NOLINTEND(readability-trailing-comma)

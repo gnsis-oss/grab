@@ -279,6 +279,43 @@ namespace grab::kernel::lifecycle
                                query::QueryScope{ .navigation = navigation } );
     }
 
+    Result<NodeInfo>
+    SessionCore::describe( const Match& match )
+    {
+        auto snapshot = bindings_.front()->store->snapshot();
+        if( !snapshot.has_value() )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no tree snapshot" );
+        }
+
+        const auto* const record = snapshot->node( NodeId{ match.ref.node } );
+        if( record == nullptr )
+        {
+            return fail( ErrorCode::NoMatch,
+                         "resolved node is not present in the current snapshot" );
+        }
+        if( record->generation != match.ref.generation )
+        {
+            return fail( ErrorCode::StaleNode, "resolved node generation is stale" );
+        }
+
+        NodeInfo info{};
+        info.role       = record->role;
+        info.states     = record->states;
+        info.provenance = record->provenance();
+
+        const auto read = record->property( grab::property::bounds );
+        if( read.state == PropertyRead::State::Present )
+        {
+            if( const auto* const rect = std::get_if<SpaceRect>( &read.value ) )
+            {
+                info.bounds = *rect;
+            }
+        }
+        return info;
+    }
+
     Result<Subscription>
     SessionCore::watch( SubscriptionScope scope,
                         QueueOptions      options )
@@ -659,6 +696,18 @@ namespace grab::kernel::lifecycle
                          "session has no composed display stack" );
         }
         return core->resolve( locator, cardinality );
+    }
+
+    Result<NodeInfo>
+    describe_verb( SessionCore* core,
+                   const Match& match )
+    {
+        if( core == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no composed display stack" );
+        }
+        return core->describe( match );
     }
 
     Result<Subscription>

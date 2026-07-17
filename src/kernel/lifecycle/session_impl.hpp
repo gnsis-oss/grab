@@ -70,6 +70,10 @@ namespace grab::kernel::lifecycle
                      Cardinality    cardinality = Cardinality::ExactlyOne );
 
             [[nodiscard]]
+            Result<NodeInfo>
+            describe( const Match& match );
+
+            [[nodiscard]]
             Result<Subscription>
             watch( SubscriptionScope scope,
                    QueueOptions      options = {} );
@@ -179,6 +183,11 @@ namespace grab::kernel::lifecycle
     resolve_verb( SessionCore*   core,
                   const Locator& locator,
                   Cardinality    cardinality );
+
+    [[nodiscard]]
+    Result<NodeInfo>
+    describe_verb( SessionCore* core,
+                   const Match& match );
 
     [[nodiscard]]
     Result<Subscription>
