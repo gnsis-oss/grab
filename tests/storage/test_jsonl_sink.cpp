@@ -1,9 +1,11 @@
 #include "grab/event.hpp"
+#include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "storage/jsonl_sink.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -131,6 +133,38 @@ namespace
                 .name = std::string{ keyName },
             } },
         };
+    }
+
+    [[nodiscard]]
+    grab::Event
+    make_envelope_event( double        timestamp,
+                         std::uint64_t sequence,
+                         std::uint32_t runtime_id )
+    {
+        grab::Event event{
+            .timestamp = timestamp,
+            .sequence  = sequence,
+            .kind      = grab::EventKind::WindowFocusChanged,
+            .category  = grab::EventCategory::Window,
+            .payload   = grab::WindowChange{
+                                            .app        = "editor",
+                                            .pid        = grab::Pid{ 4'242 },
+                                            .title      = "main.cpp",
+                                            .prev_title = {},
+                                            .duration_s = 0.0,
+                                            },
+        };
+        event.origin  = grab::EventOrigin::Physical;
+        event.subject = grab::EventSubject{
+            .runtime  = grab::RuntimeId{ runtime_id },
+            .tree     = 1U,
+            .epoch    = grab::TreeEpoch{ 1U },
+            .node     = 0X1'00'00'00'00ULL,
+            .revision = 7U,
+        };
+        event.before_revision = 6U;
+        event.after_revision  = 7U;
+        return event;
     }
 
     [[nodiscard]]
@@ -411,6 +445,62 @@ TEST( JsonlSink,
                keyDownTypeName );
     EXPECT_EQ( json_string_field( line, categoryKey ).value_or( std::string{} ),
                inputCategoryName );
+}
+
+TEST( JsonlSink,
+      LineCarriesFullEnvelope )
+{
+    const TempDir temp( "LineCarriesFullEnvelope" );
+    auto          sink_result = grab::storage::JsonlSink::open(
+        make_options( temp.path(), flushEveryWrite, generousFileLimit, tinyDiskBudgetMb )
+    );
+    ASSERT_TRUE( is_ok( sink_result ) );
+    auto sink = std::move( sink_result ).value();
+
+    ASSERT_TRUE(
+        is_ok( sink.write( make_envelope_event( firstDayTimestamp, 11U, 1U ) ) )
+    );
+
+    const auto lines = read_lines( temp.path() / std::string{ firstDayFileName } );
+    ASSERT_EQ( lines.size(), singleLineCount );
+    const auto parsed = nlohmann::json::parse( lines.front() );
+
+    EXPECT_EQ( parsed.at( "seq" ).get<std::uint64_t>(), 11U );
+    EXPECT_EQ( parsed.at( "origin" ).get<std::string>(), "physical" );
+    ASSERT_TRUE( parsed.contains( "subject" ) );
+    EXPECT_EQ( parsed.at( "subject" ).at( "runtime" ).get<std::uint32_t>(), 1U );
+    EXPECT_EQ( parsed.at( "subject" ).at( "node" ).get<std::uint64_t>(),
+               0X1'00'00'00'00ULL );
+    EXPECT_EQ( parsed.at( "subject" ).at( "revision" ).get<std::uint64_t>(), 7U );
+    EXPECT_EQ( parsed.at( "before" ).get<std::uint64_t>(), 6U );
+    EXPECT_EQ( parsed.at( "after" ).get<std::uint64_t>(), 7U );
+}
+
+TEST( JsonlSink,
+      DistinctRuntimesRecordDistinctSubjectRuntime )
+{
+    const TempDir temp( "DistinctRuntimesRecordDistinctSubjectRuntime" );
+    auto          sink_result = grab::storage::JsonlSink::open(
+        make_options( temp.path(), flushEveryWrite, generousFileLimit, tinyDiskBudgetMb )
+    );
+    ASSERT_TRUE( is_ok( sink_result ) );
+    auto sink = std::move( sink_result ).value();
+
+    ASSERT_TRUE(
+        is_ok( sink.write( make_envelope_event( firstDayTimestamp, 1U, 1U ) ) )
+    );
+    ASSERT_TRUE(
+        is_ok( sink.write( make_envelope_event( firstDayTimestamp, 2U, 2U ) ) )
+    );
+
+    const auto lines = read_lines( temp.path() / std::string{ firstDayFileName } );
+    ASSERT_EQ( lines.size(), 2U );
+    const auto first  = nlohmann::json::parse( lines.at( 0 ) );
+    const auto second = nlohmann::json::parse( lines.at( 1 ) );
+    EXPECT_EQ( first.at( "subject" ).at( "runtime" ).get<std::uint32_t>(), 1U );
+    EXPECT_EQ( second.at( "subject" ).at( "runtime" ).get<std::uint32_t>(), 2U );
+    EXPECT_NE( first.at( "subject" ).at( "runtime" ),
+               second.at( "subject" ).at( "runtime" ) );
 }
 
 TEST( JsonlSink,

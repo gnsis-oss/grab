@@ -61,7 +61,7 @@ target_link_libraries(grab_core PRIVATE grab_vendor_l0)
 # The static-library cycles through grab_kernel and both drivers are intentional; CMake supports cycles among STATIC libraries.
 target_link_libraries(grab_core PRIVATE grab_driver_x11)
 target_link_libraries(grab_core PRIVATE grab_driver_atspi)
-# The core->driver_atspi->event->core component needs three repetitions because atspi.cpp.o is only pulled in the second pass and still needs Reactor from grab_core.
+# The core->driver_atspi->kernel->core component needs three repetitions because atspi_monitor.cpp.o is only pulled in the second pass and still needs Reactor from grab_core.
 set_target_properties(grab_core PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
 target_include_directories(grab_core PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_include_directories(grab_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
@@ -83,6 +83,8 @@ add_library(grab_kernel STATIC
     src/kernel/capture/tile_differ.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp
+    src/kernel/graph/state_manager.cpp
+    src/kernel/graph/state_snapshot_provider.cpp
     src/kernel/query/evaluator.cpp
     src/kernel/query/locator.cpp
     src/kernel/query/snapshot_tree_nav.cpp
@@ -130,18 +132,22 @@ target_include_directories(grab_input PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_include_directories(grab_input PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/compat/x11_relocation_shim)
 target_compile_features(grab_input PUBLIC cxx_std_23)
 
-add_library(grab_event STATIC
-    src/event/atspi.cpp
-    src/event/window_x11.cpp
-    src/event/browser_bridge.cpp
-    src/event/state.cpp
-    src/event/state_source.cpp
-    src/event/evdev.cpp
+# eventgrab.v1 compat: the browser vocabulary left the core and is re-derived as a
+# v1-wire projection here (src/compat/eventgrab_v1/).
+add_library(grab_compat_eventgrab_v1 STATIC
+    src/compat/eventgrab_v1/browser_projection.cpp
 )
-target_link_libraries(grab_event PUBLIC grab_core PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XINPUT PkgConfig::GRAB_DBUS_1)
-target_include_directories(grab_event PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
-target_include_directories(grab_event PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/compat/x11_relocation_shim)
-target_compile_features(grab_event PUBLIC cxx_std_23)
+target_link_libraries(grab_compat_eventgrab_v1 PUBLIC grab_core grab_proto "${GRAB_PROTOBUF_TARGET}")
+target_include_directories(grab_compat_eventgrab_v1 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_compat_eventgrab_v1 PUBLIC cxx_std_23)
+
+# WebExtension native-messaging bridge (contributes integration app.* events).
+add_library(grab_driver_webextension STATIC
+    src/drivers/semantic/webextension/browser_bridge.cpp
+)
+target_link_libraries(grab_driver_webextension PUBLIC grab_core)
+target_include_directories(grab_driver_webextension PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_driver_webextension PUBLIC cxx_std_23)
 
 add_library(grab_notify STATIC
     src/notify/notifier.cpp
@@ -150,7 +156,7 @@ target_link_libraries(grab_notify PUBLIC grab_core PkgConfig::GRAB_DBUS_1)
 target_include_directories(grab_notify PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_notify PUBLIC cxx_std_23)
 
-target_link_libraries(grab_screen PUBLIC grab_event grab_image grab_notify)
+target_link_libraries(grab_screen PUBLIC grab_image grab_notify)
 
 add_library(grab_session STATIC
     src/session/manager.cpp
@@ -191,6 +197,7 @@ add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/x11_topology_source.cpp
     src/drivers/desktop/x11/x11_tree_source.cpp
     src/drivers/desktop/x11/x11_xtest_seat.cpp
+    src/drivers/desktop/x11/window_tracker.cpp
 )
 target_link_libraries(grab_driver_x11
     PUBLIC
@@ -206,17 +213,26 @@ target_link_libraries(grab_driver_x11
 target_include_directories(grab_driver_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_x11 PUBLIC cxx_std_23)
 
+add_library(grab_driver_evdev STATIC
+    src/drivers/device/evdev/evdev_source.cpp
+)
+target_link_libraries(grab_driver_evdev PUBLIC grab_core)
+target_include_directories(grab_driver_evdev PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_driver_evdev PUBLIC cxx_std_23)
+
 add_library(grab_driver_atspi STATIC
+    src/drivers/semantic/atspi/atspi_monitor.cpp
     src/drivers/semantic/atspi/atspi_runtime.cpp
     src/drivers/semantic/atspi/atspi_tree_source.cpp
 )
 target_link_libraries(grab_driver_atspi
     PUBLIC
         grab_kernel
-        grab_event
+        # atspi_monitor.hpp exposes <dbus/dbus.h> types, so consumers of the
+        # driver header need the D-Bus include path.
+        PkgConfig::GRAB_DBUS_1
     PRIVATE
         grab_vendor_l0
-        PkgConfig::GRAB_DBUS_1
 )
 target_include_directories(grab_driver_atspi PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_atspi PUBLIC cxx_std_23)
@@ -258,7 +274,7 @@ target_compile_features(grab_storage PUBLIC cxx_std_23)
 add_library(grab_service STATIC
     src/service/daemon.cpp
 )
-target_link_libraries(grab_service PUBLIC grab_core grab_transport grab_storage grab_event)
+target_link_libraries(grab_service PUBLIC grab_core grab_transport grab_storage)
 target_include_directories(grab_service PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_service PUBLIC cxx_std_23)
 

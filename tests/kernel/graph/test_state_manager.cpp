@@ -1,8 +1,8 @@
-#include "event/state.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/pid.hpp"
+#include "kernel/graph/state_manager.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -127,6 +127,37 @@ TEST( StateManager,
     ASSERT_NE( payload, nullptr );
     EXPECT_NE( payload->json.find( focusedKey ), std::string::npos );
     EXPECT_NE( payload->json.find( firstTitle ), std::string::npos );
+}
+
+TEST( StateManager,
+      OpenWindowEventsReplayCreatedWindows )
+{
+    grab::event::StateManager state;
+
+    state.observe(
+        make_window_event( windowCreatedKind, firstApp, firstPid, firstTitle )
+    );
+    state.observe(
+        make_window_event( windowCreatedKind, secondApp, secondPid, secondTitle )
+    );
+
+    const auto events = state.open_window_events( timestamp );
+
+    ASSERT_EQ( events.size(), twoOpenWindows );
+    EXPECT_EQ( events.at( 0U ).kind, windowCreatedKind );
+    EXPECT_EQ( events.at( 1U ).kind, windowCreatedKind );
+
+    const auto* first_change =
+        std::get_if<grab::WindowChange>( &events.at( 0U ).payload );
+    const auto* second_change =
+        std::get_if<grab::WindowChange>( &events.at( 1U ).payload );
+
+    ASSERT_NE( first_change, nullptr );
+    ASSERT_NE( second_change, nullptr );
+    EXPECT_EQ( first_change->app, firstApp );
+    EXPECT_EQ( first_change->title, firstTitle );
+    EXPECT_EQ( second_change->app, secondApp );
+    EXPECT_EQ( second_change->title, secondTitle );
 }
 
 TEST( StateManager,

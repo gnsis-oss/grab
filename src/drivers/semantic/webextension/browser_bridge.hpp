@@ -1,4 +1,4 @@
-#pragma once
+#pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "grab/event.hpp"
 #include "grab/result.hpp"
@@ -23,7 +23,7 @@ namespace grab::core
 
 }    // namespace grab::core
 
-namespace grab::event
+namespace grab::drivers::semantic::webextension
 {
 
     [[nodiscard]]
@@ -85,4 +85,4 @@ namespace grab::event
             std::shared_ptr<State> state_;
     };
 
-}    // namespace grab::event
+}    // namespace grab::drivers::semantic::webextension

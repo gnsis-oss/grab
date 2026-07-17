@@ -1,5 +1,6 @@
 #include "client/client.hpp"
 #include "client/loopback_transport.hpp"
+#include "compat/eventgrab_v1/browser_projection.hpp"
 #include "core/reactor.hpp"
 #include "drivers/desktop/x11/enumerate.hpp"
 #include "grab/capture.hpp"
@@ -420,33 +421,25 @@ TEST( ExitGate,
                  grab::CommitStatus::Committed ||
                  client_receipt->commit == grab::CommitStatus::Verified );
 
-    const grab::Event legacy_event{
-        .timestamp = 1.25,
-        .sequence  = 7U,
-        .kind      = grab::EventKind::BrowserTabSwitched,
-        .category  = grab::EventCategory::Browser,
-        .payload   = grab::BrowserTab{
-                                      .app            = "Firefox",
-                                      .pid            = grab::Pid{ browserPid },
-                                      .tab_title      = "Exit gate",
-                                      .prev_tab_title = "Phase zero",
-                                      },
+    const grab::compat::eventgrab_v1::BrowserTabProjection projection{
+        .app            = "Firefox",
+        .pid            = grab::Pid{ browserPid },
+        .tab_title      = "Exit gate",
+        .prev_tab_title = "Phase zero",
     };
-    const auto wire_event = grab::transport::to_wire( legacy_event );
-    ASSERT_TRUE( wire_event.has_value() );
-    EXPECT_EQ( wire_event->kind(), eventgrab::v1::BROWSER_TAB_SWITCHED );
-
-    const auto decoded_event = grab::transport::from_wire( *wire_event );
-    ASSERT_TRUE( decoded_event.has_value() );
-    EXPECT_EQ( decoded_event->kind, grab::EventKind::BrowserTabSwitched );
-    EXPECT_EQ( decoded_event->category, grab::EventCategory::Browser );
-    const auto* const decoded_tab =
-        std::get_if<grab::BrowserTab>( &decoded_event->payload );
-    ASSERT_NE( decoded_tab, nullptr );
-    EXPECT_EQ( decoded_tab->app, "Firefox" );
-    EXPECT_EQ( decoded_tab->pid, grab::Pid{ browserPid } );
-    EXPECT_EQ( decoded_tab->tab_title, "Exit gate" );
-    EXPECT_EQ( decoded_tab->prev_tab_title, "Phase zero" );
+    const auto wire_event = grab::compat::eventgrab_v1::to_wire( projection );
+    EXPECT_EQ( wire_event.kind(), eventgrab::v1::BROWSER_TAB_SWITCHED );
+    EXPECT_EQ( wire_event.category(), eventgrab::v1::EVENT_CATEGORY_BROWSER );
+    std::string wire_bytes;
+    ASSERT_TRUE( wire_event.SerializeToString( &wire_bytes ) );
+    eventgrab::v1::Event parsed_wire;
+    ASSERT_TRUE( parsed_wire.ParseFromString( wire_bytes ) );
+    const auto decoded = grab::compat::eventgrab_v1::from_wire( parsed_wire );
+    ASSERT_TRUE( decoded.has_value() );
+    EXPECT_EQ( decoded->app, "Firefox" );
+    EXPECT_EQ( decoded->pid, grab::Pid{ browserPid } );
+    EXPECT_EQ( decoded->tab_title, "Exit gate" );
+    EXPECT_EQ( decoded->prev_tab_title, "Phase zero" );
 }
 
 TEST( ExitGate,

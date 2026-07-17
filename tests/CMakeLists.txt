@@ -44,23 +44,16 @@ add_executable(grab_core_tests
     image/test_compare.cpp
     input/test_keymap.cpp
     input/test_input.cpp
-    event/test_browser_bridge.cpp
     event/test_event_descriptor.cpp
     event/test_payload_fields.cpp
-    event/test_atspi.cpp
-    event/test_state.cpp
-    event/test_state_source.cpp
-    event/test_evdev.cpp
-    event/test_window_x11.cpp
     notify/test_notifier.cpp
     transport/test_codec.cpp
     storage/test_jsonl_sink.cpp
     service/test_daemon.cpp
     transport/test_service.cpp
     transport/test_service_hardening.cpp
-    event/test_browser_classifier.cpp
 )
-target_link_libraries(grab_core_tests PRIVATE grab_core grab_vendor_l0 grab_codec grab_screen grab_image grab_event grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
+target_link_libraries(grab_core_tests PRIVATE grab_core grab_vendor_l0 grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
 target_compile_definitions(grab_core_tests PRIVATE GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs")
@@ -85,6 +78,8 @@ add_executable(grab_kernel_tests
     kernel/lifecycle/test_session_core.cpp
     kernel/lifecycle/test_observation_pump.cpp
     kernel/lifecycle/test_session_verbs.cpp
+    kernel/graph/test_state_manager.cpp
+    kernel/graph/test_state_snapshot_provider.cpp
     kernel/test_ui.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp
@@ -111,6 +106,7 @@ add_executable(grab_driver_x11_tests
     drivers/x11/test_x11_tree_source.cpp
     drivers/x11/test_x11_xtest_seat.cpp
     drivers/x11/test_x11_drag_recipe.cpp
+    drivers/x11/test_window_tracker.cpp
 )
 target_link_libraries(grab_driver_x11_tests PRIVATE
     grab_driver_x11
@@ -131,6 +127,7 @@ target_link_libraries(grab_integration_tests PRIVATE
     grab_kernel
     grab_driver_x11
     grab_transport
+    grab_compat_eventgrab_v1
     GTest::gtest_main
 )
 target_include_directories(grab_integration_tests PRIVATE
@@ -138,6 +135,7 @@ target_include_directories(grab_integration_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/tests)
 
 add_executable(grab_driver_atspi_tests
+    drivers/atspi/test_atspi.cpp
     drivers/atspi/test_atspi_mapping.cpp
     drivers/atspi/test_atspi_alias.cpp
     drivers/atspi/test_atspi_runtime.cpp
@@ -152,6 +150,46 @@ target_include_directories(grab_driver_atspi_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests)
 gtest_discover_tests(grab_driver_atspi_tests DISCOVERY_MODE PRE_TEST)
+
+add_executable(grab_driver_evdev_tests
+    drivers/device/evdev/test_evdev_source.cpp
+)
+target_link_libraries(grab_driver_evdev_tests PRIVATE
+    grab_driver_evdev
+    GTest::gtest_main
+)
+target_include_directories(grab_driver_evdev_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_driver_evdev_tests)
+
+add_executable(grab_compat_tests
+    compat/eventgrab_v1/test_browser_evidence.cpp
+    compat/eventgrab_v1/test_browser_projection.cpp
+)
+target_link_libraries(grab_compat_tests PRIVATE
+    grab_compat_eventgrab_v1
+    grab_core
+    grab_proto
+    GTest::gtest_main
+)
+target_include_directories(grab_compat_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_compat_tests)
+
+add_executable(grab_driver_webextension_tests
+    drivers/semantic/webextension/test_browser_bridge.cpp
+)
+target_link_libraries(grab_driver_webextension_tests PRIVATE
+    grab_driver_webextension
+    grab_core
+    GTest::gtest_main
+)
+target_include_directories(grab_driver_webextension_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_driver_webextension_tests)
 
 # A7: self-provision the Xvfb displays the X-backed suites use so `ctest` is
 # self-contained (no manually-started display). Opt-out with -DGRAB_TEST_PROVISION_XVFB=OFF.

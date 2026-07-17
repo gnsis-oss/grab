@@ -64,7 +64,6 @@ namespace
     constexpr auto             windowCategory       = grab::EventCategory::Window;
     constexpr auto             a11yCategory         = grab::EventCategory::Accessibility;
     constexpr auto             integrationCategory  = grab::EventCategory::Integration;
-    constexpr auto             browserCategory      = grab::EventCategory::Browser;
     constexpr auto             stateCategory        = grab::EventCategory::State;
     constexpr std::string_view codecJsonlTempRoot   = "codec_jsonl_tmp";
     constexpr std::string_view unixEpochFileName    = "1970-01-01.jsonl";
@@ -197,18 +196,6 @@ namespace
     }
 
     [[nodiscard]]
-    grab::BrowserTab
-    browser_tab()
-    {
-        return grab::BrowserTab{
-            .app            = "Firefox",
-            .pid            = grab::Pid{ pidValue },
-            .tab_title      = "Docs",
-            .prev_tab_title = "Search",
-        };
-    }
-
-    [[nodiscard]]
     grab::StateSnapshot
     state_snapshot()
     {
@@ -274,9 +261,6 @@ namespace
             make_event( grab::EventKind::AppContextUpdate,
                         integrationCategory,
                         integration_event() ),
-            make_event( grab::EventKind::BrowserTabSwitched,
-                        browserCategory,
-                        browser_tab() ),
             make_event( grab::EventKind::StateSnapshot,
                         stateCategory,
                         state_snapshot() ),
@@ -360,16 +344,6 @@ namespace
         EXPECT_EQ( actual.title, expected.title );
         EXPECT_EQ( actual.detail, expected.detail );
         EXPECT_EQ( actual.json, expected.json );
-    }
-
-    void
-    expect_payload_value_eq( const grab::BrowserTab& expected,
-                             const grab::BrowserTab& actual )
-    {
-        EXPECT_EQ( actual.app, expected.app );
-        EXPECT_EQ( actual.pid, expected.pid );
-        EXPECT_EQ( actual.tab_title, expected.tab_title );
-        EXPECT_EQ( actual.prev_tab_title, expected.prev_tab_title );
     }
 
     void

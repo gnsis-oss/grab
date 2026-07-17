@@ -1,6 +1,8 @@
 #include "core/permission.hpp"
 #include "grab/event.hpp"
 #include "grab/event_descriptor.hpp"
+#include "grab/ids.hpp"
+#include "grab/origin.hpp"
 #include "grab/payload_fields.hpp"
 #include "grab/result.hpp"
 #include "storage/jsonl_sink.hpp"
@@ -273,23 +275,6 @@ namespace grab::storage
         [[nodiscard]]
         grab::Result<OrderedJson>
         serialize_payload( grab::EventKind,
-                           const grab::BrowserTab& payload )
-        {
-            return OrderedJson{
-                {         std::string{ grab::field_name( grab::PayloadField::App ) },
-                 payload.app            },
-                {         std::string{ grab::field_name( grab::PayloadField::Pid ) },
-                 payload.pid.to_string()},
-                {    std::string{ grab::field_name( grab::PayloadField::TabTitle ) },
-                 payload.tab_title      },
-                {std::string{ grab::field_name( grab::PayloadField::PrevTabTitle ) },
-                 payload.prev_tab_title },
-            };
-        }
-
-        [[nodiscard]]
-        grab::Result<OrderedJson>
-        serialize_payload( grab::EventKind,
                            const grab::StateSnapshot& payload )
         {
             return OrderedJson{
@@ -344,12 +329,39 @@ namespace grab::storage
                 return std::unexpected( std::move( data.error() ) );
             }
 
-            const OrderedJson line{
-                {      "ts",                                      event.timestamp},
-                {    "type",         std::string{ grab::wire_name( event.kind ) }},
-                {"category", std::string{ grab::category_name( event.category ) }},
-                {    "data",                                   std::move( *data )},
+            OrderedJson line = OrderedJson{
+                {      "ts",              event.timestamp                            },
+                {    "type",             std::string{ grab::wire_name( event.kind ) }},
+                {"category",     std::string{ grab::category_name( event.category ) }},
+                {     "seq",                                           event.sequence},
+                {  "origin",
+                 std::string{ grab::detail::event_origin_name.text_of( event.origin,
+                 "unknown" ) }                                                       },
+                {    "data",                                       std::move( *data )},
             };
+
+            if( event.subject.has_value() )
+            {
+                line["subject"] = OrderedJson{
+                    { "runtime", event.subject->runtime.value},
+                    {    "tree",          event.subject->tree},
+                    {   "epoch",   event.subject->epoch.value},
+                    {    "node",          event.subject->node},
+                    {"revision",      event.subject->revision},
+                };
+            }
+            if( event.cause.has_value() )
+            {
+                line["cause"] = event.cause->value.to_string();
+            }
+            if( event.before_revision.has_value() )
+            {
+                line["before"] = *event.before_revision;
+            }
+            if( event.after_revision.has_value() )
+            {
+                line["after"] = *event.after_revision;
+            }
             return line.dump();
         }
 

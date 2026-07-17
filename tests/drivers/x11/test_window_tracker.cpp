@@ -1,5 +1,5 @@
 #include "core/reactor.hpp"
-#include "event/window_x11.hpp"
+#include "drivers/desktop/x11/window_tracker.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/result.hpp"
@@ -51,10 +51,6 @@ namespace
     constexpr std::string_view windowClass     = "GrabWindowTrackerClass";
     constexpr std::string_view initialTitle    = "grab window tracker initial title";
     constexpr std::string_view changedTitle    = "grab window tracker changed title";
-    constexpr std::string_view browserWindowInstance = "grab-browser-instance";
-    constexpr std::string_view browserWindowClass    = "Navigator.firefox-esr";
-    constexpr std::string_view browserInitialTitle   = "grab browser initial title";
-    constexpr std::string_view browserChangedTitle   = "grab browser changed title";
 
     template<typename T>
     using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -371,18 +367,6 @@ namespace
     }
 
     [[nodiscard]]
-    xcb_window_t
-    create_browser_window( xcb_connection_t*   connection,
-                           const xcb_screen_t& screen )
-    {
-        return create_window_with_properties( connection,
-                                              screen,
-                                              browserWindowInstance,
-                                              browserWindowClass,
-                                              browserInitialTitle );
-    }
-
-    [[nodiscard]]
     bool
     wait_for_reactor_barrier( grab::core::Reactor& reactor )
     {
@@ -439,15 +423,6 @@ namespace
     }
 
     [[nodiscard]]
-    grab::EventFilter
-    focus_title_browser_filter()
-    {
-        grab::EventFilter filter = focus_title_filter();
-        filter.kinds.push_back( grab::EventKind::BrowserTabSwitched );
-        return filter;
-    }
-
-    [[nodiscard]]
     std::optional<grab::WindowChange>
     wait_for_window_change( grab::Subscription& subscription,
                             grab::EventKind     kind,
@@ -479,37 +454,6 @@ namespace
         return std::nullopt;
     }
 
-    [[nodiscard]]
-    std::optional<grab::BrowserTab>
-    wait_for_browser_tab( grab::Subscription& subscription,
-                          std::string_view    app,
-                          std::string_view    tab_title )
-    {
-        const auto deadline = std::chrono::steady_clock::now() + eventTimeout;
-        while( std::chrono::steady_clock::now() < deadline )
-        {
-            while( auto event = subscription.try_pop() )
-            {
-                if( event->kind != grab::EventKind::BrowserTabSwitched )
-                {
-                    continue;
-                }
-
-                const auto* payload = std::get_if<grab::BrowserTab>( &event->payload );
-                if( payload !=
-                    nullptr &&
-                    std::string_view{ payload->app } ==
-                    app &&
-                    std::string_view{ payload->tab_title } == tab_title )
-                {
-                    return *payload;
-                }
-            }
-            std::this_thread::sleep_for( eventPollInterval );
-        }
-        return std::nullopt;
-    }
-
     void
     drain_events( grab::Subscription& subscription )
     {
@@ -527,12 +471,13 @@ TEST( WindowX11,
     ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
-    auto subscription   = bus.subscribe( create_destroy_filter(), subscriptionDepth );
+    auto subscription = bus.subscribe( create_destroy_filter(), subscriptionDepth );
 
-    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
-                                                             running.reactor(),
-                                                             bus,
-                                                             pollInterval );
+    auto tracker_result =
+        grab::drivers::desktop::x11::WindowTracker::start( xvfbDisplay,
+                                                           running.reactor(),
+                                                           bus,
+                                                           pollInterval );
     ASSERT_TRUE( tracker_result.has_value() ) << tracker_result.error().message;
     auto tracker = std::move( *tracker_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
@@ -581,10 +526,11 @@ TEST( WindowX11,
         subscriptionDepth
     );
 
-    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
-                                                             running.reactor(),
-                                                             bus,
-                                                             pollInterval );
+    auto tracker_result =
+        grab::drivers::desktop::x11::WindowTracker::start( xvfbDisplay,
+                                                           running.reactor(),
+                                                           bus,
+                                                           pollInterval );
     ASSERT_TRUE( tracker_result.has_value() ) << trackerDidNotStart;
     auto tracker = std::move( *tracker_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
@@ -612,6 +558,76 @@ TEST( WindowX11,
     EXPECT_TRUE( running.result().has_value() );
 }
 
+TEST( WindowTracker,
+      ActiveWindowChangeEmitsActiveChildDelta )
+{
+    RunningReactor running;
+    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
+
+    grab::EventBus bus;
+    auto           subscription = bus.subscribe(
+        grab::EventFilter{
+            .kinds =
+                {
+                        grab::EventKind::WindowFocusChanged,
+                        grab::EventKind::ActiveChildChanged,
+                        },
+            .categories = {  },
+    },
+        subscriptionDepth
+    );
+
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen, nullptr );
+    set_active_window( connection.get(), screen->root, XCB_WINDOW_NONE );
+    EXPECT_TRUE( flush_succeeded( connection.get() ) );
+
+    auto tracker_result =
+        grab::drivers::desktop::x11::WindowTracker::start( xvfbDisplay,
+                                                           running.reactor(),
+                                                           bus,
+                                                           pollInterval );
+    ASSERT_TRUE( tracker_result.has_value() ) << trackerDidNotStart;
+    auto tracker = std::move( *tracker_result );
+    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
+
+    auto baseline = wait_for_event( subscription, grab::EventKind::WindowFocusChanged );
+    ASSERT_TRUE( baseline.has_value() );
+
+    const xcb_window_t first_window  = create_test_window( connection.get(), *screen );
+    const xcb_window_t second_window = create_test_window( connection.get(), *screen );
+    set_active_window( connection.get(), screen->root, first_window );
+    EXPECT_TRUE( flush_succeeded( connection.get() ) );
+
+    auto first_focus = wait_for_window_change( subscription,
+                                               grab::EventKind::WindowFocusChanged,
+                                               windowClass,
+                                               initialTitle );
+    ASSERT_TRUE( first_focus.has_value() );
+    auto first_delta =
+        wait_for_event( subscription, grab::EventKind::ActiveChildChanged );
+    ASSERT_TRUE( first_delta.has_value() );
+
+    set_active_window( connection.get(), screen->root, second_window );
+    EXPECT_TRUE( flush_succeeded( connection.get() ) );
+
+    auto changed = wait_for_event( subscription, grab::EventKind::ActiveChildChanged );
+    ASSERT_TRUE( changed.has_value() );
+    const auto* graph_change = std::get_if<grab::GraphChange>( &changed->payload );
+    ASSERT_NE( graph_change, nullptr );
+    EXPECT_EQ( graph_change->previous_active,
+               static_cast<std::uint64_t>( first_window ) );
+    EXPECT_EQ( graph_change->node, static_cast<std::uint64_t>( second_window ) );
+
+    tracker.stop();
+    running.stop_and_join();
+    EXPECT_TRUE( running.result().has_value() );
+}
+
 TEST( WindowX11,
       TitleChangePublishesTitleChanged )
 {
@@ -619,12 +635,13 @@ TEST( WindowX11,
     ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
 
     grab::EventBus bus;
-    auto subscription   = bus.subscribe( focus_title_filter(), subscriptionDepth );
+    auto subscription = bus.subscribe( focus_title_filter(), subscriptionDepth );
 
-    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
-                                                             running.reactor(),
-                                                             bus,
-                                                             pollInterval );
+    auto tracker_result =
+        grab::drivers::desktop::x11::WindowTracker::start( xvfbDisplay,
+                                                           running.reactor(),
+                                                           bus,
+                                                           pollInterval );
     ASSERT_TRUE( tracker_result.has_value() ) << trackerDidNotStart;
     auto tracker = std::move( *tracker_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
@@ -654,193 +671,6 @@ TEST( WindowX11,
                                            changedTitle );
     ASSERT_TRUE( changed.has_value() );
     EXPECT_EQ( changed->prev_title, initialTitle );
-
-    tracker.stop();
-    running.stop_and_join();
-    EXPECT_TRUE( running.result().has_value() );
-}
-
-TEST( WindowX11,
-      TitleChangeOnBrowserEmitsTabSwitched )
-{
-    RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
-
-    grab::EventBus bus;
-    auto subscription = bus.subscribe( focus_title_browser_filter(), subscriptionDepth );
-
-    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
-                                                             running.reactor(),
-                                                             bus,
-                                                             pollInterval );
-    ASSERT_TRUE( tracker_result.has_value() ) << trackerDidNotStart;
-    auto tracker = std::move( *tracker_result );
-    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
-
-    const TestConnection connection{ xvfbDisplay };
-    ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
-    const xcb_screen_t* screen =
-        default_screen( connection.get(), connection.screen_index() );
-    ASSERT_NE( screen, nullptr );
-
-    const xcb_window_t window = create_browser_window( connection.get(), *screen );
-    set_active_window( connection.get(), screen->root, window );
-    EXPECT_TRUE( flush_succeeded( connection.get() ) );
-
-    auto focused = wait_for_window_change( subscription,
-                                           grab::EventKind::WindowFocusChanged,
-                                           browserWindowClass,
-                                           browserInitialTitle );
-    ASSERT_TRUE( focused.has_value() );
-    drain_events( subscription );
-
-    set_title( connection.get(), window, browserChangedTitle );
-    EXPECT_TRUE( flush_succeeded( connection.get() ) );
-
-    auto changed = wait_for_window_change( subscription,
-                                           grab::EventKind::WindowTitleChanged,
-                                           browserWindowClass,
-                                           browserChangedTitle );
-    ASSERT_TRUE( changed.has_value() );
-    EXPECT_EQ( changed->prev_title, browserInitialTitle );
-
-    auto tab =
-        wait_for_browser_tab( subscription, browserWindowClass, browserChangedTitle );
-    ASSERT_TRUE( tab.has_value() );
-    EXPECT_EQ( tab->app, browserWindowClass );
-    EXPECT_EQ( tab->tab_title, browserChangedTitle );
-    EXPECT_EQ( tab->prev_tab_title, browserInitialTitle );
-
-    tracker.stop();
-    running.stop_and_join();
-    EXPECT_TRUE( running.result().has_value() );
-}
-
-TEST( WindowX11,
-      FocusIntoBrowserEmitsTabSwitched )
-{
-    RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
-
-    grab::EventBus bus;
-    auto subscription = bus.subscribe( focus_title_browser_filter(), subscriptionDepth );
-
-    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
-                                                             running.reactor(),
-                                                             bus,
-                                                             pollInterval );
-    ASSERT_TRUE( tracker_result.has_value() ) << trackerDidNotStart;
-    auto tracker = std::move( *tracker_result );
-    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
-
-    const TestConnection connection{ xvfbDisplay };
-    ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
-    const xcb_screen_t* screen =
-        default_screen( connection.get(), connection.screen_index() );
-    ASSERT_NE( screen, nullptr );
-
-    const xcb_window_t non_browser = create_test_window( connection.get(), *screen );
-    set_active_window( connection.get(), screen->root, non_browser );
-    EXPECT_TRUE( flush_succeeded( connection.get() ) );
-    auto first_focus = wait_for_window_change( subscription,
-                                               grab::EventKind::WindowFocusChanged,
-                                               windowClass,
-                                               initialTitle );
-    ASSERT_TRUE( first_focus.has_value() );
-    drain_events( subscription );
-
-    const xcb_window_t browser = create_browser_window( connection.get(), *screen );
-    set_active_window( connection.get(), screen->root, browser );
-    EXPECT_TRUE( flush_succeeded( connection.get() ) );
-
-    auto browser_focus = wait_for_window_change( subscription,
-                                                 grab::EventKind::WindowFocusChanged,
-                                                 browserWindowClass,
-                                                 browserInitialTitle );
-    ASSERT_TRUE( browser_focus.has_value() );
-
-    auto tab =
-        wait_for_browser_tab( subscription, browserWindowClass, browserInitialTitle );
-    ASSERT_TRUE( tab.has_value() );
-    EXPECT_EQ( tab->app, browserWindowClass );
-    EXPECT_EQ( tab->tab_title, browserInitialTitle );
-    EXPECT_TRUE( tab->prev_tab_title.empty() );
-
-    tracker.stop();
-    running.stop_and_join();
-    EXPECT_TRUE( running.result().has_value() );
-}
-
-TEST( WindowX11,
-      NonBrowserTitleChangeDoesNotEmitTabSwitched )
-{
-    RunningReactor running;
-    ASSERT_TRUE( running.wait_until_started() ) << reactorDidNotStart;
-
-    grab::EventBus bus;
-    auto subscription = bus.subscribe( focus_title_browser_filter(), subscriptionDepth );
-
-    auto tracker_result = grab::event::WindowTracker::start( xvfbDisplay,
-                                                             running.reactor(),
-                                                             bus,
-                                                             pollInterval );
-    ASSERT_TRUE( tracker_result.has_value() ) << trackerDidNotStart;
-    auto tracker = std::move( *tracker_result );
-    ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << trackerNotReady;
-
-    const TestConnection connection{ xvfbDisplay };
-    ASSERT_NE( connection.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
-    const xcb_screen_t* screen =
-        default_screen( connection.get(), connection.screen_index() );
-    ASSERT_NE( screen, nullptr );
-
-    const xcb_window_t window = create_test_window( connection.get(), *screen );
-    set_active_window( connection.get(), screen->root, window );
-    EXPECT_TRUE( flush_succeeded( connection.get() ) );
-
-    auto focused = wait_for_window_change( subscription,
-                                           grab::EventKind::WindowFocusChanged,
-                                           windowClass,
-                                           initialTitle );
-    ASSERT_TRUE( focused.has_value() );
-    drain_events( subscription );
-
-    set_title( connection.get(), window, changedTitle );
-    EXPECT_TRUE( flush_succeeded( connection.get() ) );
-
-    // Drain the whole timeout window (no early exit): a spurious
-    // BrowserTabSwitched could be emitted before OR after the title event, so
-    // we must not stop as soon as the title arrives. Assert the title change
-    // was observed (proves the poll ran) and that no browser tab ever appeared.
-    bool       saw_title       = false;
-    bool       saw_browser_tab = false;
-    const auto deadline        = std::chrono::steady_clock::now() + eventTimeout;
-    while( std::chrono::steady_clock::now() < deadline )
-    {
-        while( auto event = subscription.try_pop() )
-        {
-            if( event->kind == grab::EventKind::WindowTitleChanged )
-            {
-                const auto* payload = std::get_if<grab::WindowChange>( &event->payload );
-                if( payload !=
-                    nullptr &&
-                    std::string_view{ payload->title } == changedTitle )
-                {
-                    saw_title = true;
-                }
-            }
-            else if( event->kind == grab::EventKind::BrowserTabSwitched )
-            {
-                saw_browser_tab = true;
-            }
-        }
-        std::this_thread::sleep_for( eventPollInterval );
-    }
-    EXPECT_TRUE( saw_title );
-    EXPECT_FALSE( saw_browser_tab );
 
     tracker.stop();
     running.stop_and_join();

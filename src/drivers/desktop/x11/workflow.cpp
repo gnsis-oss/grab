@@ -1,8 +1,8 @@
 #include "codec/png.hpp"
 #include "core/reactor.hpp"
 #include "drivers/desktop/x11/window_match.hpp"
+#include "drivers/desktop/x11/window_tracker.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
-#include "event/window_x11.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -365,10 +365,11 @@ namespace grab::screen
             subscriptionDepth
         );
 
-        auto tracker = grab::event::WindowTracker::start( nullptr,
-                                                          running.reactor(),
-                                                          bus,
-                                                          trackerPollInterval );
+        auto tracker =
+            grab::drivers::desktop::x11::WindowTracker::start( nullptr,
+                                                               running.reactor(),
+                                                               bus,
+                                                               trackerPollInterval );
         if( !tracker.has_value() )
         {
             running.stop_and_join();

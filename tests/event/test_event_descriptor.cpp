@@ -9,12 +9,11 @@
 namespace
 {
 
-    constexpr auto descriptorCount                = 28U;
+    constexpr auto descriptorCount                = 27U;
     constexpr auto keyDownKind                    = grab::EventKind::KeyDown;
     constexpr auto windowCreatedKind              = grab::EventKind::WindowCreated;
     constexpr auto a11yTextChangedKind            = grab::EventKind::A11yTextChanged;
     constexpr auto appContextUpdateKind           = grab::EventKind::AppContextUpdate;
-    constexpr auto browserTabKind                 = grab::EventKind::BrowserTabSwitched;
     constexpr auto stateSnapshotKind              = grab::EventKind::StateSnapshot;
     constexpr auto nodeAddedKind                  = grab::EventKind::NodeAdded;
     constexpr auto nodeChangedKind                = grab::EventKind::NodeChanged;
@@ -23,27 +22,24 @@ namespace
     constexpr auto windowCategory                 = grab::EventCategory::Window;
     constexpr auto a11yCategory                   = grab::EventCategory::Accessibility;
     constexpr auto integrationCategory            = grab::EventCategory::Integration;
-    constexpr auto browserCategory                = grab::EventCategory::Browser;
     constexpr auto stateCategory                  = grab::EventCategory::State;
-    constexpr std::string_view browserTabSwitched = "browser.tab_switched";
     constexpr std::string_view appContextUpdate   = "app.context_update";
     constexpr std::string_view appTabChanged      = "app.tab_changed";
     constexpr std::string_view inputKeyDown       = "input.key_down";
     constexpr std::string_view unspecified        = "unspecified";
-    constexpr std::string_view flatTabSwitched    = "tab_switched";
     constexpr std::string_view flatContextUpdate  = "context_update";
     constexpr std::string_view unknownType        = "does.not.exist";
     constexpr std::string_view nodeAdded          = "node.added";
     constexpr std::string_view activeChildChanged = "active_child.changed";
     constexpr auto             coalesceClass      = grab::CoalescingClass::Coalesce;
     constexpr auto             noReplayPolicy     = grab::ReplayPolicy::None;
+    constexpr auto             currentSetPolicy   = grab::ReplayPolicy::CurrentSet;
 
     static_assert( grab::detail::eventDescriptors.size() == descriptorCount );
     static_assert( grab::category_of( keyDownKind ) == inputCategory );
     static_assert( grab::category_of( windowCreatedKind ) == windowCategory );
     static_assert( grab::category_of( a11yTextChangedKind ) == a11yCategory );
     static_assert( grab::category_of( appContextUpdateKind ) == integrationCategory );
-    static_assert( grab::category_of( browserTabKind ) == browserCategory );
     static_assert( grab::category_of( stateSnapshotKind ) == stateCategory );
 
 }    // namespace
@@ -51,7 +47,6 @@ namespace
 TEST( EventDescriptor,
       MapsKindToWireName )
 {
-    EXPECT_EQ( grab::wire_name( browserTabKind ), browserTabSwitched );
     EXPECT_EQ( grab::wire_name( appContextUpdateKind ), appContextUpdate );
     EXPECT_EQ( grab::wire_name( keyDownKind ), inputKeyDown );
 }
@@ -59,7 +54,6 @@ TEST( EventDescriptor,
 TEST( EventDescriptor,
       MapsWireNameToKind )
 {
-    EXPECT_EQ( grab::wire_kind( browserTabSwitched ), browserTabKind );
     EXPECT_EQ( grab::wire_kind( appContextUpdate ), appContextUpdateKind );
     EXPECT_EQ( grab::wire_kind( appTabChanged ), grab::EventKind::AppTabChanged );
 }
@@ -67,7 +61,6 @@ TEST( EventDescriptor,
 TEST( EventDescriptor,
       RejectsDroppedFlatAliases )
 {
-    EXPECT_EQ( grab::wire_kind( flatTabSwitched ), std::nullopt );
     EXPECT_EQ( grab::wire_kind( flatContextUpdate ), std::nullopt );
 }
 
@@ -95,4 +88,5 @@ TEST( EventDescriptor,
     EXPECT_EQ( grab::wire_name( activeChildChangedKind ), activeChildChanged );
     EXPECT_EQ( grab::coalescing_class_of( nodeChangedKind ), coalesceClass );
     EXPECT_EQ( grab::replay_policy_of( nodeAddedKind ), noReplayPolicy );
+    EXPECT_EQ( grab::replay_policy_of( windowCreatedKind ), currentSetPolicy );
 }

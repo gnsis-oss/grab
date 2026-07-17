@@ -1,6 +1,6 @@
+#include "drivers/semantic/atspi/atspi_monitor.hpp"
 #include "drivers/semantic/atspi/atspi_runtime.hpp"
 #include "drivers/semantic/atspi/atspi_tree_source.hpp"
-#include "event/atspi.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -126,8 +127,22 @@ namespace grab::drivers::semantic::atspi
                     return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "AT-SPI event spec must not be empty" );
                 }
-                const std::scoped_lock lock{ mutex_ };
-                enabled_.insert( spec.name );
+                bool                        became_non_empty = false;
+                std::function<void( bool )> demand_sink;
+                {
+                    const std::scoped_lock lock{ mutex_ };
+                    const bool             was_empty = enabled_.empty();
+                    enabled_.insert( spec.name );
+                    became_non_empty = was_empty && !enabled_.empty();
+                    if( became_non_empty )
+                    {
+                        demand_sink = demand_sink_;
+                    }
+                }
+                if( became_non_empty && demand_sink )
+                {
+                    demand_sink( true );
+                }
                 return {};
             }
 
@@ -135,9 +150,30 @@ namespace grab::drivers::semantic::atspi
             grab::Result<void>
             disable( const grab::spi::EventSpec& spec ) override
             {
-                const std::scoped_lock lock{ mutex_ };
-                enabled_.erase( spec.name );
+                bool                        became_empty = false;
+                std::function<void( bool )> demand_sink;
+                {
+                    const std::scoped_lock lock{ mutex_ };
+                    const bool             was_non_empty = !enabled_.empty();
+                    enabled_.erase( spec.name );
+                    became_empty = was_non_empty && enabled_.empty();
+                    if( became_empty )
+                    {
+                        demand_sink = demand_sink_;
+                    }
+                }
+                if( became_empty && demand_sink )
+                {
+                    demand_sink( false );
+                }
                 return {};
+            }
+
+            void
+            set_demand_sink( std::function<void( bool )> sink )
+            {
+                const std::scoped_lock lock{ mutex_ };
+                demand_sink_ = std::move( sink );
             }
 
             [[nodiscard]]
@@ -194,11 +230,12 @@ namespace grab::drivers::semantic::atspi
 
         private:
 
-            grab::Subscription      subscription_;
-            std::mutex              mutex_;
-            std::condition_variable condition_;
-            std::set<std::string>   enabled_;
-            bool                    notified_{};
+            grab::Subscription          subscription_;
+            std::mutex                  mutex_;
+            std::condition_variable     condition_;
+            std::set<std::string>       enabled_;
+            std::function<void( bool )> demand_sink_;
+            bool                        notified_{};
     };
 
     AtspiRuntime::AtspiRuntime() :
@@ -290,6 +327,24 @@ namespace grab::drivers::semantic::atspi
                                                           enumerate_accessibles_,
                                                           x11_alias_authority_ );
         monitor_ = std::make_unique<grab::event::AtspiMonitor>( std::move( *monitor ) );
+        event_source_->set_demand_sink(
+            [this]( bool enabled )
+            {
+                if( monitor_ == nullptr )
+                {
+                    return;
+                }
+                if( enabled )
+                {
+                    // NOLINTNEXTLINE(bugprone-unused-return-value)
+                    static_cast<void>( monitor_->enable_events() );
+                }
+                else
+                {
+                    monitor_->disable_events();
+                }
+            }
+        );
         generation_  = next_generation;
         runtime_id_  = next_runtime_id;
         has_started_ = true;

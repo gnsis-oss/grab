@@ -1,7 +1,7 @@
-#include "event/state.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "kernel/graph/state_manager.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -12,6 +12,7 @@
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace grab::event
 {
@@ -161,6 +162,32 @@ namespace grab::event
                 .json = root.dump(),
             } },
         };
+    }
+
+    std::vector<grab::Event>
+    StateManager::open_window_events( double timestamp ) const
+    {
+        std::vector<grab::Event> events;
+        events.reserve( open_windows_.size() );
+
+        for( const auto& window : open_windows_ )
+        {
+            events.push_back( grab::Event{
+                .timestamp = timestamp,
+                .sequence  = unsetSequence,
+                .kind      = grab::EventKind::WindowCreated,
+                .category  = grab::category_of( grab::EventKind::WindowCreated ),
+                .payload   = grab::Payload{ grab::WindowChange{
+                    .app        = window.app,
+                    .pid        = window.pid,
+                    .title      = window.title,
+                    .prev_title = {},
+                    .duration_s = 0.0,
+                } },
+            } );
+        }
+
+        return events;
     }
 
     void

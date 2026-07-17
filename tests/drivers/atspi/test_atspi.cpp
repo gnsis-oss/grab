@@ -1,5 +1,5 @@
 #include "core/reactor.hpp"
-#include "event/atspi.hpp"
+#include "drivers/semantic/atspi/atspi_monitor.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/result.hpp"
@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <chrono>
 #include <future>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <variant>
@@ -194,4 +195,48 @@ TEST( Atspi,
     EXPECT_EQ( monitor.error().code, deviceInaccessibleCode );
     running.stop_and_join();
     EXPECT_TRUE( running.result().has_value() );
+}
+
+// GoogleTest assertion macros inflate the reported cognitive complexity.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+TEST( AtspiEventRegistry,
+      DemandTogglesRegistrationExactlyOnceAtTransitions )
+{
+    int                             enable_calls  = 0;
+    int                             disable_calls = 0;
+    std::string                     last_name;
+    grab::event::AtspiEventRegistry registry(
+        [&]( std::string_view name, bool enable ) -> grab::Result<void>
+        {
+            last_name = std::string{ name };
+            if( enable )
+            {
+                ++enable_calls;
+            }
+            else
+            {
+                ++disable_calls;
+            }
+            return {};
+        }
+    );
+
+    constexpr std::string_view eventName = "object:state-changed:focused";
+
+    ASSERT_TRUE( registry.acquire( eventName ).has_value() );    // 0->1 registers
+    EXPECT_EQ( enable_calls, 1 );
+    EXPECT_EQ( registry.demand( eventName ), 1U );
+
+    ASSERT_TRUE( registry.acquire( eventName ).has_value() );    // 1->2 no register
+    EXPECT_EQ( enable_calls, 1 );
+    EXPECT_EQ( registry.demand( eventName ), 2U );
+
+    registry.release( eventName );    // 2->1 no deregister
+    EXPECT_EQ( disable_calls, 0 );
+    EXPECT_EQ( registry.demand( eventName ), 1U );
+
+    registry.release( eventName );    // 1->0 deregisters
+    EXPECT_EQ( disable_calls, 1 );
+    EXPECT_EQ( registry.demand( eventName ), 0U );
+    EXPECT_EQ( last_name, std::string{ eventName } );
 }
