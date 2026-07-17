@@ -2,7 +2,6 @@
 
 #include "grab/capture.hpp"
 #include "grab/context.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/ids.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
@@ -10,6 +9,7 @@
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "grab/trace.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "kernel/graph/tree_store.hpp"
 #include "spi/runtime.hpp"

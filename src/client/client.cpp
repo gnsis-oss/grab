@@ -2,7 +2,6 @@
 #include "client/transport.hpp"
 #include "grab/capture.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
@@ -10,6 +9,7 @@
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/trace.hpp"
+#include "kernel/events/event_bus.hpp"
 
 #include <algorithm>
 #include <array>

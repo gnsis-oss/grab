@@ -41,7 +41,7 @@ add_library(grab_core STATIC
     src/spi/monitor.cpp
     src/kernel/lifecycle/context.cpp
     src/kernel/routing/doctor.cpp
-    src/core/event_bus.cpp
+    src/kernel/events/event_bus.cpp
     src/kernel/identity/id_factory.cpp
     src/kernel/support/posix_open.c
     src/spi/permission.cpp

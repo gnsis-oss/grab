@@ -1,7 +1,6 @@
 #pragma once
 
 #include "grab/capture.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/query.hpp"
@@ -31,6 +30,8 @@ namespace grab::spi
 
 namespace grab
 {
+
+    class EventBus;
 
     struct SessionOptions
     {

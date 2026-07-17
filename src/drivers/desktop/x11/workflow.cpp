@@ -4,7 +4,6 @@
 #include "drivers/desktop/x11/workflow.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/geometry/size.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
@@ -13,6 +12,7 @@
 #include "kernel/action/polling_event_source.hpp"
 #include "kernel/action/wait_engine.hpp"
 #include "kernel/capture/tile_differ.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/scheduling/reactor.hpp"
 #include "notify/notifier.hpp"
 

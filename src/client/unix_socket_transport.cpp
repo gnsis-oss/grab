@@ -8,7 +8,6 @@
 #include "frontends/grpc/proto_descriptor.hpp"
 #include "grab/capture.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/ids.hpp"
 #include "grab/interaction.hpp"
@@ -17,6 +16,7 @@
 #include "grab/result.hpp"
 #include "grab/space.hpp"
 #include "grab/trace.hpp"
+#include "kernel/events/event_bus.hpp"
 
 #include <atomic>
 #include <chrono>

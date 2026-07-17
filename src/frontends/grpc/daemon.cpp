@@ -2,10 +2,10 @@
 #include "frontends/grpc/server.hpp"
 #include "grab/active_kind_probe.hpp"
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/scheduling/reactor.hpp"
 #include "storage/jsonl_sink.hpp"
 

@@ -1,7 +1,7 @@
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/pid.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/graph/state_snapshot_provider.hpp"
 
 // clang-format off

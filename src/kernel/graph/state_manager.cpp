@@ -1,6 +1,6 @@
 #include "grab/event.hpp"
-#include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
+#include "kernel/events/event_bus.hpp"
 #include "kernel/graph/state_manager.hpp"
 
 #include <algorithm>
