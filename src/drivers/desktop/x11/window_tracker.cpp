@@ -1,10 +1,8 @@
 #include "core/reactor.hpp"
 #include "drivers/desktop/x11/protocol.hpp"
-#include "event/browser_classifier.hpp"
-#include "event/window_x11.hpp"
+#include "drivers/desktop/x11/window_tracker.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
-#include "grab/event_descriptor.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 
@@ -25,7 +23,7 @@
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 
-namespace grab::event
+namespace grab::drivers::desktop::x11
 {
     namespace
     {
@@ -67,7 +65,6 @@ namespace grab::event
         {
                 xcb_window_t                          window = XCB_WINDOW_NONE;
                 std::string                           app;
-                bool                                  is_browser = false;
                 grab::Pid                             pid;
                 std::string                           title;
                 std::chrono::steady_clock::time_point opened_at;
@@ -385,14 +382,12 @@ namespace grab::event
                           const Atoms&                          atoms,
                           std::chrono::steady_clock::time_point opened_at )
         {
-            const std::string app = read_app( connection, window );
             return TrackedWindow{
-                .window     = window,
-                .app        = app,
-                .is_browser = is_browser_app( app ),
-                .pid        = read_pid( connection, window, atoms ),
-                .title      = read_title( connection, window, atoms ),
-                .opened_at  = opened_at,
+                .window    = window,
+                .app       = read_app( connection, window ),
+                .pid       = read_pid( connection, window, atoms ),
+                .title     = read_title( connection, window, atoms ),
+                .opened_at = opened_at,
             };
         }
 
@@ -418,10 +413,9 @@ namespace grab::event
             const auto existing = find_tracked( windows, window );
             if( existing != windows.end() )
             {
-                existing->app        = read_app( connection, window );
-                existing->is_browser = is_browser_app( existing->app );
-                existing->pid        = read_pid( connection, window, atoms );
-                existing->title      = read_title( connection, window, atoms );
+                existing->app   = read_app( connection, window );
+                existing->pid   = read_pid( connection, window, atoms );
+                existing->title = read_title( connection, window, atoms );
                 return *existing;
             }
 
@@ -461,15 +455,20 @@ namespace grab::event
 
         [[nodiscard]]
         grab::Event
-        make_browser_tab_event( grab::BrowserTab payload )
+        make_active_child_event( xcb_window_t previous_active,
+                                 xcb_window_t current_active )
         {
-            constexpr auto kind = grab::EventKind::BrowserTabSwitched;
             return grab::Event{
                 .timestamp = now_timestamp_s(),
                 .sequence  = 0U,
-                .kind      = kind,
-                .category  = grab::category_of( kind ),
-                .payload   = grab::Payload{ std::move( payload ) },
+                .kind      = grab::EventKind::ActiveChildChanged,
+                .category  = grab::EventCategory::Window,
+                .payload   = grab::Payload{ grab::GraphChange{
+                    .node            = static_cast<std::uint64_t>( current_active ),
+                    .related         = 0U,
+                    .relation        = 0U,
+                    .previous_active = static_cast<std::uint64_t>( previous_active ),
+                } },
             };
         }
 
@@ -853,19 +852,15 @@ namespace grab::event
 
             const xcb_window_t current_active =
                 active_window( state->connection, state->root, state->atoms );
+            const bool had_polled_before = state->has_polled_active;
             const bool active_changed =
-                !state->has_polled_active || current_active != state->active_window;
+                !had_polled_before || current_active != state->active_window;
             state->has_polled_active = true;
 
             if( active_changed )
             {
                 const xcb_window_t prev_active = state->active_window;
-                const auto previous     = find_tracked( state->tracked, prev_active );
-                const bool has_previous = previous != state->tracked.end();
-                const bool previous_is_browser = has_previous && previous->is_browser;
-                const std::string previous_app =
-                    has_previous ? previous->app : std::string{};
-                state->active_window = current_active;
+                state->active_window           = current_active;
                 if( current_active == XCB_WINDOW_NONE )
                 {
                     pending_events.push_back( make_empty_focus_event() );
@@ -880,19 +875,12 @@ namespace grab::event
                         make_window_event( grab::EventKind::WindowFocusChanged,
                                            make_window_change( info ) )
                     );
-                    if( auto tab = browser_tab_on_focus_change( info.app,
-                                                                info.pid,
-                                                                info.is_browser,
-                                                                info.title,
-                                                                has_previous,
-                                                                previous_is_browser,
-                                                                previous_app );
-                        tab.has_value() )
-                    {
-                        pending_events.push_back(
-                            make_browser_tab_event( std::move( *tab ) )
-                        );
-                    }
+                }
+                if( had_polled_before )
+                {
+                    pending_events.push_back(
+                        make_active_child_event( prev_active, current_active )
+                    );
                 }
             }
             else if( current_active != XCB_WINDOW_NONE )
@@ -921,17 +909,6 @@ namespace grab::event
                             make_window_event( grab::EventKind::WindowTitleChanged,
                                                std::move( payload ) )
                         );
-                        if( auto tab = browser_tab_on_title_change( existing->app,
-                                                                    existing->pid,
-                                                                    existing->is_browser,
-                                                                    new_title,
-                                                                    old_title );
-                            tab.has_value() )
-                        {
-                            pending_events.push_back(
-                                make_browser_tab_event( std::move( *tab ) )
-                            );
-                        }
                     }
                 }
             }
@@ -1002,4 +979,4 @@ namespace grab::event
         }
     }
 
-}    // namespace grab::event
+}    // namespace grab::drivers::desktop::x11

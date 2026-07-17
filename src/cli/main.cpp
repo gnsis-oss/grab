@@ -10,8 +10,8 @@
 #include "core/reactor.hpp"
 #include "core/registry.hpp"
 #include "drivers/desktop/x11/window_match.hpp"
+#include "drivers/desktop/x11/window_tracker.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
-#include "event/window_x11.hpp"
 #include "grab/capture.hpp"
 #include "grab/command_descriptor.hpp"
 #include "grab/event.hpp"
@@ -1744,7 +1744,8 @@ namespace
             }
         );
 
-        auto tracker = grab::event::WindowTracker::start( nullptr, reactor, bus );
+        auto tracker =
+            grab::drivers::desktop::x11::WindowTracker::start( nullptr, reactor, bus );
         if( !tracker.has_value() )
         {
             reactor.stop();

@@ -49,7 +49,6 @@ add_executable(grab_core_tests
     event/test_payload_fields.cpp
     event/test_state.cpp
     event/test_state_source.cpp
-    event/test_window_x11.cpp
     notify/test_notifier.cpp
     transport/test_codec.cpp
     storage/test_jsonl_sink.cpp
@@ -109,6 +108,7 @@ add_executable(grab_driver_x11_tests
     drivers/x11/test_x11_tree_source.cpp
     drivers/x11/test_x11_xtest_seat.cpp
     drivers/x11/test_x11_drag_recipe.cpp
+    drivers/x11/test_window_tracker.cpp
 )
 target_link_libraries(grab_driver_x11_tests PRIVATE
     grab_driver_x11

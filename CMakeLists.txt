@@ -131,7 +131,6 @@ target_include_directories(grab_input PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/comp
 target_compile_features(grab_input PUBLIC cxx_std_23)
 
 add_library(grab_event STATIC
-    src/event/window_x11.cpp
     src/event/browser_bridge.cpp
     src/event/state.cpp
     src/event/state_source.cpp
@@ -189,6 +188,7 @@ add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/x11_topology_source.cpp
     src/drivers/desktop/x11/x11_tree_source.cpp
     src/drivers/desktop/x11/x11_xtest_seat.cpp
+    src/drivers/desktop/x11/window_tracker.cpp
 )
 target_link_libraries(grab_driver_x11
     PUBLIC

@@ -1,4 +1,4 @@
-#pragma once
+#pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "grab/result.hpp"
 
@@ -20,7 +20,7 @@ namespace grab::core
 
 }    // namespace grab::core
 
-namespace grab::event
+namespace grab::drivers::desktop::x11
 {
 
     class WindowTracker
@@ -70,4 +70,4 @@ namespace grab::event
             std::shared_ptr<State> state_;
     };
 
-}    // namespace grab::event
+}    // namespace grab::drivers::desktop::x11
