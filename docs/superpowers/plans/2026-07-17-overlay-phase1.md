@@ -34,7 +34,11 @@
 ```cpp
 namespace grab::overlay
 {
-    struct Color { std::uint8_t r = 0U, g = 0U, b = 0U, a = 255U; };
+    struct Color { std::uint8_t r = 0U, g = 0U, b = 0U,
+                                a = std::numeric_limits<std::uint8_t>::max(); };
+    // ^ tidy adjudication (T1 review): a bare 255U trips readability-magic-numbers,
+    //   and {} on members with user-provided default ctors trips
+    //   readability-redundant-member-init — the tidy-clean spellings govern.
     struct StrokeStyle { Color color{}; float width_px = 1.0F; };   // device-space px (spec §3.2)
     struct FillStyle { Color color{}; };
 
@@ -59,9 +63,9 @@ namespace grab::overlay
 
     struct Shape
     {
-        Geometry                   geometry{};
-        std::optional<StrokeStyle> stroke{};
-        std::optional<FillStyle>   fill{};
+        Geometry                   geometry;
+        std::optional<StrokeStyle> stroke;
+        std::optional<FillStyle>   fill;
         LifetimePolicy             lifetime{ Persistent{} };
         Band                       band = Band::Annotation;
         std::int32_t               z    = 0;
@@ -76,7 +80,7 @@ namespace grab::overlay
     struct Upsert { ShapeRecord record{}; };
     struct Remove { ShapeId id{}; };
     struct Clear  { SceneEpoch new_epoch{}; };
-    struct SceneDelta { SceneEpoch epoch{}; Revision revision{}; std::variant<Upsert, Remove, Clear> change{}; };
+    struct SceneDelta { SceneEpoch epoch{}; Revision revision{}; std::variant<Upsert, Remove, Clear> change; };
 
     struct SceneSnapshot { SceneEpoch epoch{}; Revision through_revision{}; std::vector<ShapeRecord> shapes; };
 }
