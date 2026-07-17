@@ -135,6 +135,7 @@ target_compile_features(grab_input PUBLIC cxx_std_23)
 # v1-wire projection here (src/compat/eventgrab_v1/).
 add_library(grab_compat_eventgrab_v1 STATIC
     src/compat/eventgrab_v1/browser_projection.cpp
+    src/compat/eventgrab_v1/v1_payload_codec.cpp
 )
 target_link_libraries(grab_compat_eventgrab_v1 PUBLIC grab_core grab_proto "${GRAB_PROTOBUF_TARGET}")
 target_include_directories(grab_compat_eventgrab_v1 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
@@ -250,7 +251,7 @@ add_library(grab_transport STATIC
     src/frontends/grpc/server.cpp
 )
 target_link_libraries(grab_transport PUBLIC grab_core grab_proto "${GRAB_GRPCXX_TARGET}" "${GRAB_PROTOBUF_TARGET}")
-target_link_libraries(grab_transport PRIVATE grab_kernel grab_codec)
+target_link_libraries(grab_transport PRIVATE grab_kernel grab_codec grab_compat_eventgrab_v1)
 target_include_directories(grab_transport PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_transport PUBLIC cxx_std_23)
 
