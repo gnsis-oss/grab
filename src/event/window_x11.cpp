@@ -1,4 +1,5 @@
 #include "core/reactor.hpp"
+#include "drivers/desktop/x11/protocol.hpp"
 #include "event/browser_classifier.hpp"
 #include "event/window_x11.hpp"
 #include "grab/event.hpp"
@@ -6,7 +7,6 @@
 #include "grab/event_descriptor.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "platform/x11/protocol.hpp"
 
 #include <algorithm>
 #include <chrono>

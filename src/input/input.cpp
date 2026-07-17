@@ -1,11 +1,11 @@
 #include "drivers/desktop/x11/x11_drag_recipe.hpp"
 #include "drivers/desktop/x11/x11_xtest_seat.hpp"
+#include "drivers/desktop/x11/xcb_connection.hpp"
+#include "drivers/desktop/x11/xkb_keymap.hpp"
 #include "grab/drag.hpp"
 #include "grab/input.hpp"
 #include "grab/keymap.hpp"
 #include "grab/result.hpp"
-#include "platform/x11/xcb_connection.hpp"
-#include "platform/x11/xkb_keymap.hpp"
 
 #include <algorithm>
 #include <array>
