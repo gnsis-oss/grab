@@ -1,5 +1,5 @@
+#include "frontends/grpc/service.hpp"
 #include "grab/event_bus.hpp"
-#include "transport/service.hpp"
 
 #include <array>
 #include <atomic>

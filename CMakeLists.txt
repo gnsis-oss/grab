@@ -245,9 +245,9 @@ target_include_directories(grab_input_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_input_x11 PUBLIC cxx_std_23)
 
 add_library(grab_transport STATIC
-    src/transport/codec.cpp
-    src/transport/service.cpp
-    src/transport/server.cpp
+    src/frontends/grpc/codec.cpp
+    src/frontends/grpc/service.cpp
+    src/frontends/grpc/server.cpp
 )
 target_link_libraries(grab_transport PUBLIC grab_core grab_proto "${GRAB_GRPCXX_TARGET}" "${GRAB_PROTOBUF_TARGET}")
 target_link_libraries(grab_transport PRIVATE grab_kernel grab_codec)
@@ -271,7 +271,7 @@ target_include_directories(grab_storage PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_storage PUBLIC cxx_std_23)
 
 add_library(grab_service STATIC
-    src/service/daemon.cpp
+    src/frontends/grpc/daemon.cpp
 )
 target_link_libraries(grab_service PUBLIC grab_core grab_transport grab_storage)
 target_include_directories(grab_service PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)

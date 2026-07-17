@@ -3,6 +3,10 @@
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/proto_descriptor.hpp"
+#include "frontends/grpc/server.hpp"
+#include "frontends/grpc/service.hpp"
 #include "grab/active_kind_probe.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -11,10 +15,6 @@
 #include "grab/role.hpp"
 #include "grab/session.hpp"
 #include "grab/ui.hpp"
-#include "transport/codec.hpp"
-#include "transport/proto_descriptor.hpp"
-#include "transport/server.hpp"
-#include "transport/service.hpp"
 
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>

@@ -1,12 +1,12 @@
 #include "eventgrab/v1/events.pb.h"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/proto_descriptor.hpp"
 #include "grab/event.hpp"
 #include "grab/ids.hpp"
 #include "grab/origin.hpp"
 #include "grab/payload_fields.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
-#include "transport/codec.hpp"
-#include "transport/proto_descriptor.hpp"
 
 #include <algorithm>
 #include <array>

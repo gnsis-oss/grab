@@ -4,6 +4,8 @@
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.grpc.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/proto_descriptor.hpp"
 #include "grab/capture.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -15,8 +17,6 @@
 #include "grab/result.hpp"
 #include "grab/space.hpp"
 #include "grab/trace.hpp"
-#include "transport/codec.hpp"
-#include "transport/proto_descriptor.hpp"
 
 #include <chrono>
 #include <cstddef>

@@ -1,6 +1,9 @@
 #include "codec/png.hpp"
 #include "eventgrab/v1/events.pb.h"
 #include "eventgrab/v1/service.pb.h"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/proto_descriptor.hpp"
+#include "frontends/grpc/service.hpp"
 #include "grab/active_kind_probe.hpp"
 #include "grab/capture.hpp"
 #include "grab/command_descriptor.hpp"
@@ -14,9 +17,6 @@
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "grab/trace.hpp"
-#include "transport/codec.hpp"
-#include "transport/proto_descriptor.hpp"
-#include "transport/service.hpp"
 
 #include <algorithm>
 #include <array>

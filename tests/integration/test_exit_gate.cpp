@@ -3,6 +3,7 @@
 #include "compat/eventgrab_v1/browser_projection.hpp"
 #include "core/reactor.hpp"
 #include "drivers/desktop/x11/enumerate.hpp"
+#include "frontends/grpc/codec.hpp"
 #include "grab/capture.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
@@ -13,7 +14,6 @@
 #include "grab/session.hpp"
 #include "grab/space.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
-#include "transport/codec.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>

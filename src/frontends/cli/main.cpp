@@ -12,6 +12,7 @@
 #include "frontends/cli/common.hpp"
 #include "frontends/cli/input_command.hpp"
 #include "frontends/cli/session_command.hpp"
+#include "frontends/grpc/daemon.hpp"
 #include "grab/capture.hpp"
 #include "grab/command_descriptor.hpp"
 #include "grab/event.hpp"
@@ -31,7 +32,6 @@
 #include "grab/ui.hpp"
 #include "image/compare.hpp"
 #include "notify/notifier.hpp"
-#include "service/daemon.hpp"
 
 #include <charconv>
 #include <condition_variable>

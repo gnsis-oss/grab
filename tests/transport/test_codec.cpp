@@ -1,4 +1,6 @@
 #include "eventgrab/v1/events.pb.h"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/proto_descriptor.hpp"
 #include "grab/event.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/ids.hpp"
@@ -6,8 +8,6 @@
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "storage/jsonl_sink.hpp"
-#include "transport/codec.hpp"
-#include "transport/proto_descriptor.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
