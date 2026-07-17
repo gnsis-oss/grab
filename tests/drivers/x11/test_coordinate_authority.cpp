@@ -1,7 +1,7 @@
-#include "core/space_graph.hpp"    // NOLINT(misc-include-cleaner)
 #include "drivers/desktop/x11/coordinate_authority.hpp"
 #include "drivers/desktop/x11/enumerate.hpp"
 #include "grab/result.hpp"
+#include "kernel/presentation/space_graph.hpp"    // NOLINT(misc-include-cleaner)
 
 #include <array>
 #include <cstdint>

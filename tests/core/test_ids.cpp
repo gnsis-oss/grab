@@ -1,5 +1,5 @@
-#include "core/id_factory.hpp"
 #include "grab/ids.hpp"
+#include "kernel/identity/id_factory.hpp"
 
 // clang-format and llvm-include-order disagree about these include categories.
 // NOLINTBEGIN(llvm-include-order)

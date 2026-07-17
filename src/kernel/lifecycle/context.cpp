@@ -1,7 +1,7 @@
-#include "core/id_factory.hpp"
 #include "grab/context.hpp"
 #include "grab/result.hpp"
 #include "grab/trace.hpp"
+#include "kernel/identity/id_factory.hpp"
 
 #include <chrono>
 #include <cstddef>
