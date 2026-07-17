@@ -1,8 +1,8 @@
 add_test(NAME grab_invariant_checks
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_invariants.sh)
 
-add_test(NAME grab_legacy_ratchet
-         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_legacy_ratchet.sh)
+add_test(NAME grab_public_header_allowlist
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_headers.sh)
 
 add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/input_command.cpp
