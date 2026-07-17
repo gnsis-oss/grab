@@ -1,9 +1,11 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "grab/context.hpp"
+#include "grab/event.hpp"
 #include "grab/result.hpp"
 
 #include <chrono>
+#include <functional>
 #include <string>
 
 namespace grab::spi
@@ -21,8 +23,18 @@ namespace grab::spi
     {
         public:
 
-            EventSource()                     = default;
-            virtual ~EventSource()            = default;
+            using EventSink        = std::function<void( grab::Event&& )>;
+
+            EventSource()          = default;
+            virtual ~EventSource() = default;
+
+            // Producer sources (X11, fake) override this to deliver each decoded
+            // grab::Event; sources that self-publish (e.g. AT-SPI) ignore it.
+            virtual void
+            set_sink( EventSink )
+            {
+            }
+
             EventSource( const EventSource& ) = delete;
             EventSource&
             operator=( const EventSource& ) = delete;

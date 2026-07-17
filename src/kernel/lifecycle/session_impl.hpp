@@ -39,6 +39,8 @@ namespace grab::drivers::desktop::x11
 namespace grab::kernel::lifecycle
 {
 
+    class ObservationPump;
+
     class SessionCore
     {
         public:
@@ -131,6 +133,15 @@ namespace grab::kernel::lifecycle
             RuntimeId
             runtime_id_at( std::size_t index ) const noexcept;
 
+            // Start/stop the continuous observation pump over the primary
+            // runtime's event source and periodic tree-delta drains.
+            [[nodiscard]]
+            Result<void>
+            start_observation( const OperationContext& context );
+
+            void
+            stop_observation();
+
         private:
 
             struct RuntimeBinding
@@ -185,6 +196,7 @@ namespace grab::kernel::lifecycle
             // restart-scoped id. Source-minted ids still drive per-store restart
             // detection.
             std::uint32_t                                next_runtime_id_{ 1U };
+            std::unique_ptr<ObservationPump>             pump_;
     };
 
     [[nodiscard]]

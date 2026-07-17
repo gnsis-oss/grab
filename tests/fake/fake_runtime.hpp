@@ -2,6 +2,7 @@
 
 #include "fake/fake_tree_source.hpp"
 #include "grab/context.hpp"
+#include "grab/event.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
 #include "grab/ui.hpp"
@@ -10,12 +11,14 @@
 #include "spi/runtime.hpp"
 #include "spi/tree_source.hpp"
 
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -62,11 +65,9 @@ namespace grab::testing
 
             [[nodiscard]]
             Result<void>
-            wait_for_event(
-                [[maybe_unused]] const spi::EventSpec&    spec,
-                const OperationContext&                   context,
-                [[maybe_unused]] std::chrono::nanoseconds maximum_wait
-            ) override
+            wait_for_event( [[maybe_unused]] const spi::EventSpec& spec,
+                            const OperationContext&                context,
+                            std::chrono::nanoseconds maximum_wait ) override
             {
                 ++wait_count_;
                 const auto checked = context.check();
@@ -74,15 +75,62 @@ namespace grab::testing
                 {
                     return std::unexpected( checked.error() );
                 }
-                if( wakeups_.empty() )
+
+                if( deliver_scripted_event() )
+                {
+                    return {};
+                }
+
+                // Wait-engine path (no sink wired): scripted void wakeups.
+                if( !wakeups_.empty() )
+                {
+                    auto wakeup = std::move( wakeups_.front() );
+                    wakeups_.pop_front();
+                    wakeup();
+                    return {};
+                }
+
+                bool has_sink{};
+                {
+                    const std::scoped_lock lock{ sink_mutex_ };
+                    has_sink = static_cast<bool>( sink_ );
+                }
+                if( !has_sink )
                 {
                     return fail( ErrorCode::DeadlineExceeded,
                                  "fake event source has no scripted wakeup" );
                 }
-                auto wakeup = std::move( wakeups_.front() );
-                wakeups_.pop_front();
-                wakeup();
+
+                // Pump path, idle: block up to the budget for a scripted event so
+                // the pump loop does not spin, then time out cleanly.
+                {
+                    std::unique_lock lock{ events_mutex_ };
+                    events_cv_.wait_for( lock,
+                                         maximum_wait,
+                                         [this]()
+                                         {
+                                             return !scripted_events_.empty();
+                                         } );
+                }
+                static_cast<void>( deliver_scripted_event() );
                 return {};
+            }
+
+            void
+            set_sink( spi::EventSource::EventSink sink ) override
+            {
+                const std::scoped_lock lock{ sink_mutex_ };
+                sink_ = std::move( sink );
+            }
+
+            void
+            push_event( grab::Event event )
+            {
+                {
+                    const std::scoped_lock lock{ events_mutex_ };
+                    scripted_events_.push_back( std::move( event ) );
+                }
+                events_cv_.notify_all();
             }
 
             void
@@ -112,9 +160,37 @@ namespace grab::testing
                 demand_.clear();
                 wakeups_.clear();
                 wait_count_ = 0U;
+                const std::scoped_lock lock{ events_mutex_ };
+                scripted_events_.clear();
             }
 
         private:
+
+            [[nodiscard]]
+            bool
+            deliver_scripted_event()
+            {
+                grab::Event event;
+                {
+                    const std::scoped_lock lock{ events_mutex_ };
+                    if( scripted_events_.empty() )
+                    {
+                        return false;
+                    }
+                    event = std::move( scripted_events_.front() );
+                    scripted_events_.pop_front();
+                }
+                EventSink sink_copy;
+                {
+                    const std::scoped_lock lock{ sink_mutex_ };
+                    sink_copy = sink_;
+                }
+                if( sink_copy )
+                {
+                    sink_copy( std::move( event ) );
+                }
+                return true;
+            }
 
             static constexpr std::size_t       noDemand    = 0U;
             static constexpr std::size_t       firstDemand = 1U;
@@ -122,6 +198,11 @@ namespace grab::testing
             std::map<std::string, std::size_t> demand_;
             std::deque<std::function<void()>>  wakeups_;
             std::size_t                        wait_count_{};
+            spi::EventSource::EventSink        sink_;
+            mutable std::mutex                 sink_mutex_;
+            std::deque<grab::Event>            scripted_events_;
+            mutable std::mutex                 events_mutex_;
+            std::condition_variable            events_cv_;
     };
 
     class FakeActionRoute;

@@ -29,7 +29,7 @@ namespace grab::drivers::desktop::x11
                   InjectionLedger&  ledger );
 
             void
-            set_sink( EventSink sink );
+            set_sink( EventSink sink ) override;
 
             [[nodiscard]]
             grab::Result<void>

@@ -17,6 +17,7 @@
 #include "kernel/action/transaction.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "kernel/graph/tree_store.hpp"
+#include "kernel/lifecycle/observation_pump.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/query/evaluator.hpp"
 #include "kernel/query/snapshot_tree_nav.hpp"
@@ -109,6 +110,12 @@ namespace grab::kernel::lifecycle
     {
         try
         {
+            // Join the pump's worker threads before tearing down the runtimes
+            // and bus they publish through.
+            if( pump_ != nullptr )
+            {
+                pump_->stop();
+            }
             // User-held subscriptions may outlive this core; their teardown must
             // not re-enter a destroyed runtime.
             bus_.set_demand_callback( {} );
@@ -544,6 +551,77 @@ namespace grab::kernel::lifecycle
             }
         }
         return {};
+    }
+
+    Result<void>
+    SessionCore::start_observation( const OperationContext& context )
+    {
+        if( pump_ != nullptr )
+        {
+            return {};
+        }
+
+        auto* const primary_source =
+            primary_runtime_ != nullptr ? primary_runtime_->event_source() : nullptr;
+
+        if( primary_source != nullptr )
+        {
+            // Demand-driven masks: input-kind subscriber counts toggle the event
+            // source's per-kind enablement.
+            bus_.set_demand_callback(
+                [primary_source]( EventKind kind, bool enabled )
+                {
+                    const spi::EventSpec spec{
+                        .name = std::string{ wire_name( kind ) },
+                    };
+                    if( enabled )
+                    {
+                        static_cast<void>(
+                            // NOLINTNEXTLINE(bugprone-unused-return-value)
+                            primary_source->enable( spec )
+                        );
+                    }
+                    else
+                    {
+                        static_cast<void>(
+                            // NOLINTNEXTLINE(bugprone-unused-return-value)
+                            primary_source->disable( spec )
+                        );
+                    }
+                }
+            );
+        }
+
+        auto pump = std::make_unique<ObservationPump>(
+            bus_,
+            [this]( const OperationContext& drain_context )
+            {
+                return pump_once( drain_context );
+            }
+        );
+        if( primary_source != nullptr )
+        {
+            pump->pump_event_source( *primary_source );
+        }
+        pump->start();
+
+        // Drain any tree deltas queued before the pump loop begins.
+        // NOLINTNEXTLINE(bugprone-unused-return-value)
+        static_cast<void>( pump_once( context ) );
+
+        pump_ = std::move( pump );
+        return {};
+    }
+
+    void
+    SessionCore::stop_observation()
+    {
+        if( pump_ != nullptr )
+        {
+            pump_->stop();
+            pump_.reset();
+        }
+        bus_.set_demand_callback( {} );
     }
 
     void

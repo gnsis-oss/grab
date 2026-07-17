@@ -87,6 +87,7 @@ add_executable(grab_kernel_tests
     kernel/capture/test_pacing_governor.cpp
     kernel/capture/test_tile_differ.cpp
     kernel/lifecycle/test_session_core.cpp
+    kernel/lifecycle/test_observation_pump.cpp
     kernel/lifecycle/test_session_verbs.cpp
     kernel/test_ui.cpp
     kernel/test_tree_store.cpp
