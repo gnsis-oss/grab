@@ -46,6 +46,7 @@ namespace grab
         inline constexpr std::string_view mouse_drag          = "mouse.drag";
         inline constexpr std::string_view key_text            = "key.text";
         inline constexpr std::string_view key_chord           = "key.chord";
+        inline constexpr std::string_view overlay             = "overlay";
 
     }    // namespace capability
 
@@ -69,6 +70,7 @@ namespace grab
         MouseDrag,
         KeyText,
         KeyChord,
+        Overlay,
         Count,
     };
 
@@ -115,6 +117,7 @@ namespace grab
                 enum_entry( Capability::MouseDrag, capability::mouse_drag ),
                 enum_entry( Capability::KeyText, capability::key_text ),
                 enum_entry( Capability::KeyChord, capability::key_chord ),
+                enum_entry( Capability::Overlay, capability::overlay ),
             } ),
         };
         static_assert( enum_table_has_count( capabilityNames,

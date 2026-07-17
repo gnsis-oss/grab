@@ -27,6 +27,7 @@ add_executable(grab_core_tests
     core/test_permission.cpp
     core/test_process_ref.cpp
     core/test_monitor.cpp
+    core/test_overlay_types.cpp
     core/test_registry.cpp
     core/test_reactor.cpp
     core/test_resolver.cpp

@@ -21,6 +21,7 @@ interaction.hpp
 keymap.hpp
 locator.hpp
 origin.hpp
+overlay.hpp
 payload_fields.hpp
 pid.hpp
 pointer_button.hpp
