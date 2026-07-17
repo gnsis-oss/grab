@@ -134,12 +134,9 @@ add_library(grab_event STATIC
     src/event/atspi.cpp
     src/event/window_x11.cpp
     src/event/browser_bridge.cpp
-    src/event/source_registry.cpp
-    src/event/platform_factory.cpp
     src/event/state.cpp
     src/event/state_source.cpp
     src/event/evdev.cpp
-    src/event/xinput2.cpp
 )
 target_link_libraries(grab_event PUBLIC grab_core PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XINPUT PkgConfig::GRAB_DBUS_1)
 target_include_directories(grab_event PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)

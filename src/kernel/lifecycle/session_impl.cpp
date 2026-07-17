@@ -287,6 +287,33 @@ namespace grab::kernel::lifecycle
         return std::unique_ptr<SessionCore>( new SessionCore() );
     }
 
+    Result<std::unique_ptr<SessionCore>>
+    SessionCore::open_owning( std::unique_ptr<spi::Runtime> runtime,
+                              const OperationContext&       context )
+    {
+        if( runtime == nullptr )
+        {
+            return fail( ErrorCode::InvalidArgument, "open_owning requires a runtime" );
+        }
+
+        auto started = runtime->start( context );
+        if( !started.has_value() )
+        {
+            return std::unexpected( std::move( started.error() ) );
+        }
+
+        auto core              = std::unique_ptr<SessionCore>( new SessionCore() );
+        core->owned_runtime_   = std::move( runtime );
+        core->primary_runtime_ = core->owned_runtime_.get();
+
+        auto attached          = core->attach( *core->owned_runtime_, context );
+        if( !attached.has_value() )
+        {
+            return std::unexpected( std::move( attached.error() ) );
+        }
+        return core;
+    }
+
     Result<Match>
     SessionCore::resolve( const Locator& locator,
                           Cardinality    cardinality )

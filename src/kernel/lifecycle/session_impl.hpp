@@ -54,6 +54,15 @@ namespace grab::kernel::lifecycle
             static std::unique_ptr<SessionCore>
             open_for_test();
 
+            // Compose a core that owns and is driven by an externally-provided
+            // runtime (set as the primary). For daemon/observation composition
+            // and tests that need a controllable runtime. Does not wire event
+            // sink/demand; call start_observation() for live observation.
+            [[nodiscard]]
+            static Result<std::unique_ptr<SessionCore>>
+            open_owning( std::unique_ptr<spi::Runtime> runtime,
+                         const OperationContext&       context );
+
             ~SessionCore();
 
             SessionCore( const SessionCore& ) = delete;

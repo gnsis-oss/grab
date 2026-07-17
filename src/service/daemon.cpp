@@ -1,8 +1,8 @@
 #include "core/reactor.hpp"
-#include "event/platform_factory.hpp"
-#include "event/source_registry.hpp"
+#include "grab/active_kind_probe.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
+#include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "service/daemon.hpp"
@@ -27,7 +27,6 @@
 #include <thread>
 #include <unistd.h>
 #include <utility>
-#include <vector>
 
 namespace grab::service
 {
@@ -65,6 +64,34 @@ namespace grab::service
         {
             return std::unexpected( make_internal_error( message ) );
         }
+
+        // The daemon observes through the runtime pump, which produces input,
+        // window/graph, and accessibility events; state snapshots and the
+        // browser projection are dormant until later waves. Sourced from the
+        // event-descriptor table's category, not the retired SourceRegistry.
+        class RuntimeKindProbe final : public grab::ActiveKindProbe
+        {
+            public:
+
+                [[nodiscard]]
+                bool
+                is_active( grab::EventKind kind ) const noexcept override
+                {
+                    for( const auto& descriptor : grab::detail::eventDescriptors )
+                    {
+                        if( descriptor.kind == kind )
+                        {
+                            return descriptor.category ==
+                                   grab::EventCategory::Input ||
+                                   descriptor.category ==
+                                   grab::EventCategory::Window ||
+                                   descriptor.category ==
+                                   grab::EventCategory::Accessibility;
+                        }
+                    }
+                    return false;
+                }
+        };
 
         [[nodiscard]]
         std::unexpected<grab::Error>
@@ -220,6 +247,10 @@ namespace grab::service
 
             [[nodiscard]]
             grab::Result<void>
+            compose_session();
+
+            [[nodiscard]]
+            grab::Result<void>
             start_transport();
 
             [[nodiscard]]
@@ -269,11 +300,9 @@ namespace grab::service
             std::optional<std::filesystem::path> store_dir_;
             std::size_t                          storage_queue_depth_;
             std::size_t                          storage_buffer_limit_;
-            std::function<std::vector<std::unique_ptr<grab::event::EventSource>>()>
-                                                            source_factory_;
-            grab::EventBus                                  bus_;
+            std::function<grab::Result<std::unique_ptr<grab::Session>>()>
+                                                            session_factory_;
             grab::core::Reactor                             reactor_;
-            grab::event::SourceRegistry                     registry_;
             std::unique_ptr<grab::Session>                  session_;
             std::optional<grab::transport::TransportServer> server_;
             std::optional<grab::storage::JsonlSink>         sink_;
@@ -281,6 +310,7 @@ namespace grab::service
             std::thread                                     reactor_thread_;
             std::thread                                     drain_thread_;
             std::atomic_bool                                shutdown_started_{ false };
+            RuntimeKindProbe                                probe_;
     };
 
     Daemon::Impl::Impl( DaemonOptions options ) :
@@ -288,7 +318,7 @@ namespace grab::service
         store_dir_( std::move( options.store_dir ) ),
         storage_queue_depth_( options.storage_queue_depth ),
         storage_buffer_limit_( options.storage_buffer_limit ),
-        source_factory_( std::move( options.source_factory ) ),
+        session_factory_( std::move( options.session_factory ) ),
         drain_state_( std::make_shared<DrainState>() )
     {
     }
@@ -302,6 +332,19 @@ namespace grab::service
         // still-joinable reactor thread never reaches std::thread's terminating
         // destructor.
         join_reactor();
+    }
+
+    grab::Result<void>
+    Daemon::Impl::compose_session()
+    {
+        auto session = session_factory_ ? session_factory_()
+                                        : grab::Session::open( grab::SessionOptions{} );
+        if( !session.has_value() )
+        {
+            return std::unexpected( std::move( session.error() ) );
+        }
+        session_ = std::move( *session );
+        return {};
     }
 
     grab::Result<void>
@@ -328,18 +371,11 @@ namespace grab::service
     grab::Result<void>
     Daemon::Impl::start_transport()
     {
-        // The daemon owns one public Session so the wire verbs share the same
-        // composition root as local callers. Without a display the session
-        // still opens (reactor-only) and its verbs report CapabilityUnavailable.
-        auto session = grab::Session::open( grab::SessionOptions{} );
-        if( session.has_value() )
-        {
-            session_ = std::move( *session );
-        }
-
+        // Storage, transport, and observation all share the Session's bus so the
+        // wire verbs and durable sink read the runtime pump's output.
         auto transport = grab::transport::TransportServer::start( endpoint_,
-                                                                  bus_,
-                                                                  &registry_,
+                                                                  session_->bus(),
+                                                                  &probe_,
                                                                   session_.get() );
         if( !transport.has_value() )
         {
@@ -394,17 +430,9 @@ namespace grab::service
             return std::unexpected( std::move( error ) );
         }
 
-        auto sources =
-            source_factory_
-                ? source_factory_()
-                : grab::event::PlatformFactory::build( grab::event::SourceConfig{} );
-        for( auto& source : sources )
-        {
-            registry_.add( std::move( source ) );
-        }
-
-        auto start_result = registry_.start_all( reactor_, bus_ );
-        static_cast<void>( start_result );
+        // Observation now flows from the Session's runtime pump onto its bus.
+        const auto observation = session_->start_observation();
+        static_cast<void>( observation );
         return {};
     }
 
@@ -470,7 +498,7 @@ namespace grab::service
             // make it strictly lossless. This is a known follow-up.
             grab::EventFilter filter;
             auto              subscription =
-                bus_.subscribe( std::move( filter ), storage_queue_depth_ );
+                session_->bus().subscribe( std::move( filter ), storage_queue_depth_ );
             subscription.set_notify(
                 [state = drain_state_]
                 {
@@ -605,7 +633,6 @@ namespace grab::service
             return;
         }
 
-        registry_.stop_all();
         reactor_.stop();
         join_reactor();
 
@@ -622,16 +649,23 @@ namespace grab::service
             server_.reset();
         }
 
-        session_.reset();
+        // Stop the pump (it publishes onto the session bus), then stop and join
+        // the storage drain thread (it holds a subscription to that bus), and
+        // only then destroy the session/bus. Reordering this is a use-after-free.
+        if( session_ != nullptr )
+        {
+            session_->stop_observation();
+        }
         signal_drain_stop();
         join_drain();
+        session_.reset();
         flush_and_close_sink();
     }
 
     grab::EventBus&
     Daemon::Impl::bus() noexcept
     {
-        return bus_;
+        return session_->bus();
     }
 
     const std::string&
@@ -675,6 +709,13 @@ namespace grab::service
         try
         {
             auto impl           = std::make_unique<Impl>( std::move( options ) );
+
+            auto session_result = impl->compose_session();
+            if( !session_result.has_value() )
+            {
+                impl->shutdown();
+                return std::unexpected( std::move( session_result.error() ) );
+            }
 
             auto storage_result = impl->start_storage();
             if( !storage_result.has_value() )
