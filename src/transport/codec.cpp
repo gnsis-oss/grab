@@ -378,22 +378,6 @@ namespace grab::transport
         }
 
         void
-        encode_browser_tab( eventgrab::v1::Event&   wire,
-                            const grab::BrowserTab& payload )
-        {
-            set_data( wire, grab::field_name( PayloadField::App ), payload.app );
-            set_data( wire,
-                      grab::field_name( PayloadField::Pid ),
-                      payload.pid.to_string() );
-            set_data( wire,
-                      grab::field_name( PayloadField::TabTitle ),
-                      payload.tab_title );
-            set_data( wire,
-                      grab::field_name( PayloadField::PrevTabTitle ),
-                      payload.prev_tab_title );
-        }
-
-        void
         encode_state_snapshot( eventgrab::v1::Event&      wire,
                                const grab::StateSnapshot& payload )
         {
@@ -656,36 +640,6 @@ namespace grab::transport
         }
 
         [[nodiscard]]
-        grab::Result<grab::BrowserTab>
-        decode_browser_tab( const eventgrab::v1::Event& wire )
-        {
-            auto app = required_string( wire, grab::field_name( PayloadField::App ) );
-            if( !app.has_value() )
-            {
-                return std::unexpected( app.error() );
-            }
-            auto pid = required_string( wire, grab::field_name( PayloadField::Pid ) );
-            if( !pid.has_value() )
-            {
-                return std::unexpected( pid.error() );
-            }
-            auto tab_title =
-                required_string( wire, grab::field_name( PayloadField::TabTitle ) );
-            if( !tab_title.has_value() )
-            {
-                return std::unexpected( tab_title.error() );
-            }
-            return grab::BrowserTab{
-                .app       = *app,
-                .pid       = grab::Pid::from_string( *pid ),
-                .tab_title = *tab_title,
-                .prev_tab_title =
-                    optional_string( wire,
-                                     grab::field_name( PayloadField::PrevTabTitle ) ),
-            };
-        }
-
-        [[nodiscard]]
         grab::Result<grab::StateSnapshot>
         decode_state_snapshot( const eventgrab::v1::Event& wire )
         {
@@ -732,8 +686,6 @@ namespace grab::transport
                 case grab::EventKind::AppTabChanged :
                 case grab::EventKind::AppContextUpdate :
                     return decode_integration_event( wire );
-                case grab::EventKind::BrowserTabSwitched :
-                    return decode_browser_tab( wire );
                 case grab::EventKind::StateSnapshot :
                     return decode_state_snapshot( wire );
                 case grab::EventKind::NodeAdded :
@@ -838,9 +790,6 @@ namespace grab::transport
                     wire,
                     std::get<grab::IntegrationEvent>( event.payload )
                 );
-                break;
-            case grab::EventKind::BrowserTabSwitched :
-                encode_browser_tab( wire, std::get<grab::BrowserTab>( event.payload ) );
                 break;
             case grab::EventKind::StateSnapshot :
                 encode_state_snapshot( wire,

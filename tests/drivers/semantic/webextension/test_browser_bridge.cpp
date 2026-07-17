@@ -1,8 +1,7 @@
 #include "core/reactor.hpp"
-#include "event/browser_bridge.hpp"
+#include "drivers/semantic/webextension/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
-#include "grab/pid.hpp"
 #include "grab/result.hpp"
 
 // clang-format off
@@ -48,11 +47,6 @@ namespace
         R"({"type":"browser.tab_switched","tab_title":"Calendar","prev_tab_title":"Gmail","app":"chrome","pid":"42"})";
     constexpr std::string_view malformedJson       = "{not json";
     constexpr std::string_view missingTypeJson     = R"({"tab_title":"x"})";
-    constexpr std::string_view expectedTabTitle    = "Gmail";
-    constexpr std::string_view expectedPrevTitle   = "Docs";
-    constexpr std::string_view secondExpectedTitle = "Calendar";
-    constexpr std::int64_t     expectedPidValue    = 42;
-    constexpr grab::Pid        expectedPid{ expectedPidValue };
     constexpr std::string_view reactorDidNotStart  = "reactor thread did not start";
     constexpr std::string_view bridgeNotRegistered = "bridge fd did not register";
 
@@ -314,22 +308,24 @@ namespace
 TEST( BrowserBridge,
       ParsesTabSwitchedMessage )
 {
-    auto event = grab::event::parse_browser_message( tabSwitchedJson );
+    auto event =
+        grab::drivers::semantic::webextension::parse_browser_message( tabSwitchedJson );
 
     ASSERT_TRUE( event.has_value() ) << event.error().message;
-    EXPECT_EQ( event->kind, grab::EventKind::BrowserTabSwitched );
-    EXPECT_EQ( event->category, grab::EventCategory::Browser );
-    const auto* payload = std::get_if<grab::BrowserTab>( &event->payload );
+    EXPECT_EQ( event->kind, grab::EventKind::AppTabChanged );
+    EXPECT_EQ( event->category, grab::EventCategory::Integration );
+    const auto* payload = std::get_if<grab::IntegrationEvent>( &event->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->pid, expectedPid );
-    EXPECT_EQ( payload->tab_title, expectedTabTitle );
-    EXPECT_EQ( payload->prev_tab_title, expectedPrevTitle );
+    EXPECT_EQ( payload->app, "chrome" );
+    EXPECT_EQ( payload->detail, "browser.tab_switched" );
+    EXPECT_EQ( payload->json, tabSwitchedJson );
 }
 
 TEST( BrowserBridge,
       MalformedJsonRejected )
 {
-    auto event = grab::event::parse_browser_message( malformedJson );
+    auto event =
+        grab::drivers::semantic::webextension::parse_browser_message( malformedJson );
 
     ASSERT_FALSE( event.has_value() );
     EXPECT_EQ( event.error().code, grab::ErrorCode::ProtocolError );
@@ -338,7 +334,8 @@ TEST( BrowserBridge,
 TEST( BrowserBridge,
       MissingTypeRejected )
 {
-    auto event = grab::event::parse_browser_message( missingTypeJson );
+    auto event =
+        grab::drivers::semantic::webextension::parse_browser_message( missingTypeJson );
 
     ASSERT_FALSE( event.has_value() );
     EXPECT_EQ( event.error().code, grab::ErrorCode::ProtocolError );
@@ -356,14 +353,16 @@ TEST( BrowserBridge,
     grab::EventBus bus;
     auto           subscription = bus.subscribe(
         grab::EventFilter{
-            .kinds      = { grab::EventKind::BrowserTabSwitched },
+            .kinds      = { grab::EventKind::AppTabChanged },
             .categories = {},
         },
         subscriptionDepth
     );
 
     auto bridge_result =
-        grab::event::BrowserBridge::start( pipe.read_fd(), running.reactor(), bus );
+        grab::drivers::semantic::webextension::BrowserBridge::start( pipe.read_fd(),
+                                                                     running.reactor(),
+                                                                     bus );
     ASSERT_TRUE( bridge_result.has_value() ) << bridge_result.error().message;
     auto bridge = std::move( *bridge_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << bridgeNotRegistered;
@@ -371,13 +370,13 @@ TEST( BrowserBridge,
     const auto frame = frame_message( tabSwitchedJson );
     ASSERT_TRUE( write_all( pipe.write_fd(), frame ) );
 
-    auto event = wait_for_event( subscription, grab::EventKind::BrowserTabSwitched );
+    auto event = wait_for_event( subscription, grab::EventKind::AppTabChanged );
     ASSERT_TRUE( event.has_value() );
-    const auto* payload = std::get_if<grab::BrowserTab>( &event->payload );
+    const auto* payload = std::get_if<grab::IntegrationEvent>( &event->payload );
     ASSERT_NE( payload, nullptr );
-    EXPECT_EQ( payload->pid, expectedPid );
-    EXPECT_EQ( payload->tab_title, expectedTabTitle );
-    EXPECT_EQ( payload->prev_tab_title, expectedPrevTitle );
+    EXPECT_EQ( payload->app, "chrome" );
+    EXPECT_EQ( payload->detail, "browser.tab_switched" );
+    EXPECT_EQ( payload->json, tabSwitchedJson );
 
     bridge.stop();
     running.stop_and_join();
@@ -396,14 +395,16 @@ TEST( BrowserBridge,
     grab::EventBus bus;
     auto           subscription = bus.subscribe(
         grab::EventFilter{
-            .kinds      = { grab::EventKind::BrowserTabSwitched },
+            .kinds      = { grab::EventKind::AppTabChanged },
             .categories = {},
         },
         subscriptionDepth
     );
 
     auto bridge_result =
-        grab::event::BrowserBridge::start( pipe.read_fd(), running.reactor(), bus );
+        grab::drivers::semantic::webextension::BrowserBridge::start( pipe.read_fd(),
+                                                                     running.reactor(),
+                                                                     bus );
     ASSERT_TRUE( bridge_result.has_value() ) << bridge_result.error().message;
     auto bridge = std::move( *bridge_result );
     ASSERT_TRUE( wait_for_reactor_barrier( running.reactor() ) ) << bridgeNotRegistered;
@@ -412,18 +413,22 @@ TEST( BrowserBridge,
         frame_message( tabSwitchedJson ) + frame_message( secondTabSwitchedJson );
     ASSERT_TRUE( write_all( pipe.write_fd(), frames ) );
 
-    auto first = wait_for_event( subscription, grab::EventKind::BrowserTabSwitched );
+    auto first = wait_for_event( subscription, grab::EventKind::AppTabChanged );
     ASSERT_TRUE( first.has_value() );
-    auto second = wait_for_event( subscription, grab::EventKind::BrowserTabSwitched );
+    auto second = wait_for_event( subscription, grab::EventKind::AppTabChanged );
     ASSERT_TRUE( second.has_value() );
 
-    const auto* first_payload = std::get_if<grab::BrowserTab>( &first->payload );
+    const auto* first_payload = std::get_if<grab::IntegrationEvent>( &first->payload );
     ASSERT_NE( first_payload, nullptr );
-    EXPECT_EQ( first_payload->tab_title, expectedTabTitle );
+    EXPECT_EQ( first_payload->app, "chrome" );
+    EXPECT_EQ( first_payload->detail, "browser.tab_switched" );
+    EXPECT_EQ( first_payload->json, tabSwitchedJson );
 
-    const auto* second_payload = std::get_if<grab::BrowserTab>( &second->payload );
+    const auto* second_payload = std::get_if<grab::IntegrationEvent>( &second->payload );
     ASSERT_NE( second_payload, nullptr );
-    EXPECT_EQ( second_payload->tab_title, secondExpectedTitle );
+    EXPECT_EQ( second_payload->app, "chrome" );
+    EXPECT_EQ( second_payload->detail, "browser.tab_switched" );
+    EXPECT_EQ( second_payload->json, secondTabSwitchedJson );
 
     bridge.stop();
     running.stop_and_join();

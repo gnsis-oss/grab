@@ -59,8 +59,6 @@ namespace grab::transport
         proto_kind_row( grab::EventKind::AppTabChanged, eventgrab::v1::APP_TAB_CHANGED ),
         proto_kind_row( grab::EventKind::AppContextUpdate,
                         eventgrab::v1::APP_CONTEXT_UPDATE ),
-        proto_kind_row( grab::EventKind::BrowserTabSwitched,
-                        eventgrab::v1::BROWSER_TAB_SWITCHED ),
         proto_kind_row( grab::EventKind::StateSnapshot, eventgrab::v1::STATE_SNAPSHOT ),
         proto_kind_row( grab::EventKind::NodeAdded, eventgrab::v1::NODE_ADDED ),
         proto_kind_row( grab::EventKind::NodeRemoved, eventgrab::v1::NODE_REMOVED ),
@@ -100,8 +98,6 @@ namespace grab::transport
                             eventgrab::v1::EVENT_CATEGORY_ACCESSIBILITY ),
         proto_category_row( grab::EventCategory::Integration,
                             eventgrab::v1::EVENT_CATEGORY_INTEGRATION ),
-        proto_category_row( grab::EventCategory::Browser,
-                            eventgrab::v1::EVENT_CATEGORY_BROWSER ),
         proto_category_row( grab::EventCategory::State,
                             eventgrab::v1::EVENT_CATEGORY_STATE ),
     } );

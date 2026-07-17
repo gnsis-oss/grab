@@ -1,10 +1,9 @@
 #include "core/reactor.hpp"
-#include "event/browser_bridge.hpp"
+#include "drivers/semantic/webextension/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_bus.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/payload_fields.hpp"
-#include "grab/pid.hpp"
 #include "grab/result.hpp"
 
 #include <algorithm>
@@ -30,7 +29,7 @@
 #include <utility>
 #include <vector>
 
-namespace grab::event
+namespace grab::drivers::semantic::webextension
 {
     namespace
     {
@@ -173,19 +172,6 @@ namespace grab::event
 
         [[nodiscard]]
         std::string
-        title_field( const nlohmann::json& object )
-        {
-            if( const auto title =
-                    field_value( object, grab::field_name( PayloadField::Title ) );
-                title.has_value() )
-            {
-                return *title;
-            }
-            return field_or_empty( object, grab::field_name( PayloadField::TabTitle ) );
-        }
-
-        [[nodiscard]]
-        std::string
         detail_field( const nlohmann::json& object,
                       std::string_view      type )
         {
@@ -235,32 +221,6 @@ namespace grab::event
 
         [[nodiscard]]
         grab::Event
-        make_browser_tab_event( const nlohmann::json& object )
-        {
-            const auto kind = grab::EventKind::BrowserTabSwitched;
-            return grab::Event{
-                .timestamp = timestamp_field( object ).value_or( 0.0 ),
-                .sequence  = 0U,
-                .kind      = kind,
-                .category  = grab::category_of( kind ),
-                .payload   = grab::Payload{ grab::BrowserTab{
-                    .app =
-                        field_or_empty( object, grab::field_name( PayloadField::App ) ),
-                    .pid = grab::Pid::from_string(
-                        field_or_empty( object, grab::field_name( PayloadField::Pid ) )
-                    ),
-                    .tab_title =
-                        field_or_empty( object,
-                                        grab::field_name( PayloadField::TabTitle ) ),
-                    .prev_tab_title =
-                        field_or_empty( object,
-                                        grab::field_name( PayloadField::PrevTabTitle ) ),
-                } },
-            };
-        }
-
-        [[nodiscard]]
-        grab::Event
         make_integration_event( grab::EventKind       kind,
                                 const nlohmann::json& object,
                                 std::string_view      type,
@@ -274,7 +234,8 @@ namespace grab::event
                 .payload   = grab::Payload{ grab::IntegrationEvent{
                     .app =
                         field_or_empty( object, grab::field_name( PayloadField::App ) ),
-                    .title  = title_field( object ),
+                    .title  = field_or_empty( object,
+                                              grab::field_name( PayloadField::Title ) ),
                     .detail = detail_field( object, type ),
                     .json   = json_field( object, original_json ),
                 } },
@@ -372,11 +333,6 @@ namespace grab::event
         }
 
         const auto kind = grab::wire_kind( *type );
-
-        if( kind == grab::EventKind::BrowserTabSwitched )
-        {
-            return make_browser_tab_event( object );
-        }
 
         if( kind == grab::EventKind::AppContextUpdate )
         {
@@ -637,4 +593,4 @@ namespace grab::event
         }
     }
 
-}    // namespace grab::event
+}    // namespace grab::drivers::semantic::webextension

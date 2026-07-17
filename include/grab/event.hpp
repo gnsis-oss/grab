@@ -21,9 +21,8 @@ namespace grab
         Window        = 2U,
         Accessibility = 3U,
         Integration   = 4U,
-        Browser       = 5U,
-        State         = 6U,
-        Count         = 7U,
+        State         = 5U,
+        Count         = 6U,
     };
 
     enum class EventKind : std::uint16_t
@@ -48,7 +47,6 @@ namespace grab
         A11yStateChanged   = 305U,
         AppTabChanged      = 400U,
         AppContextUpdate   = 401U,
-        BrowserTabSwitched = 500U,
         StateSnapshot      = 600U,
         NodeAdded          = 700U,
         NodeRemoved        = 701U,
@@ -111,14 +109,6 @@ namespace grab
             std::string json;
     };
 
-    struct BrowserTab
-    {
-            std::string app;
-            grab::Pid   pid;
-            std::string tab_title;
-            std::string prev_tab_title;
-    };
-
     struct StateSnapshot
     {
             std::string json;
@@ -140,7 +130,6 @@ namespace grab
                                  WindowChange,
                                  A11yEvent,
                                  IntegrationEvent,
-                                 BrowserTab,
                                  StateSnapshot,
                                  GraphChange>;
 

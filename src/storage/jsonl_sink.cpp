@@ -273,23 +273,6 @@ namespace grab::storage
         [[nodiscard]]
         grab::Result<OrderedJson>
         serialize_payload( grab::EventKind,
-                           const grab::BrowserTab& payload )
-        {
-            return OrderedJson{
-                {         std::string{ grab::field_name( grab::PayloadField::App ) },
-                 payload.app            },
-                {         std::string{ grab::field_name( grab::PayloadField::Pid ) },
-                 payload.pid.to_string()},
-                {    std::string{ grab::field_name( grab::PayloadField::TabTitle ) },
-                 payload.tab_title      },
-                {std::string{ grab::field_name( grab::PayloadField::PrevTabTitle ) },
-                 payload.prev_tab_title },
-            };
-        }
-
-        [[nodiscard]]
-        grab::Result<OrderedJson>
-        serialize_payload( grab::EventKind,
                            const grab::StateSnapshot& payload )
         {
             return OrderedJson{

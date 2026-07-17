@@ -132,13 +132,22 @@ target_include_directories(grab_input PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_include_directories(grab_input PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/compat/x11_relocation_shim)
 target_compile_features(grab_input PUBLIC cxx_std_23)
 
-add_library(grab_event STATIC
-    src/event/browser_bridge.cpp
+# eventgrab.v1 compat: the browser vocabulary left the core and is re-derived as a
+# v1-wire projection here (src/compat/eventgrab_v1/).
+add_library(grab_compat_eventgrab_v1 STATIC
+    src/compat/eventgrab_v1/browser_projection.cpp
 )
-target_link_libraries(grab_event PUBLIC grab_core PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XINPUT PkgConfig::GRAB_DBUS_1)
-target_include_directories(grab_event PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
-target_include_directories(grab_event PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/compat/x11_relocation_shim)
-target_compile_features(grab_event PUBLIC cxx_std_23)
+target_link_libraries(grab_compat_eventgrab_v1 PUBLIC grab_core grab_proto "${GRAB_PROTOBUF_TARGET}")
+target_include_directories(grab_compat_eventgrab_v1 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_compat_eventgrab_v1 PUBLIC cxx_std_23)
+
+# WebExtension native-messaging bridge (contributes integration app.* events).
+add_library(grab_driver_webextension STATIC
+    src/drivers/semantic/webextension/browser_bridge.cpp
+)
+target_link_libraries(grab_driver_webextension PUBLIC grab_core)
+target_include_directories(grab_driver_webextension PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_driver_webextension PUBLIC cxx_std_23)
 
 add_library(grab_notify STATIC
     src/notify/notifier.cpp
@@ -147,7 +156,7 @@ target_link_libraries(grab_notify PUBLIC grab_core PkgConfig::GRAB_DBUS_1)
 target_include_directories(grab_notify PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_notify PUBLIC cxx_std_23)
 
-target_link_libraries(grab_screen PUBLIC grab_event grab_image grab_notify)
+target_link_libraries(grab_screen PUBLIC grab_image grab_notify)
 
 add_library(grab_session STATIC
     src/session/manager.cpp
@@ -265,7 +274,7 @@ target_compile_features(grab_storage PUBLIC cxx_std_23)
 add_library(grab_service STATIC
     src/service/daemon.cpp
 )
-target_link_libraries(grab_service PUBLIC grab_core grab_transport grab_storage grab_event)
+target_link_libraries(grab_service PUBLIC grab_core grab_transport grab_storage)
 target_include_directories(grab_service PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_service PUBLIC cxx_std_23)
 

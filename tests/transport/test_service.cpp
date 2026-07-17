@@ -636,9 +636,6 @@ TEST( EventService,
                       eventgrab::v1::INPUT_MOUSE_MOVE,
                       eventgrab::v1::EVENT_CATEGORY_INPUT );
     expect_type_info( response,
-                      eventgrab::v1::BROWSER_TAB_SWITCHED,
-                      eventgrab::v1::EVENT_CATEGORY_BROWSER );
-    expect_type_info( response,
                       eventgrab::v1::STATE_SNAPSHOT,
                       eventgrab::v1::EVENT_CATEGORY_STATE );
 }

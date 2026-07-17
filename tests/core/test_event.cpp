@@ -14,13 +14,11 @@ namespace
     constexpr auto          windowFocusChangedKind = grab::EventKind::WindowFocusChanged;
     constexpr auto          a11yButtonClickedKind  = grab::EventKind::A11yButtonClicked;
     constexpr auto          appContextUpdateKind   = grab::EventKind::AppContextUpdate;
-    constexpr auto          browserTabSwitchedKind = grab::EventKind::BrowserTabSwitched;
     constexpr auto          stateSnapshotKind      = grab::EventKind::StateSnapshot;
     constexpr auto          inputCategory          = grab::EventCategory::Input;
     constexpr auto          windowCategory         = grab::EventCategory::Window;
     constexpr auto          accessibilityCategory  = grab::EventCategory::Accessibility;
     constexpr auto          integrationCategory    = grab::EventCategory::Integration;
-    constexpr auto          browserCategory        = grab::EventCategory::Browser;
     constexpr auto          stateCategory          = grab::EventCategory::State;
     constexpr double        timestamp              = 1.25;
     constexpr std::uint64_t sequence               = 7U;
@@ -48,7 +46,6 @@ TEST( EventModel,
     static_assert( grab::category_of( windowFocusChangedKind ) == windowCategory );
     static_assert( grab::category_of( a11yButtonClickedKind ) == accessibilityCategory );
     static_assert( grab::category_of( appContextUpdateKind ) == integrationCategory );
-    static_assert( grab::category_of( browserTabSwitchedKind ) == browserCategory );
     static_assert( grab::category_of( stateSnapshotKind ) == stateCategory );
 }
 
@@ -94,14 +91,13 @@ TEST( EventFilter,
       BothListsMustMatch )
 {
     const grab::EventFilter filter{
-        .kinds      = { browserTabSwitchedKind },
-        .categories = { browserCategory },
+        .kinds      = { stateSnapshotKind },
+        .categories = { stateCategory },
     };
-    const grab::Event matching_event =
-        make_event( browserTabSwitchedKind, browserCategory );
+    const grab::Event matching_event = make_event( stateSnapshotKind, stateCategory );
     const grab::Event wrong_category_event =
-        make_event( browserTabSwitchedKind, windowCategory );
-    const grab::Event wrong_kind_event = make_event( keyDownKind, browserCategory );
+        make_event( stateSnapshotKind, windowCategory );
+    const grab::Event wrong_kind_event = make_event( keyDownKind, stateCategory );
 
     EXPECT_TRUE( filter.matches( matching_event ) );
     EXPECT_FALSE( filter.matches( wrong_category_event ) );

@@ -150,9 +150,6 @@ namespace grab
             event_descriptor( EventKind::AppContextUpdate,
                               EventCategory::Integration,
                               "app.context_update" ),
-            event_descriptor( EventKind::BrowserTabSwitched,
-                              EventCategory::Browser,
-                              "browser.tab_switched" ),
             event_descriptor( EventKind::StateSnapshot,
                               EventCategory::State,
                               "state.snapshot",
@@ -214,7 +211,6 @@ namespace grab
                 enum_entry( EventCategory::Window, "window" ),
                 enum_entry( EventCategory::Accessibility, "accessibility" ),
                 enum_entry( EventCategory::Integration, "integration" ),
-                enum_entry( EventCategory::Browser, "browser" ),
                 enum_entry( EventCategory::State, "state" ),
             } ),
         };
