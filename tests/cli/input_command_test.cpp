@@ -1,4 +1,5 @@
 #include "cli/input_command.hpp"
+#include "grab/result.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -89,4 +90,44 @@ TEST( InputCommand,
     auto args = writable_arguments( storage );
 
     EXPECT_EQ( grab::cli::run_drag_curve_command( args ), usageExitCode );
+}
+
+TEST( WindowFractionToCoordinate,
+      ZeroFractionMapsToOrigin )
+{
+    const auto coordinate =
+        grab::cli::window_fraction_to_coordinate( 160.0, 320.0, 0.0, "x" );
+
+    ASSERT_TRUE( coordinate.has_value() ) << coordinate.error().message;
+    EXPECT_EQ( *coordinate, 160 );
+}
+
+TEST( WindowFractionToCoordinate,
+      MaximumFractionMapsToLastPixel )
+{
+    const auto coordinate =
+        grab::cli::window_fraction_to_coordinate( 160.0, 320.0, 1.0, "x" );
+
+    ASSERT_TRUE( coordinate.has_value() ) << coordinate.error().message;
+    EXPECT_EQ( *coordinate, 160 + 320 - 1 );
+}
+
+TEST( WindowFractionToCoordinate,
+      FractionOutsideUnitIntervalIsInvalid )
+{
+    const auto coordinate =
+        grab::cli::window_fraction_to_coordinate( 160.0, 320.0, -0.01, "x" );
+
+    ASSERT_FALSE( coordinate.has_value() );
+    EXPECT_EQ( coordinate.error().code, grab::ErrorCode::InvalidArgument );
+}
+
+TEST( WindowFractionToCoordinate,
+      SubPixelExtentIsInvalid )
+{
+    const auto coordinate =
+        grab::cli::window_fraction_to_coordinate( 160.0, 0.0, 0.5, "x" );
+
+    ASSERT_FALSE( coordinate.has_value() );
+    EXPECT_EQ( coordinate.error().code, grab::ErrorCode::InvalidArgument );
 }

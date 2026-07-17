@@ -1,7 +1,5 @@
 #include "grab/input.hpp"
 #include "grab/result.hpp"
-#include "grab/space.hpp"
-#include "grab/window_match.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -37,17 +35,9 @@ namespace
     constexpr std::uint32_t    propertyReplaceMode     = XCB_PROP_MODE_REPLACE;
     constexpr std::uint8_t     format8Bits             = 8U;
     constexpr std::uint8_t     responseTypeMask        = 0X7FU;
-    constexpr std::uint8_t     leftButton              = 1U;
     constexpr std::size_t      expectedTypedKeyPresses = 2U;
     constexpr std::size_t      expectedPressedKeyCount = 1U;
     constexpr std::int32_t     minimumDragMotionEvents = 1;
-    constexpr double           windowCenterFraction    = 0.5;
-    constexpr double           maximumWindowFraction   = 1.0;
-    constexpr double           outsideWindowFraction   = -0.01;
-    constexpr double           curveSourceX            = 0.2;
-    constexpr double           curveSourceY            = 0.3;
-    constexpr double           curveDestinationX       = 0.8;
-    constexpr double           curveDestinationY       = 0.7;
     constexpr auto             eventTimeout            = std::chrono::seconds{ 3 };
     constexpr auto             eventPollInterval       = std::chrono::milliseconds{ 5 };
     constexpr std::string_view typedText               = "Ab";
@@ -56,7 +46,6 @@ namespace
     constexpr std::string_view inputInstance           = "grab-input-instance";
     constexpr std::string_view inputClass              = "GrabInputTestClass";
     constexpr std::string_view windowTitle             = "grab input test";
-    constexpr std::string_view missingClickEvent       = "ButtonPress was not observed";
     constexpr std::string_view missingDragSequence =
         "ButtonPress, MotionNotify..., ButtonRelease sequence was not observed";
 
@@ -299,34 +288,6 @@ namespace
     }
 
     [[nodiscard]]
-    bool
-    wait_for_button_press( xcb_connection_t* connection )
-    {
-        const auto deadline = std::chrono::steady_clock::now() + eventTimeout;
-        while( std::chrono::steady_clock::now() < deadline )
-        {
-            const auto event = take_xcb_owned( xcb_poll_for_event( connection ) );
-            if( event != nullptr )
-            {
-                const auto response_type =
-                    static_cast<std::uint8_t>( event->response_type & responseTypeMask );
-                if( response_type == XCB_BUTTON_PRESS )
-                {
-                    return true;
-                }
-                continue;
-            }
-
-            if( xcb_connection_has_error( connection ) != xcbOk )
-            {
-                return false;
-            }
-            std::this_thread::sleep_for( eventPollInterval );
-        }
-        return false;
-    }
-
-    [[nodiscard]]
     std::vector<ObservedPointerEvent>
     collect_pointer_events( xcb_connection_t* connection )
     {
@@ -459,88 +420,6 @@ TEST( Input,
 }
 
 TEST( Input,
-      ClickInWindowHitsInside )
-{
-    const ObserverConnection observer{ xvfbDisplay };
-    ASSERT_NE( observer.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
-    const xcb_screen_t* screen =
-        default_screen( observer.get(), observer.screen_index() );
-    ASSERT_NE( screen, nullptr );
-    static_cast<void>(
-        create_observer_window( observer.get(), *screen, XCB_EVENT_MASK_BUTTON_PRESS )
-    );
-
-    auto input = grab::Input::open( xvfbDisplay );
-    ASSERT_TRUE( input.has_value() ) << input.error().message;
-    auto located = input->locate( { std::string{ inputClass } }, windowTitle );
-    ASSERT_TRUE( located.has_value() ) << located.error().message;
-
-    const auto click_result = input->click_in_window( *located,
-                                                      windowCenterFraction,
-                                                      windowCenterFraction,
-                                                      leftButton );
-    ASSERT_TRUE( click_result.has_value() ) << click_result.error().message;
-
-    EXPECT_TRUE( wait_for_button_press( observer.get() ) ) << missingClickEvent;
-}
-
-TEST( Input,
-      ClickInWindowMaximumFractionUsesLastPixel )
-{
-    const ObserverConnection observer{ xvfbDisplay };
-    ASSERT_NE( observer.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
-    const xcb_screen_t* screen =
-        default_screen( observer.get(), observer.screen_index() );
-    ASSERT_NE( screen, nullptr );
-    static_cast<void>(
-        create_observer_window( observer.get(), *screen, XCB_EVENT_MASK_BUTTON_PRESS )
-    );
-
-    auto input = grab::Input::open( xvfbDisplay );
-    ASSERT_TRUE( input.has_value() ) << input.error().message;
-    auto located = input->locate( { std::string{ inputClass } }, windowTitle );
-    ASSERT_TRUE( located.has_value() ) << located.error().message;
-
-    const auto click_result = input->click_in_window( *located,
-                                                      maximumWindowFraction,
-                                                      maximumWindowFraction,
-                                                      leftButton );
-    ASSERT_TRUE( click_result.has_value() ) << click_result.error().message;
-
-    const auto pointer = take_xcb_owned(
-        xcb_query_pointer_reply( observer.get(),
-                                 xcb_query_pointer( observer.get(), screen->root ),
-                                 nullptr )
-    );
-    ASSERT_NE( pointer, nullptr );
-    EXPECT_EQ( pointer->root_x, windowX + static_cast<std::int32_t>( windowWidth ) - 1 );
-    EXPECT_EQ( pointer->root_y,
-               windowY + static_cast<std::int32_t>( windowHeight ) - 1 );
-}
-
-TEST( Input,
-      ClickInWindowRejectsFractionOutsideUnitInterval )
-{
-    auto input = grab::Input::open( xvfbDisplay );
-    ASSERT_TRUE( input.has_value() ) << input.error().message;
-    const grab::input::LocatedWindow window{
-        .window = { .xid = 0U },
-        .bounds = { .x = windowX, .y = windowY, .w = windowWidth, .h = windowHeight },
-        .trust  = grab::TransformTrust::Exact,
-    };
-
-    const auto click_result = input->click_in_window( window,
-                                                      outsideWindowFraction,
-                                                      windowCenterFraction,
-                                                      leftButton );
-
-    ASSERT_FALSE( click_result.has_value() );
-    EXPECT_EQ( click_result.error().code, grab::ErrorCode::InvalidArgument );
-}
-
-TEST( Input,
       DragEmitsSequence )
 {
     const ObserverConnection observer{ xvfbDisplay };
@@ -560,38 +439,6 @@ TEST( Input,
 
     const auto drag_result = input->drag( { .x = dragFromX, .y = dragFromY },
                                           { .x = dragToX, .y = dragToY } );
-    ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
-
-    const std::vector<ObservedPointerEvent> events =
-        collect_pointer_events( observer.get() );
-    EXPECT_TRUE( contains_drag_sequence( events ) );
-}
-
-TEST( Input,
-      CurveDragInWindowEmitsSequence )
-{
-    const ObserverConnection observer{ xvfbDisplay };
-    ASSERT_NE( observer.get(), nullptr );
-    ASSERT_EQ( xcb_connection_has_error( observer.get() ), xcbOk );
-    const xcb_screen_t* screen =
-        default_screen( observer.get(), observer.screen_index() );
-    ASSERT_NE( screen, nullptr );
-    static_cast<void>( create_observer_window( observer.get(),
-                                               *screen,
-                                               XCB_EVENT_MASK_BUTTON_PRESS |
-                                                   XCB_EVENT_MASK_BUTTON_RELEASE |
-                                                   XCB_EVENT_MASK_POINTER_MOTION ) );
-
-    auto input = grab::Input::open( xvfbDisplay );
-    ASSERT_TRUE( input.has_value() ) << input.error().message;
-    auto located = input->locate( { std::string{ inputClass } }, windowTitle );
-    ASSERT_TRUE( located.has_value() ) << located.error().message;
-
-    const auto drag_result = input->drag_curve_in_window( *located,
-                                                          curveSourceX,
-                                                          curveSourceY,
-                                                          curveDestinationX,
-                                                          curveDestinationY );
     ASSERT_TRUE( drag_result.has_value() ) << drag_result.error().message;
 
     const std::vector<ObservedPointerEvent> events =

@@ -123,7 +123,6 @@ target_compile_features(grab_image PUBLIC cxx_std_23)
 
 add_library(grab_input STATIC
     src/input/input.cpp
-    src/input/locator.cpp
 )
 target_link_libraries(grab_input PUBLIC grab_core grab_driver_x11 grab_input_x11 PkgConfig::GRAB_XCB PkgConfig::GRAB_XCB_XTEST)
 target_include_directories(grab_input PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)

@@ -4,13 +4,10 @@
 #include "grab/geometry.hpp"
 #include "grab/pointer_button.hpp"
 #include "grab/result.hpp"
-#include "grab/window_match.hpp"
 
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <string_view>
-#include <vector>
 
 namespace grab::input
 {
@@ -68,31 +65,6 @@ namespace grab
             [[nodiscard]]
             grab::Result<void>
             press_key( std::string_view name );
-
-            [[nodiscard]]
-            grab::Result<void>
-            activate( const grab::input::LocatedWindow& win );
-
-            [[nodiscard]]
-            grab::Result<grab::input::LocatedWindow>
-            locate( const std::vector<std::string>& wm_class_candidates,
-                    std::string_view                title = {} );
-
-            [[nodiscard]]
-            grab::Result<void>
-            click_in_window( const grab::input::LocatedWindow& win,
-                             double                            frac_x,
-                             double                            frac_y,
-                             std::uint8_t button = grab::input::primaryButton );
-
-            [[nodiscard]]
-            grab::Result<void>
-            drag_curve_in_window( const grab::input::LocatedWindow& win,
-                                  double                            source_x,
-                                  double                            source_y,
-                                  double                            destination_x,
-                                  double                            destination_y,
-                                  const grab::input::DragOptions&   options = {} );
 
         private:
 

@@ -1,19 +1,29 @@
 #include "cli/common.hpp"
 #include "cli/input_command.hpp"
+#include "grab/drag.hpp"
+#include "grab/geometry/point.hpp"
 #include "grab/input.hpp"
+#include "grab/interaction.hpp"
+#include "grab/locator.hpp"
+#include "grab/query.hpp"
 #include "grab/result.hpp"
-#include "grab/window_match.hpp"
+#include "grab/role.hpp"
+#include "grab/session.hpp"
+#include "grab/ui.hpp"
 
 #include <charconv>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
+#include <limits>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
-#include <vector>
 #include <xkbcommon/xkbcommon.h>
 
 namespace grab::cli
@@ -324,38 +334,67 @@ namespace grab::cli
         }
 
         [[nodiscard]]
-        grab::Result<grab::input::LocatedWindow>
-        locate_and_activate( grab::Input&         input,
-                             const TargetOptions& target )
+        grab::Locator
+        window_locator( const std::string& wm_class )
         {
-            auto window = input.locate( std::vector<std::string>{ target.window } );
-            if( !window.has_value() )
+            return grab::sel::all( {
+                grab::sel::role( grab::role::window ),
+                grab::sel::property( grab::property::window_class, wm_class ),
+            } );
+        }
+
+        [[nodiscard]]
+        grab::Result<std::unique_ptr<grab::Session>>
+        open_window_session( const TargetOptions& target )
+        {
+            grab::SessionOptions options;
+            if( !target.display.empty() )
             {
-                return std::unexpected( std::move( window.error() ) );
+                options.display = target.display;
             }
-            auto activation = input.activate( *window );
-            if( !activation.has_value() )
+            return grab::Session::open( std::move( options ) );
+        }
+
+        [[nodiscard]]
+        grab::Result<grab::Match>
+        resolve_and_activate( grab::Session&       session,
+                              const TargetOptions& target )
+        {
+            auto match = session.resolve( window_locator( target.window ) );
+            if( !match.has_value() )
             {
-                return std::unexpected( std::move( activation.error() ) );
+                return std::unexpected( std::move( match.error() ) );
             }
-            return *window;
+            auto activated = session.perform( grab::Activate{ .target = *match } );
+            if( !activated.has_value() )
+            {
+                return std::unexpected( std::move( activated.error() ) );
+            }
+            return *match;
         }
 
         [[nodiscard]]
         grab::Result<void>
         press_key( const KeyOptions& options )
         {
+            auto session = open_window_session( options.target );
+            if( !session.has_value() )
+            {
+                return std::unexpected( std::move( session.error() ) );
+            }
+            auto match = resolve_and_activate( **session, options.target );
+            if( !match.has_value() )
+            {
+                return std::unexpected( std::move( match.error() ) );
+            }
+
+            // The keypress itself stays on the raw seat so --layout/--display apply.
             auto input =
                 open_input( options.target,
                             options.has_layout ? options.layout : std::string_view{} );
             if( !input.has_value() )
             {
                 return std::unexpected( std::move( input.error() ) );
-            }
-            auto window = locate_and_activate( *input, options.target );
-            if( !window.has_value() )
-            {
-                return std::unexpected( std::move( window.error() ) );
             }
             return input->press_key( options.keysym );
         }
@@ -364,21 +403,70 @@ namespace grab::cli
         grab::Result<void>
         drag_curve( const DragCurveOptions& options )
         {
-            auto input = open_input( options.target );
-            if( !input.has_value() )
+            auto session = open_window_session( options.target );
+            if( !session.has_value() )
             {
-                return std::unexpected( std::move( input.error() ) );
+                return std::unexpected( std::move( session.error() ) );
             }
-            auto window = locate_and_activate( *input, options.target );
-            if( !window.has_value() )
+            auto match = resolve_and_activate( **session, options.target );
+            if( !match.has_value() )
             {
-                return std::unexpected( std::move( window.error() ) );
+                return std::unexpected( std::move( match.error() ) );
             }
-            return input->drag_curve_in_window( *window,
-                                                options.source.x,
-                                                options.source.y,
-                                                options.destination.x,
-                                                options.destination.y );
+            auto info = ( *session )->describe( *match );
+            if( !info.has_value() )
+            {
+                return std::unexpected( std::move( info.error() ) );
+            }
+
+            auto from_x = grab::cli::window_fraction_to_coordinate( info->bounds.x,
+                                                                    info->bounds.w,
+                                                                    options.source.x,
+                                                                    "source x" );
+            if( !from_x.has_value() )
+            {
+                return std::unexpected( std::move( from_x.error() ) );
+            }
+            auto from_y = grab::cli::window_fraction_to_coordinate( info->bounds.y,
+                                                                    info->bounds.h,
+                                                                    options.source.y,
+                                                                    "source y" );
+            if( !from_y.has_value() )
+            {
+                return std::unexpected( std::move( from_y.error() ) );
+            }
+            auto to_x = grab::cli::window_fraction_to_coordinate( info->bounds.x,
+                                                                  info->bounds.w,
+                                                                  options.destination.x,
+                                                                  "destination x" );
+            if( !to_x.has_value() )
+            {
+                return std::unexpected( std::move( to_x.error() ) );
+            }
+            auto to_y = grab::cli::window_fraction_to_coordinate( info->bounds.y,
+                                                                  info->bounds.h,
+                                                                  options.destination.y,
+                                                                  "destination y" );
+            if( !to_y.has_value() )
+            {
+                return std::unexpected( std::move( to_y.error() ) );
+            }
+
+            grab::input::DragOptions drag_options;
+            drag_options.path = grab::input::DragOptions::Path::Cubic;
+            auto receipt =
+                ( *session )
+                    ->perform( grab::Drag{
+                        .target  = *match,
+                        .from    = grab::geometry::Point{.x = *from_x, .y = *from_y},
+                        .to      = grab::geometry::Point{  .x = *to_x,   .y = *to_y},
+                        .options = drag_options,
+            } );
+            if( !receipt.has_value() )
+            {
+                return std::unexpected( std::move( receipt.error() ) );
+            }
+            return {};
         }
 
         int
@@ -393,6 +481,47 @@ namespace grab::cli
         }
 
     }    // namespace
+
+    grab::Result<std::int16_t>
+    window_fraction_to_coordinate( double           origin,
+                                   double           size,
+                                   double           fraction,
+                                   std::string_view axis )
+    {
+        constexpr double minimumFraction = 0.0;
+        constexpr double maximumFraction = 1.0;
+        if( !std::isfinite( fraction ) ||
+            fraction <
+            minimumFraction ||
+            fraction > maximumFraction )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               std::string{ axis } +
+                                   " fraction must be between 0 and 1" );
+        }
+        if( !std::isfinite( origin ) )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               std::string{ axis } + " window origin must be finite" );
+        }
+        if( !std::isfinite( size ) || size < 1.0 )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               std::string{ axis } +
+                                   " window extent must be at least one" );
+        }
+        const double maximum_offset = size - 1.0;
+        const double absolute = std::round( origin + ( fraction * maximum_offset ) );
+        if( absolute <
+            static_cast<double>( std::numeric_limits<std::int16_t>::min() ) ||
+            absolute > static_cast<double>( std::numeric_limits<std::int16_t>::max() ) )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               std::string{ axis } +
+                                   " coordinate is outside int16 range" );
+        }
+        return static_cast<std::int16_t>( absolute );
+    }
 
     int
     run_key_command( std::span<char* const> args )
