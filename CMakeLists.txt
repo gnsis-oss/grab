@@ -50,7 +50,7 @@ add_library(grab_core STATIC
     src/core/reactor.cpp
     src/core/registry.cpp
     src/core/resolver.cpp
-    src/core/session.cpp
+    src/kernel/lifecycle/session.cpp
     src/core/space_graph.cpp
     src/kernel/lifecycle/session_impl.cpp
     src/kernel/lifecycle/observation_pump.cpp
