@@ -53,6 +53,10 @@ namespace grab::drivers::desktop::x11
             refresh_transforms();
 
             [[nodiscard]]
+            grab::Result<std::vector<grab::TransformRecord>>
+            force_refresh_transforms();
+
+            [[nodiscard]]
             const CoordinateAuthority&
             coordinate_authority() const noexcept;
 

@@ -3,6 +3,7 @@
 #include "drivers/desktop/x11/injection_ledger.hpp"
 #include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "drivers/desktop/x11/xcb_connection.hpp"
+#include "grab/capability.hpp"
 #include "grab/event.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
@@ -17,6 +18,13 @@
 #include <span>
 #include <string_view>
 
+namespace grab::core
+{
+
+    class Reactor;
+
+}
+
 namespace grab::drivers::desktop::x11
 {
 
@@ -27,12 +35,13 @@ namespace grab::drivers::desktop::x11
     class X11KeyboardRoute;
     class X11PointerRoute;
     class X11ActivationRoute;
+    class X11OverlayDelegate;
 
     class X11Runtime final : public grab::spi::Runtime
     {
         public:
 
-            X11Runtime();
+            explicit X11Runtime( grab::core::Reactor* reactor = nullptr ) noexcept;
             ~X11Runtime() override;
 
             [[nodiscard]]
@@ -91,6 +100,18 @@ namespace grab::drivers::desktop::x11
             event_source() override;
 
             [[nodiscard]]
+            grab::spi::OverlayDelegate*
+            overlay_delegate() override;
+
+            [[nodiscard]]
+            std::span<const grab::Capability>
+            capabilities() const noexcept;
+
+            [[nodiscard]]
+            const grab::Error*
+            overlay_delegate_error() const noexcept;
+
+            [[nodiscard]]
             std::span<const grab::spi::RouteDescriptor>
             routes() const override;
 
@@ -118,8 +139,12 @@ namespace grab::drivers::desktop::x11
             InjectionLedger                      ledger_;
             std::unique_ptr<X11EventSource>      event_source_;
             std::unique_ptr<X11TopologySource>   topology_source_;
+            std::unique_ptr<X11OverlayDelegate>  overlay_delegate_;
+            std::optional<grab::Error>           overlay_delegate_error_;
             std::function<void( grab::Event&& )> pending_sink_;
+            grab::core::Reactor*                 reactor_{};
             std::uint32_t                        generation_{ initialGeneration };
+            bool                                 overlay_available_{};
             bool                                 has_started_{};
     };
 

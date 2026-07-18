@@ -54,13 +54,41 @@ namespace grab::drivers::desktop::x11
         {
             return std::unexpected( std::move( outputs.error() ) );
         }
-        return refresh( *outputs );
+        return refresh( *outputs, false );
+    }
+
+    grab::Result<void>
+    CoordinateAuthority::force_refresh()
+    {
+        auto outputs =
+            grab::screen::list_outputs( use_default_display_ ? nullptr
+                                                             : display_.c_str() );
+        if( !outputs.has_value() )
+        {
+            return std::unexpected( std::move( outputs.error() ) );
+        }
+        return refresh( *outputs, true );
     }
 
     grab::Result<void>
     CoordinateAuthority::refresh( std::span<const grab::screen::OutputInfo> outputs )
     {
-        if( graph_ != nullptr && topology_matches( outputs ) )
+        return refresh( outputs, false );
+    }
+
+    grab::Result<void>
+    CoordinateAuthority::force_refresh(
+        std::span<const grab::screen::OutputInfo> outputs
+    )
+    {
+        return refresh( outputs, true );
+    }
+
+    grab::Result<void>
+    CoordinateAuthority::refresh( std::span<const grab::screen::OutputInfo> outputs,
+                                  bool                                      force )
+    {
+        if( !force && graph_ != nullptr && topology_matches( outputs ) )
         {
             return {};
         }
@@ -74,8 +102,27 @@ namespace grab::drivers::desktop::x11
         const auto next_generation = grab::DisplayGeneration{
             .value = generation_.value + 1U,
         };
-        auto       next_graph  = std::make_shared<grab::detail::SpaceGraph>();
-        const auto next_global = next_graph->add_space( next_generation.value );
+        std::shared_ptr<grab::detail::SpaceGraph> next_graph;
+        grab::CoordinateSpaceId                   next_global{};
+        if( graph_ == nullptr )
+        {
+            next_graph  = std::make_shared<grab::detail::SpaceGraph>();
+            next_global = next_graph->add_space( next_generation.value );
+        }
+        else
+        {
+            // Keep the graph and display-global space stable so live services
+            // retain a valid authority pointer across the atomic topology
+            // transaction. Old output routes are generation-staled below; new
+            // output spaces receive transforms at the new generation.
+            next_graph  = graph_;
+            next_global = global_space_;
+            next_graph->bump_generation( next_global );
+            for( const auto& output : outputs_ )
+            {
+                next_graph->bump_generation( output.space );
+            }
+        }
 
         std::vector<OutputSpace> next_outputs;
         next_outputs.reserve( outputs.size() );
@@ -106,15 +153,6 @@ namespace grab::drivers::desktop::x11
                 .scale      = 1.0,
                 .generation = grab::CaptureGeneration{ next_generation.value },
             } );
-        }
-
-        if( graph_ != nullptr )
-        {
-            graph_->bump_generation( global_space_ );
-            for( const auto& output : outputs_ )
-            {
-                graph_->bump_generation( output.space );
-            }
         }
 
         graph_        = std::move( next_graph );

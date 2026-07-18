@@ -106,6 +106,7 @@ gtest_discover_tests(grab_kernel_tests)
 add_executable(grab_driver_x11_tests
     drivers/x11/test_coordinate_authority.cpp
     drivers/x11/test_enumerate.cpp
+    drivers/x11/test_overlay_delegate.cpp
     drivers/x11/test_record.cpp
     drivers/x11/test_virtual_display.cpp
     drivers/x11/test_workflow.cpp

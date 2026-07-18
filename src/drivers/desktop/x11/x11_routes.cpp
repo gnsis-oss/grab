@@ -2,6 +2,7 @@
 #include "drivers/desktop/x11/x11_drag_recipe.hpp"
 #include "drivers/desktop/x11/x11_routes.hpp"
 #include "drivers/desktop/x11/x11_tree_source.hpp"
+#include "grab/capability.hpp"
 #include "grab/drag.hpp"
 #include "grab/geometry/point.hpp"
 #include "grab/query.hpp"
@@ -10,6 +11,7 @@
 #include "kernel/query/snapshot_tree_nav.hpp"
 #include "spi/tree_source.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -17,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -28,6 +31,16 @@
 
 namespace grab::drivers::desktop::x11
 {
+
+    std::span<const grab::Capability>
+    x11_capability_rows( bool overlay_available ) noexcept
+    {
+        static constexpr std::array overlay_rows{ grab::Capability::Overlay };
+        static constexpr std::array<grab::Capability, 0U> no_overlay_rows{};
+        return overlay_available ? std::span<const grab::Capability>{ overlay_rows }
+                                 : std::span<const grab::Capability>{ no_overlay_rows };
+    }
+
     namespace
     {
 

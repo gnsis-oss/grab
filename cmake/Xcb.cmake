@@ -15,8 +15,11 @@ function(grab_find_xcb)
         xcb
         xcb-xtest
         xcb-composite
+        xcb-render
+        xcb-shape
         xcb-shm
         xcb-randr
+        xcb-xfixes
         xcb-xinput
         xkbcommon-x11
         dbus-1

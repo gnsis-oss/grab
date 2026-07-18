@@ -41,11 +41,19 @@ namespace grab::drivers::desktop::x11
             grab::Result<void>
             refresh();
 
+            [[nodiscard]]
+            grab::Result<void>
+            force_refresh();
+
             // Explicit topology input keeps graph behavior testable without a live
             // display. Production callers use the zero-argument refresh above.
             [[nodiscard]]
             grab::Result<void>
             refresh( std::span<const grab::screen::OutputInfo> outputs );
+
+            [[nodiscard]]
+            grab::Result<void>
+            force_refresh( std::span<const grab::screen::OutputInfo> outputs );
 
             [[nodiscard]]
             std::shared_ptr<const grab::detail::SpaceGraph>
@@ -81,8 +89,13 @@ namespace grab::drivers::desktop::x11
             bool
             topology_matches( std::span<const grab::screen::OutputInfo> outputs ) const;
 
-            std::string                               display_;
-            bool                                      use_default_display_{ true };
+            [[nodiscard]]
+            grab::Result<void>
+                        refresh( std::span<const grab::screen::OutputInfo> outputs,
+                                 bool                                      force );
+
+            std::string display_;
+            bool        use_default_display_{ true };
             std::shared_ptr<grab::detail::SpaceGraph> graph_;
             grab::CoordinateSpaceId                   global_space_{};
             grab::DisplayGeneration                   generation_{};

@@ -1,3 +1,4 @@
+#include "drivers/desktop/x11/overlay_delegate.hpp"
 #include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "drivers/desktop/x11/x11_event_source.hpp"
 #include "drivers/desktop/x11/x11_routes.hpp"
@@ -7,11 +8,14 @@
 #include "drivers/desktop/x11/x11_xtest_seat.hpp"
 #include "drivers/desktop/x11/xcb_connection.hpp"
 #include "drivers/desktop/x11/xkb_keymap.hpp"
+#include "grab/capability.hpp"
 #include "grab/context.hpp"
+#include "grab/event.hpp"
 #include "grab/ids.hpp"
 #include "grab/result.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "spi/event_source.hpp"
+#include "spi/overlay_delegate.hpp"
 #include "spi/route.hpp"
 #include "spi/topology_source.hpp"
 #include "spi/tree_source.hpp"
@@ -19,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -27,7 +32,10 @@
 namespace grab::drivers::desktop::x11
 {
 
-    X11Runtime::X11Runtime()  = default;
+    X11Runtime::X11Runtime( grab::core::Reactor* reactor ) noexcept :
+        reactor_{ reactor }
+    {
+    }
 
     X11Runtime::~X11Runtime() = default;
 
@@ -144,6 +152,13 @@ namespace grab::drivers::desktop::x11
                 }
             }
         );
+        auto overlay_probe = X11OverlayDelegate::probe();
+        overlay_available_ = overlay_probe.has_value();
+        overlay_delegate_error_.reset();
+        if( !overlay_probe.has_value() )
+        {
+            overlay_delegate_error_ = std::move( overlay_probe.error() );
+        }
         generation_  = next_generation;
         has_started_ = true;
         return {};
@@ -152,6 +167,13 @@ namespace grab::drivers::desktop::x11
     grab::Result<void>
     X11Runtime::stop()
     {
+        if( overlay_delegate_ != nullptr )
+        {
+            overlay_delegate_->close();
+        }
+        overlay_delegate_.reset();
+        overlay_delegate_error_.reset();
+        overlay_available_ = false;
         topology_source_.reset();
         activation_route_.reset();
         event_source_.reset();
@@ -232,6 +254,71 @@ namespace grab::drivers::desktop::x11
     X11Runtime::event_source()
     {
         return event_source_.get();
+    }
+
+    grab::spi::OverlayDelegate*
+    X11Runtime::overlay_delegate()
+    {
+        if( connection_.get() == nullptr )
+        {
+            return nullptr;
+        }
+        if( overlay_delegate_ == nullptr )
+        {
+            auto created = X11OverlayDelegate::create( reactor_ );
+            if( !created.has_value() )
+            {
+                overlay_available_      = false;
+                overlay_delegate_error_ = std::move( created.error() );
+                return nullptr;
+            }
+            overlay_delegate_ = std::move( *created );
+            overlay_delegate_->set_availability_changed(
+                [this]( bool available, const grab::Error* error )
+                {
+                    overlay_available_ = available;
+                    if( error != nullptr )
+                    {
+                        overlay_delegate_error_ = *error;
+                    }
+                    else if( available )
+                    {
+                        overlay_delegate_error_.reset();
+                    }
+                }
+            );
+            overlay_delegate_->set_topology_refresh(
+                [this]() -> grab::Result<void>
+                {
+                    if( !capture_route_.has_value() )
+                    {
+                        return grab::fail(
+                            grab::ErrorCode::CapabilityUnavailable,
+                            "X11 overlay topology has no coordinate authority"
+                        );
+                    }
+                    auto refreshed = capture_route_->force_refresh_transforms();
+                    if( !refreshed.has_value() )
+                    {
+                        return std::unexpected( std::move( refreshed.error() ) );
+                    }
+                    return {};
+                }
+            );
+        }
+        return overlay_delegate_.get();
+    }
+
+    std::span<const grab::Capability>
+    X11Runtime::capabilities() const noexcept
+    {
+        return x11_capability_rows( overlay_available_ );
+    }
+
+    const grab::Error*
+    X11Runtime::overlay_delegate_error() const noexcept
+    {
+        return overlay_delegate_error_.has_value() ? &*overlay_delegate_error_ : nullptr;
     }
 
     std::span<const grab::spi::RouteDescriptor>

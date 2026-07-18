@@ -3,6 +3,7 @@
 #include "drivers/desktop/x11/injection_ledger.hpp"
 #include "drivers/desktop/x11/x11_input_correctness.hpp"
 #include "drivers/desktop/x11/x11_xtest_seat.hpp"
+#include "grab/capability.hpp"
 #include "grab/keymap.hpp"
 #include "spi/event_source.hpp"
 #include "spi/route.hpp"
@@ -18,6 +19,10 @@ namespace grab::drivers::desktop::x11
 {
 
     class X11TreeSource;
+
+    [[nodiscard]]
+    std::span<const grab::Capability>
+    x11_capability_rows( bool overlay_available ) noexcept;
 
     class X11InputSeat final : public grab::spi::InputSeat,
                                public ModifierState

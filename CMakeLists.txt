@@ -189,6 +189,7 @@ target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 add_library(grab_driver_x11 STATIC
     src/drivers/desktop/x11/coordinate_authority.cpp
     src/drivers/desktop/x11/enumerate.cpp
+    src/drivers/desktop/x11/overlay_delegate.cpp
     src/drivers/desktop/x11/record.cpp
     src/drivers/desktop/x11/workflow.cpp
     src/drivers/desktop/x11/x11_capture.cpp
@@ -211,7 +212,11 @@ target_link_libraries(grab_driver_x11
         grab_screen
         grab_input_x11
         ${GRAB_LIBAV_TARGETS}
+        PkgConfig::GRAB_XCB_RENDER
+        PkgConfig::GRAB_XCB_SHAPE
+        PkgConfig::GRAB_XCB_SHM
         PkgConfig::GRAB_XCB_XTEST
+        PkgConfig::GRAB_XCB_XFIXES
 )
 target_include_directories(grab_driver_x11 PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_x11 PUBLIC cxx_std_23)

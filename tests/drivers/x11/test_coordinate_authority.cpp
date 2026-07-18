@@ -3,9 +3,11 @@
 #include "grab/result.hpp"
 #include "kernel/presentation/space_graph.hpp"    // NOLINT(misc-include-cleaner)
 
+// clang-format off
+#include <gtest/gtest.h>
 #include <array>
 #include <cstdint>
-#include <gtest/gtest.h>
+// clang-format on
 
 namespace
 {
@@ -90,4 +92,27 @@ TEST( CoordinateAuthority,
     ASSERT_TRUE( fresh_mapping.has_value() );
     EXPECT_DOUBLE_EQ( fresh_mapping->x,
                       static_cast<double>( outputOriginX + 1 ) + localX );
+}
+
+TEST( CoordinateAuthority,
+      ForcedRefreshBumpsGenerationForAnObservedRandrTransaction )
+{
+    grab::drivers::desktop::x11::CoordinateAuthority authority;
+    const std::array outputs{ output_at( outputOriginX, outputOriginY ) };
+    ASSERT_TRUE( authority.refresh( outputs ).has_value() );
+
+    const auto graph          = authority.graph();
+    const auto stale_output   = authority.output_space( "DP-1" );
+    const auto old_generation = authority.generation();
+    ASSERT_TRUE( stale_output.has_value() );
+
+    ASSERT_TRUE( authority.force_refresh( outputs ).has_value() );
+
+    EXPECT_EQ( authority.graph(), graph );
+    EXPECT_EQ( authority.generation().value, old_generation.value + 1U );
+    const auto stale_mapping =
+        graph->map( { .x = localX, .y = localY, .space = stale_output->space },
+                    authority.global_space() );
+    ASSERT_FALSE( stale_mapping.has_value() );
+    EXPECT_EQ( stale_mapping.error().code, grab::ErrorCode::TopologyChanged );
 }

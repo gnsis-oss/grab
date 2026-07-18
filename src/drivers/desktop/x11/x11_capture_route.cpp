@@ -192,6 +192,20 @@ namespace grab::drivers::desktop::x11
         };
     }
 
+    grab::Result<std::vector<grab::TransformRecord>>
+    X11CaptureRoute::force_refresh_transforms()
+    {
+        auto refreshed = authority_.force_refresh();
+        if( !refreshed.has_value() )
+        {
+            return std::unexpected( std::move( refreshed.error() ) );
+        }
+        return std::vector<grab::TransformRecord>{
+            authority_.transforms().begin(),
+            authority_.transforms().end()
+        };
+    }
+
     const CoordinateAuthority&
     X11CaptureRoute::coordinate_authority() const noexcept
     {

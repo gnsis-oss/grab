@@ -159,7 +159,8 @@ namespace grab::kernel::lifecycle
                          "no display available for session composition" );
         }
 
-        auto runtime = std::make_unique<grab::drivers::desktop::x11::X11Runtime>();
+        auto runtime =
+            std::make_unique<grab::drivers::desktop::x11::X11Runtime>( reactor );
         auto* const            x11 = runtime.get();
         const OperationContext context{};
         auto                   started = runtime->start( context );
