@@ -299,6 +299,11 @@ target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_ima
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 
+option(GRAB_BUILD_EXAMPLES "Build example programs" ON)
+if(GRAB_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
 if(BUILD_TESTING)
     include(AddGTest)
     enable_testing()
