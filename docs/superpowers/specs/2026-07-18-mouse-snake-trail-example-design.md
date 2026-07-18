@@ -40,8 +40,9 @@ example doubles as a readable reference for that loop.
    - `Band::Trail`, `z = 0`
    - lifetime: `Fade{ 1200ms }` (comet tail)
    - stroke: 3.0 px; color by `Event::origin` using the built-in palette —
-     injected (`InjectedSelf`/`InjectedOther`) blue, otherwise red. Wiggling
-     the physical mouse during a run draws a red trail beside the blue snake.
+     `Physical` red, otherwise blue (matching the kernel trail's ternary).
+     Wiggling the physical mouse during a run draws a red trail beside the
+     blue snake.
    Adds alone trigger presentation (the kernel's own trail path never flushes
    per segment); the example calls `overlay->flush()` once from the main
    thread after the sweep, as a visibility fence before the fade hold.

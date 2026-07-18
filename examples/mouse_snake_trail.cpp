@@ -278,10 +278,11 @@ namespace
             // executed, so no reactor job touches this object afterwards.
             // Accepted narrow race: set_notify({}) does not join an
             // in-flight notify callback, so one extra drain can still get
-            // posted after it returns. Harmless here: the pump object
-            // outlives the fence call below, and by the time the fence
-            // completes the queue is quiescent, so that extra drain (if it
-            // ran at all) found nothing left to do.
+            // posted after the fence. Harmless here: the reactor runs its
+            // remaining jobs before honoring stop, Session::close() joins
+            // the reactor thread, and run() destroys the pump only after
+            // close() returns — so the straggler (which finds an empty
+            // queue) always runs while this object is alive.
             [[nodiscard]]
             grab::Result<void>
             stop()
