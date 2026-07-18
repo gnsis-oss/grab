@@ -42,7 +42,9 @@ example doubles as a readable reference for that loop.
    - stroke: 3.0 px; color by `Event::origin` using the built-in palette —
      injected (`InjectedSelf`/`InjectedOther`) blue, otherwise red. Wiggling
      the physical mouse during a run draws a red trail beside the blue snake.
-   - then `overlay->flush()`.
+   Adds alone trigger presentation (the kernel's own trail path never flushes
+   per segment); the example calls `overlay->flush()` once from the main
+   thread after the sweep, as a visibility fence before the fade hold.
 5. Events without an absolute position (delta-only, e.g. evdev fallback) and
    `QueueGapMarker` items break the path (reset `previous`) instead of drawing.
 
