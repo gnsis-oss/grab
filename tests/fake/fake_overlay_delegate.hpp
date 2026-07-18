@@ -76,6 +76,7 @@ namespace grab::testing
                 through_revision_ = {};
                 shapes_.clear();
                 apply_failure_.reset();
+                flush_failure_.reset();
                 return {};
             }
 
@@ -110,6 +111,19 @@ namespace grab::testing
                 auto candidate_revision = through_revision_;
                 for( const auto& delta : deltas )
                 {
+                    // A Clear delta opening a new epoch IS the explicit epoch
+                    // transition: applied atomically, never treated as a gap.
+                    if( candidate_epoch.has_value() &&
+                        delta.epoch !=
+                        *candidate_epoch &&
+                        std::holds_alternative<overlay::Clear>( delta.change ) &&
+                        delta.revision.value == firstRevisionValue )
+                    {
+                        candidate_shapes.clear();
+                        candidate_epoch    = delta.epoch;
+                        candidate_revision = delta.revision;
+                        continue;
+                    }
                     if( candidate_epoch.has_value() && delta.epoch != *candidate_epoch )
                     {
                         return desync( "overlay scene epoch changed" );
@@ -179,6 +193,13 @@ namespace grab::testing
                     return fail( ErrorCode::InvalidArgument,
                                  "cannot flush a closed overlay delegate" );
                 }
+                if( flush_failure_.has_value() )
+                {
+                    auto failure = std::move( *flush_failure_ );
+                    flush_failure_.reset();
+                    state_ = OverlayDelegateState::Desynced;
+                    return fail( failure.code, std::move( failure.message ) );
+                }
                 if( state_ == OverlayDelegateState::Desynced )
                 {
                     return fail( ErrorCode::ResyncRequired,
@@ -202,6 +223,7 @@ namespace grab::testing
                 through_revision_ = {};
                 shapes_.clear();
                 apply_failure_.reset();
+                flush_failure_.reset();
             }
 
             void
@@ -209,6 +231,18 @@ namespace grab::testing
                              std::string message )
             {
                 apply_failure_ = InjectedFailure{
+                    .code    = code,
+                    .message = std::move( message ),
+                };
+            }
+
+            // The injected flush failure also desynchronizes the delegate,
+            // mirroring a real fence failure (X11: sync round-trip loss).
+            void
+            fail_next_flush( ErrorCode   code,
+                             std::string message )
+            {
+                flush_failure_ = InjectedFailure{
                     .code    = code,
                     .message = std::move( message ),
                 };
@@ -320,6 +354,7 @@ namespace grab::testing
             OverlayShapeMap                    shapes_{};
             std::vector<OverlayCall>           calls_{};
             std::optional<InjectedFailure>     apply_failure_{};
+            std::optional<InjectedFailure>     flush_failure_{};
     };
 
 }    // namespace grab::testing

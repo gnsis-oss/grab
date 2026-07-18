@@ -380,6 +380,37 @@ TEST_F( OverlayDelegateContractTest,
 }
 
 TEST_F( OverlayDelegateContractTest,
+        ClearDeltaIsTheExplicitEpochTransitionNotAGap )
+{
+    ASSERT_TRUE( scene.add( rect_shape() ).has_value() );
+    scene.clear();
+    const auto survivor = scene.add( rect_shape() );
+    ASSERT_TRUE( survivor.has_value() );
+
+    ASSERT_TRUE( delegate.apply( deltas ).has_value() );
+
+    EXPECT_EQ( delegate.state(), grab::testing::OverlayDelegateState::Synced );
+    ASSERT_EQ( delegate.shapes().size(), std::size_t{ 1U } );
+    EXPECT_TRUE( delegate.shapes().contains( *survivor ) );
+}
+
+TEST_F( OverlayDelegateContractTest,
+        EpochJumpWithoutClearStillDesynchronizes )
+{
+    ASSERT_TRUE( scene.add( rect_shape() ).has_value() );
+    ASSERT_TRUE( delegate.apply( deltas ).has_value() );
+
+    auto foreign        = deltas.front();
+    foreign.epoch.value = deltas.front().epoch.value + 1U;
+    foreign.revision    = grab::overlay::Revision{ .value = 1U };
+
+    const auto applied  = delegate.apply( std::span{ &foreign, 1U } );
+    ASSERT_FALSE( applied.has_value() );
+    EXPECT_EQ( applied.error().code, grab::ErrorCode::ResyncRequired );
+    EXPECT_EQ( delegate.state(), grab::testing::OverlayDelegateState::Desynced );
+}
+
+TEST_F( OverlayDelegateContractTest,
         CloseIsIdempotentAndEveryCloseIsRecorded )
 {
     delegate.close();

@@ -1010,3 +1010,43 @@ TEST( OverlayService,
     open_session->close();
     EXPECT_TRUE( every_call_uses_thread( *thread_log, *reactor_thread ) );
 }
+
+TEST( OverlayService,
+      FlushFailureMarksServiceDesynchronizedAndNextVerbRecovers )
+{
+    constexpr std::size_t    minimumResyncCalls = 1U;
+    grab::detail::SpaceGraph graph;
+    const auto               space = graph.add_space( topologyGeneration );
+    OverlayRuntime           runtime;
+    auto                     service =
+        grab::kernel::presentation::OverlayService::create( runtime,
+                                                            graph,
+                                                            space,
+                                                            []
+                                                            {
+                                                                return sceneNow;
+                                                            } );
+    ASSERT_TRUE( service.has_value() ) << service.error().message;
+    ASSERT_TRUE( ( *service )->add( rect_shape( space ) ).has_value() );
+
+    runtime.delegate().fail_next_flush( grab::ErrorCode::DeviceInaccessible,
+                                        "injected fence loss" );
+    const auto failed = ( *service )->flush();
+    ASSERT_FALSE( failed.has_value() );
+
+    // The failed fence desynchronized the delegate; the next verb must route
+    // through recovery (resync) instead of wedging on ResyncRequired.
+    const auto readded = ( *service )->add( rect_shape( space ) );
+    ASSERT_TRUE( readded.has_value() ) << readded.error().message;
+
+    std::size_t resync_calls = 0U;
+    for( const auto& call : runtime.delegate().calls() )
+    {
+        if( std::holds_alternative<grab::testing::OverlayResyncCall>( call ) )
+        {
+            ++resync_calls;
+        }
+    }
+    EXPECT_GE( resync_calls, minimumResyncCalls );
+    EXPECT_TRUE( ( *service )->flush().has_value() );
+}

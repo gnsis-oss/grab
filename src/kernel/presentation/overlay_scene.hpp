@@ -50,6 +50,12 @@ namespace grab::kernel::presentation
             void
             set_delta_sink( DeltaSink sink );
 
+            // Number of sink invocations that threw; deltas are still
+            // considered published (the scene never blocks on a sink).
+            [[nodiscard]]
+            std::uint64_t
+            publication_failures() const noexcept;
+
         private:
 
             struct Impl;

@@ -37,6 +37,61 @@ namespace grab
 
     }    // namespace
 
+    namespace
+    {
+
+        // Pending off-thread invocations, cancellable at detach: if the reactor
+        // exits before running a posted completion, detach() settles every
+        // outstanding promise with SessionClosed instead of leaving callers
+        // blocked forever. Each operation settles exactly once (CAS-guarded).
+        class OverlayPendingRegistry final
+        {
+            public:
+
+                [[nodiscard]]
+                std::uint64_t
+                add( std::function<void()> cancel )
+                {
+                    const std::scoped_lock lock{ mutex_ };
+                    const auto             ticket = next_ticket_++;
+                    pending_.emplace_back( ticket, std::move( cancel ) );
+                    return ticket;
+                }
+
+                void
+                remove( std::uint64_t ticket )
+                {
+                    const std::scoped_lock lock{ mutex_ };
+                    std::erase_if( pending_,
+                                   [ticket]( const auto& entry )
+                                   {
+                                       return entry.first == ticket;
+                                   } );
+                }
+
+                void
+                cancel_all()
+                {
+                    std::vector<std::pair<std::uint64_t, std::function<void()>>> drained;
+                    {
+                        const std::scoped_lock lock{ mutex_ };
+                        drained.swap( pending_ );
+                    }
+                    for( auto& [ticket, cancel] : drained )
+                    {
+                        cancel();
+                    }
+                }
+
+            private:
+
+                std::mutex    mutex_;
+                std::uint64_t next_ticket_{};
+                std::vector<std::pair<std::uint64_t, std::function<void()>>> pending_;
+        };
+
+    }    // namespace
+
     class Overlay::Impl
     {
         public:
@@ -61,16 +116,38 @@ namespace grab
                                              std::forward<Operation>( operation ) );
                 }
 
-                auto completion = std::make_shared<std::promise<Result<T>>>();
-                auto completed  = completion->get_future();
+                auto       completion = std::make_shared<std::promise<Result<T>>>();
+                auto       completed  = completion->get_future();
+                auto       settled    = std::make_shared<std::atomic_bool>( false );
+                auto       registry   = registry_;
+                const auto ticket     = registry->add(
+                    [completion, settled]
+                    {
+                        bool expected = false;
+                        if( settled->compare_exchange_strong( expected, true ) )
+                        {
+                            completion->set_value( std::unexpected(
+                                kernel::lifecycle::session_closed_error()
+                            ) );
+                        }
+                    }
+                );
                 reactor->post(
                     [completion,
+                     settled,
+                     registry,
+                     ticket,
                      core,
                      operation = std::forward<Operation>( operation )]() mutable
                     {
-                        completion->set_value(
-                            invoke_safely<T>( core, std::move( operation ) )
-                        );
+                        bool expected = false;
+                        if( settled->compare_exchange_strong( expected, true ) )
+                        {
+                            completion->set_value(
+                                invoke_safely<T>( core, std::move( operation ) )
+                            );
+                        }
+                        registry->remove( ticket );
                     }
                 );
                 lock.unlock();
@@ -113,10 +190,12 @@ namespace grab
                 }
             }
 
-            std::mutex                      mutex_;
-            grab::core::Reactor*            reactor_{};
-            std::thread::id                 reactor_thread_;
-            kernel::lifecycle::SessionCore* core_{};
+            std::mutex                              mutex_;
+            grab::core::Reactor*                    reactor_{};
+            std::thread::id                         reactor_thread_;
+            kernel::lifecycle::SessionCore*         core_{};
+            std::shared_ptr<OverlayPendingRegistry> registry_ =
+                std::make_shared<OverlayPendingRegistry>();
     };
 
     Overlay::Overlay() :
@@ -202,10 +281,15 @@ namespace grab
     void
     Overlay::detach() noexcept
     {
-        const std::scoped_lock lock{ impl_->mutex_ };
-        impl_->core_           = nullptr;
-        impl_->reactor_        = nullptr;
-        impl_->reactor_thread_ = {};
+        {
+            const std::scoped_lock lock{ impl_->mutex_ };
+            impl_->core_           = nullptr;
+            impl_->reactor_        = nullptr;
+            impl_->reactor_thread_ = {};
+        }
+        // Settle every invocation still waiting on a reactor that will never
+        // run it; each settles exactly once.
+        impl_->registry_->cancel_all();
     }
 
     class Session::Impl

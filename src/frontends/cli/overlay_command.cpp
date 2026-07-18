@@ -934,12 +934,26 @@ namespace grab::cli
         {
             if( request.wait_for.has_value() )
             {
-                auto active = open_shape( std::move( request.shape ) );
+                // The lifetime clock starts when add() stamps started_at, not
+                // when flush() returns; wait only the time remaining to the
+                // absolute policy deadline so fence latency never extends the
+                // shape's on-screen life.
+                const auto policy_start = std::chrono::steady_clock::now();
+                auto       active       = open_shape( std::move( request.shape ) );
                 if( !active.has_value() )
                 {
                     return std::unexpected( std::move( active.error() ) );
                 }
-                return wait_until_timer( *active->session, *request.wait_for );
+                const auto deadline = policy_start + *request.wait_for;
+                const auto remaining =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        deadline - std::chrono::steady_clock::now()
+                    );
+                if( remaining <= std::chrono::milliseconds::zero() )
+                {
+                    return {};
+                }
+                return wait_until_timer( *active->session, remaining );
             }
 
             auto signals = BlockedSignals::create();

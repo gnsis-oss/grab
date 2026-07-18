@@ -175,8 +175,14 @@ serialized on the session's reactor thread (X11 affinity). **Failure rule:**
 any `apply` failure marks the delegate desynchronized — further deltas are
 rejected until an atomic `resync` succeeds. Public API success means *scene
 acceptance*, not pixels; `flush(revision)` is the presentation fence — it
-returns once everything up to `revision` is actually presented (the ring-3
-test fences before capturing; no sleep-and-hope).
+returns once the delegate has presented everything up to `revision` and the
+X server has processed it. **An external compositor's repaint is
+asynchronous and NOT fenced** — X11 offers no portable present-feedback for
+another client's redraw; pixel-verifying consumers (the ring-3 tests)
+bounded-retry their capture rather than assuming a stronger guarantee.
+A `Clear` delta opening a new epoch (revision 1 of that epoch) is applied
+atomically as the explicit epoch transition — never a gap; any other epoch
+change or revision discontinuity desynchronizes.
 
 - The contract is the **abstract scene**, not pixels: shape records with
   style, space-tagged geometry, and declarative lifetime/animation policies.
@@ -221,7 +227,9 @@ like any other capability).
 
 - New public header `include/grab/overlay.hpp` (allowlist addition):
   `session.overlay() -> Result<Overlay*>` (expected cannot hold references)
-  exposing the scene verbs.
+  exposing the scene verbs, plus `Overlay::space()` — the coordinate space
+  the surface renders in; the CLI parses geometry space-unresolved and
+  stamps this space at the session boundary.
   **Type home rule (public headers cannot include `src/`):** the shape/style/
   lifetime *value types* and the `SceneDelta`/`SceneSnapshot` envelopes are
   defined in this public header (the `event.hpp` pattern — vocabulary as

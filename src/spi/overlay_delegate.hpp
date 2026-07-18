@@ -9,6 +9,11 @@
 namespace grab::spi
 {
 
+    // Delegates apply enveloped deltas contiguously within an epoch. A Clear
+    // delta that opens a new epoch (revision 1 of that epoch) is the explicit
+    // epoch transition and is applied atomically — state empties, the new
+    // epoch is adopted. Any other epoch change or revision discontinuity is a
+    // gap: the delegate desynchronizes until resync().
     class OverlayDelegate
     {
         public:

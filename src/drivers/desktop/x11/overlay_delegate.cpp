@@ -82,6 +82,10 @@ namespace grab::drivers::desktop::x11
         constexpr std::string_view compositorUnavailableReason{
             "X11 overlay requires an owned compositing manager selection"
         };
+        constexpr std::string_view reactorRequiredReason{
+            "X11 overlay requires a bound reactor to map (compositor monitor "
+            "and fade/TTL frame clock)"
+        };
         constexpr std::string_view compositorSelectionPrefix{ "_NET_WM_CM_S" };
 
         template<typename Type>
@@ -995,7 +999,6 @@ namespace grab::drivers::desktop::x11
                     return fail( ErrorCode::InvalidArgument,
                                  "X11 overlay delegate is already open" );
                 }
-
                 auto refreshed = probe_connection( connection_.get(),
                                                    screen_index_,
                                                    require_compositor );
@@ -1008,7 +1011,21 @@ namespace grab::drivers::desktop::x11
                     }
                     return std::unexpected( std::move( refreshed.error() ) );
                 }
-                probe_       = *refreshed;
+                probe_ = *refreshed;
+
+                if( map_window && reactor_ == nullptr )
+                {
+                    // A mapped overlay without a reactor has no compositor
+                    // monitor and no fade/TTL frame clock: compositor loss
+                    // would leave a fullscreen opaque window on screen. The
+                    // capability requires a bound reactor to map. Checked
+                    // after the probe so missing-prerequisite reasons
+                    // (ARGB/XFixes/compositor) keep their distinct errors.
+                    auto unavailable = capability_error( reactorRequiredReason );
+                    last_error_      = unavailable;
+                    notify_availability( false );
+                    return std::unexpected( std::move( unavailable ) );
+                }
 
                 auto created = create_surface();
                 if( !created.has_value() )
@@ -1107,6 +1124,20 @@ namespace grab::drivers::desktop::x11
                 bool changed{};
                 for( const auto& delta : deltas )
                 {
+                    // A Clear delta opening a new epoch IS the explicit epoch
+                    // transition: applied atomically, never treated as a gap.
+                    if( candidate_epoch.has_value() &&
+                        delta.epoch !=
+                        *candidate_epoch &&
+                        std::holds_alternative<overlay::Clear>( delta.change ) &&
+                        delta.revision.value == revisionStep )
+                    {
+                        candidate_shapes.clear();
+                        candidate_epoch    = delta.epoch;
+                        candidate_revision = delta.revision;
+                        changed            = true;
+                        continue;
+                    }
                     if( candidate_epoch.has_value() && delta.epoch != *candidate_epoch )
                     {
                         return mark_desynced( "X11 overlay scene epoch changed" );
@@ -2331,20 +2362,19 @@ namespace grab::drivers::desktop::x11
                         return;
                     }
                 }
-                // Reapply the complete retained abstract scene to the newly
-                // created raster. Its first render is full-surface damage.
+                // The cached records were transformed under the OLD topology;
+                // replaying them would freeze stale device coordinates. The
+                // fresh surface starts empty and the delegate desynchronizes:
+                // the owning service's next verb/flush resyncs with geometry
+                // retransformed through the refreshed space graph.
                 if( epoch_.has_value() )
                 {
-                    auto resynced = resync( overlay::SceneSnapshot{
-                        .epoch            = *epoch_,
-                        .through_revision = accepted_revision_,
-                        .shapes           = shapes_,
-                    } );
-                    if( !resynced.has_value() )
-                    {
-                        mark_async_desynced( std::move( resynced.error() ) );
-                        return;
-                    }
+                    mark_async_desynced(
+                        make_error( ErrorCode::ResyncRequired,
+                                    "X11 overlay topology changed; service "
+                                    "resync with retransformed geometry "
+                                    "required" )
+                    );
                 }
                 else
                 {

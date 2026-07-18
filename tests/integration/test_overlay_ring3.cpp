@@ -1049,9 +1049,32 @@ namespace
             GTEST_SKIP() << "requires the Xvfb fixture on " << bareDisplay;
         }
         ASSERT_EQ( compositor_owner( display ), XCB_WINDOW_NONE );
-        const auto before   = root_children( display );
+        const auto                              before = root_children( display );
 
-        auto       delegate = X11OverlayDelegate::create( nullptr, bareDisplay );
+        // Record every MapNotify on the root for the WHOLE attempt window —
+        // a before/after child comparison cannot exclude transient mapping.
+        constexpr std::array<std::uint32_t, 1U> substructureMask{
+            XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY,
+        };
+        xcb_change_window_attributes( display.get(),
+                                      display.root(),
+                                      XCB_CW_EVENT_MASK,
+                                      substructureMask.data() );
+        xcb_flush( display.get() );
+
+        // Public resolution path: the session's overlay capability must be
+        // unavailable on a compositor-less display.
+        grab::SessionOptions options;
+        options.display = std::string{ bareDisplay };
+        auto session    = grab::Session::open( std::move( options ) );
+        ASSERT_TRUE( session.has_value() ) << session.error().message;
+        const auto facade = ( *session )->overlay();
+        ASSERT_FALSE( facade.has_value() );
+        EXPECT_EQ( facade.error().code, grab::ErrorCode::CapabilityUnavailable );
+        ( *session )->close();
+
+        // Direct-delegate probe keeps the distinct-reason assertion.
+        auto delegate = X11OverlayDelegate::create( nullptr, bareDisplay );
         ASSERT_TRUE( delegate.has_value() ) << delegate.error().message;
         const auto opened = ( *delegate )->open( grab::CoordinateSpaceId{ 1U } );
 
@@ -1061,8 +1084,22 @@ namespace
             << opened.error().message;
         EXPECT_EQ( x11_detail::X11OverlayDelegateTestAccess::window( **delegate ),
                    XCB_WINDOW_NONE );
-        EXPECT_EQ( root_children( display ), before );
         ( *delegate )->close();
+
+        // No MapNotify may have arrived at any point during the attempts.
+        xcb_flush( display.get() );
+        std::size_t map_notifications = 0U;
+        while( auto* event = xcb_poll_for_event( display.get() ) )
+        {
+            const auto response = event->response_type & syntheticEventMask;
+            if( response == XCB_MAP_NOTIFY )
+            {
+                ++map_notifications;
+            }
+            std::free( event );    // NOLINT(cppcoreguidelines-no-malloc,hicpp-no-malloc)
+        }
+        EXPECT_EQ( map_notifications, std::size_t{ 0U } );
+        EXPECT_EQ( root_children( display ), before );
     }
 
     // GoogleTest assertion macros dominate the reported cognitive complexity.

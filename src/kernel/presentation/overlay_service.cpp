@@ -562,7 +562,15 @@ namespace grab::kernel::presentation
                 return std::unexpected( std::move( recovered.error() ) );
             }
         }
-        return delegate_->flush( snapshot.through_revision );
+        auto flushed = delegate_->flush( snapshot.through_revision );
+        if( !flushed.has_value() )
+        {
+            // A failed fence may leave the delegate desynchronized; force the
+            // next verb (or flush retry) through recovery instead of wedging
+            // on ResyncRequired.
+            desynchronized_ = true;
+        }
+        return flushed;
     }
 
     void

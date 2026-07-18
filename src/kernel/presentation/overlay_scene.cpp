@@ -705,6 +705,12 @@ namespace grab::kernel::presentation
         return snapshot;
     }
 
+    std::uint64_t
+    OverlayScene::publication_failures() const noexcept
+    {
+        return impl_->publication_failures.load( std::memory_order_relaxed );
+    }
+
     void
     OverlayScene::set_delta_sink( DeltaSink sink )
     {
