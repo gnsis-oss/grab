@@ -265,9 +265,30 @@ Rendering rules (spec §3.2, closed): nonzero winding fill; round caps/joins; de
 
 ### Task 8: Trail animator
 
+> **Gap discovered 2026-07-18 (user ruling: extend vocabulary).** `MouseMove`
+> events carry only relative `{axis, delta}` — no absolute position, no
+> coordinate space anywhere in the event vocabulary; XI2 *raw* motion has no
+> root coordinates. §3.4's trail therefore has no input in the assumed shape.
+> Fix = **Task 8a**, before the animator: `MouseMove` gains
+> `std::optional<SpacePoint> position{}` (position + space in one field),
+> stamped at the provider edge — the X11 source performs one
+> `xcb_query_pointer` per coalesced raw-motion batch and stamps the result
+> plus the coordinate authority's global space id (injected via the runtime).
+> Additive + tolerant-decode-safe across: `payload_fields.hpp` keys, proto
+> message (optional fields), gRPC codec, `compat/eventgrab_v1` (v1 wire
+> DROPS the new field — v1 round-trip must stay green), JSONL storage.
+> Consumers without positions (evdev fallback) simply leave it absent; the
+> animator ignores position-less motion (cannot draw it).
+
 **Files:**
+- Task 8a modify: `include/grab/event.hpp`, `include/grab/payload_fields.hpp`,
+  `proto/eventgrab/v1/events.proto`, `src/frontends/grpc/codec.cpp`,
+  `src/compat/eventgrab_v1/v1_payload_codec.cpp`, `src/storage/jsonl_sink.cpp`,
+  `src/drivers/desktop/x11/x11_event_source.{hpp,cpp}`,
+  `src/drivers/desktop/x11/x11_runtime.cpp` (space-id injection)
 - Create: `src/kernel/presentation/trail_animator.{hpp,cpp}`
-- Test: `tests/kernel/test_trail_animator.cpp`
+- Test: `tests/kernel/test_trail_animator.cpp` (+ extend the existing event
+  codec/storage round-trip tests with the optional position field)
 
 **Interfaces:**
 - Consumes: `SubscriptionEvent` variant (`grab/watch.hpp`: `std::variant<Event, QueueGapMarker>`), `Overlay`-facade-compatible sink (constructor takes `OverlayScene&` or the public `Overlay*` — take `OverlayScene&`, the CLI wires it through the service).
