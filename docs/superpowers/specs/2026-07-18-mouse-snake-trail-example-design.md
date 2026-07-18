@@ -104,7 +104,9 @@ them.
 2. Run under Xvfb; capture the display mid-run and confirm trail segments
    render along the snake path.
 3. Live run on a real display as the demo — the program genuinely moves the
-   pointer; that is its purpose.
+   pointer; that is its purpose. Use the release preset: the sanitized dev
+   build renders the overlay at ~5 fps on large displays, which starves the
+   reactor and makes the trail look static.
 
 ## Out of scope
 

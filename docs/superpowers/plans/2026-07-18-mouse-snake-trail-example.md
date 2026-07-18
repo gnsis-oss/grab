@@ -792,10 +792,15 @@ Expected: authorship shows `GNERSIS <gornersisyan4@gmail.com>` twice.
 
 ## Live demo (manual, after the plan)
 
-On a real display the program moves the actual pointer:
+Build the **release preset** for live runs — the default dev build carries
+ASan/UBSan + coverage, whose per-pixel instrumentation drops the overlay from
+60 fps to ~5 fps at 3200x2000 (frames arrive seconds apart: the trail looks
+static and physical-input trails render late):
 
 ```bash
-./build/mouse_snake_trail
+cmake --preset release
+cmake --build build-release -j --target mouse_snake_trail
+./build-release/examples/mouse_snake_trail
 ```
 
 The snake draws blue; wiggling the physical mouse during the run draws red beside it.
