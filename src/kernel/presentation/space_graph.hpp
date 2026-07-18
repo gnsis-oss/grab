@@ -25,6 +25,11 @@ namespace grab::detail
             bump_generation( CoordinateSpaceId space );
 
             [[nodiscard]]
+            Result<Affine>
+            resolve_transform( CoordinateSpaceId source,
+                               CoordinateSpaceId destination ) const;
+
+            [[nodiscard]]
             Result<SpacePoint>
             map( SpacePoint        point,
                  CoordinateSpaceId destination ) const;

@@ -36,6 +36,20 @@ namespace grab::drivers::desktop::x11
 
 }
 
+namespace grab::detail
+{
+
+    class SpaceGraph;
+
+}
+
+namespace grab::kernel::presentation
+{
+
+    class OverlayService;
+
+}
+
 namespace grab::kernel::lifecycle
 {
 
@@ -101,6 +115,13 @@ namespace grab::kernel::lifecycle
             Result<Frame>
             capture( const CaptureTarget& target,
                      CaptureOptions       options = {} );
+
+            [[nodiscard]]
+            Result<grab::kernel::presentation::OverlayService*>
+            overlay();
+
+            void
+            close_overlay() noexcept;
 
             [[nodiscard]]
             EventBus&
@@ -197,6 +218,8 @@ namespace grab::kernel::lifecycle
             spi::Runtime*                                primary_runtime_{};
             grab::drivers::desktop::x11::X11Runtime*     x11_runtime_{};
             std::vector<DiagnosticEntry>                 runtime_diagnostics_;
+            std::shared_ptr<const grab::detail::SpaceGraph>             overlay_graph_;
+            std::unique_ptr<grab::kernel::presentation::OverlayService> overlay_service_;
 
             // Monotonic session-scoped RuntimeId authority. Each attached
             // runtime is assigned a distinct, stable id via allocate_runtime_id;
@@ -204,8 +227,8 @@ namespace grab::kernel::lifecycle
             // disambiguate multi-runtime output regardless of a source's own
             // restart-scoped id. Source-minted ids still drive per-store restart
             // detection.
-            std::uint32_t                                next_runtime_id_{ 1U };
-            std::unique_ptr<ObservationPump>             pump_;
+            std::uint32_t                    next_runtime_id_{ 1U };
+            std::unique_ptr<ObservationPump> pump_;
     };
 
     [[nodiscard]]
@@ -236,5 +259,9 @@ namespace grab::kernel::lifecycle
     capture_verb( SessionCore*         core,
                   const CaptureTarget& target,
                   CaptureOptions       options );
+
+    [[nodiscard]]
+    Result<grab::kernel::presentation::OverlayService*>
+    overlay_verb( SessionCore* core );
 
 }    // namespace grab::kernel::lifecycle

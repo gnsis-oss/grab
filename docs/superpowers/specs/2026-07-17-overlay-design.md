@@ -213,7 +213,8 @@ like any other capability).
 ## 6. Public API + CLI
 
 - New public header `include/grab/overlay.hpp` (allowlist addition):
-  `session.overlay() -> Result<Overlay&>` exposing the scene verbs.
+  `session.overlay() -> Result<Overlay*>` (expected cannot hold references)
+  exposing the scene verbs.
   **Type home rule (public headers cannot include `src/`):** the shape/style/
   lifetime *value types* and the `SceneDelta`/`SceneSnapshot` envelopes are
   defined in this public header (the `event.hpp` pattern — vocabulary as

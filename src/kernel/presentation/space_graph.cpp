@@ -164,11 +164,11 @@ namespace grab::detail
         ++generations_.at( space );
     }
 
-    Result<SpacePoint>
-    SpaceGraph::map( SpacePoint        point,
-                     CoordinateSpaceId destination ) const
+    Result<Affine>
+    SpaceGraph::resolve_transform( CoordinateSpaceId source,
+                                   CoordinateSpaceId destination ) const
     {
-        auto route = find_route( point.space, destination );
+        auto route = find_route( source, destination );
         if( !route.has_value() )
         {
             return std::unexpected( std::move( route.error() ) );
@@ -178,11 +178,26 @@ namespace grab::detail
             return fail( ErrorCode::TopologyChanged,
                          "coordinate transform route is stale" );
         }
+        return route->transform;
+    }
 
-        const auto& transform = route->transform;
+    Result<SpacePoint>
+    SpaceGraph::map( SpacePoint        point,
+                     CoordinateSpaceId destination ) const
+    {
+        auto transform = resolve_transform( point.space, destination );
+        if( !transform.has_value() )
+        {
+            return std::unexpected( std::move( transform.error() ) );
+        }
+
         return SpacePoint{
-            .x = ( transform.xx * point.x ) + ( transform.xy * point.y ) + transform.tx,
-            .y = ( transform.yx * point.x ) + ( transform.yy * point.y ) + transform.ty,
+            .x     = ( transform->xx * point.x ) +
+                     ( transform->xy * point.y ) +
+                     transform->tx,
+            .y     = ( transform->yx * point.x ) +
+                     ( transform->yy * point.y ) +
+                     transform->ty,
             .space = destination,
         };
     }

@@ -1,11 +1,13 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "grab/result.hpp"
 #include "grab/space.hpp"
 
 #include <chrono>
 #include <compare>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -172,3 +174,54 @@ namespace grab::overlay
     };
 
 }    // namespace grab::overlay
+
+namespace grab
+{
+
+    class Overlay
+    {
+        public:
+
+            ~Overlay();
+
+            Overlay( const Overlay& ) = delete;
+            Overlay&
+            operator=( const Overlay& ) = delete;
+            Overlay( Overlay&& )        = delete;
+            Overlay&
+            operator=( Overlay&& ) = delete;
+
+            [[nodiscard]]
+            Result<overlay::ShapeId>
+            add( overlay::Shape shape );
+
+            [[nodiscard]]
+            Result<void>
+            update( overlay::ShapeId id,
+                    overlay::Shape   shape );
+
+            [[nodiscard]]
+            Result<void>
+            remove( overlay::ShapeId id );
+
+            void
+            clear();
+
+            [[nodiscard]]
+            Result<void>
+            flush();
+
+        private:
+
+            friend class Session;
+
+            Overlay();
+
+            void
+            detach() noexcept;
+
+            class Impl;
+            std::unique_ptr<Impl> impl_;
+    };
+
+}    // namespace grab

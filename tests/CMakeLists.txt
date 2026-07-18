@@ -85,12 +85,17 @@ add_executable(grab_kernel_tests
     kernel/test_overlay_delegate_contract.cpp
     kernel/test_overlay_raster.cpp
     kernel/test_overlay_scene.cpp
+    kernel/test_overlay_service.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp
     kernel/test_fake_runtime.cpp
     query/test_query.cpp
 )
-target_link_libraries(grab_kernel_tests PRIVATE grab_kernel grab_codec GTest::gtest_main)
+target_link_libraries(grab_kernel_tests PRIVATE
+    grab_kernel
+    grab_vendor_l0
+    grab_codec
+    GTest::gtest_main)
 target_include_directories(grab_kernel_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests)

@@ -19,6 +19,8 @@
 #include "kernel/graph/tree_store.hpp"
 #include "kernel/lifecycle/observation_pump.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
+#include "kernel/presentation/overlay_service.hpp"
+#include "kernel/presentation/space_graph.hpp"
 #include "kernel/query/evaluator.hpp"
 #include "kernel/query/snapshot_tree_nav.hpp"
 #include "spi/event_source.hpp"
@@ -116,6 +118,9 @@ namespace grab::kernel::lifecycle
             {
                 pump_->stop();
             }
+            // The service leases a delegate owned by the primary runtime. Close
+            // that lease while the runtime is still alive.
+            close_overlay();
             // User-held subscriptions may outlive this core; their teardown must
             // not re-enter a destroyed runtime.
             bus_.set_demand_callback( {} );
@@ -451,6 +456,61 @@ namespace grab::kernel::lifecycle
             return std::unexpected( std::move( native.error() ) );
         }
         return route->capture_window( *native );
+    }
+
+    Result<grab::kernel::presentation::OverlayService*>
+    SessionCore::overlay()
+    {
+        if( overlay_service_ != nullptr )
+        {
+            return overlay_service_.get();
+        }
+        if( primary_runtime_ == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no primary runtime" );
+        }
+
+        CoordinateSpaceId delegate_space{};
+        if( x11_runtime_ != nullptr )
+        {
+            if( auto* const route = x11_runtime_->capture_route(); route != nullptr )
+            {
+                overlay_graph_ = route->graph();
+                delegate_space = route->global_space();
+            }
+        }
+        if( overlay_graph_ == nullptr )
+        {
+            auto graph     = std::make_shared<grab::detail::SpaceGraph>();
+            delegate_space = graph->add_space();
+            overlay_graph_ = std::move( graph );
+        }
+
+        auto service = grab::kernel::presentation::OverlayService::create(
+            *primary_runtime_,
+            *overlay_graph_,
+            delegate_space,
+            []
+            {
+                return std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()
+                );
+            }
+        );
+        if( !service.has_value() )
+        {
+            return std::unexpected( std::move( service.error() ) );
+        }
+        overlay_service_ = std::move( *service );
+        return overlay_service_.get();
+    }
+
+    void
+    SessionCore::close_overlay() noexcept
+    {
+        overlay_service_.reset();
+        overlay_graph_.reset();
     }
 
     Result<void>
@@ -882,6 +942,17 @@ namespace grab::kernel::lifecycle
                          "session has no composed display stack" );
         }
         return core->capture( target, options );
+    }
+
+    Result<grab::kernel::presentation::OverlayService*>
+    overlay_verb( SessionCore* core )
+    {
+        if( core == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no composed display stack" );
+        }
+        return core->overlay();
     }
 
 }    // namespace grab::kernel::lifecycle

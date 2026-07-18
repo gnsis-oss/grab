@@ -3,6 +3,7 @@
 #include "grab/capture.hpp"
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
+#include "grab/overlay.hpp"
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/trace.hpp"
@@ -83,6 +84,12 @@ namespace grab
             EventBus&
             bus() noexcept;
 
+            // Non-owning facade. The pointer remains valid for this Session's
+            // lifetime and is detached by close().
+            [[nodiscard]]
+            Result<Overlay*>
+            overlay();
+
             // Start/stop continuous observation over the composed runtime's
             // event source and tree deltas. No-op when no runtime is composed.
             [[nodiscard]]
@@ -119,6 +126,9 @@ namespace grab
         private:
 
             explicit Session( SessionOptions options );
+
+            void
+            bind_overlay_facade() noexcept;
 
             class Impl;
 
