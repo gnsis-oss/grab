@@ -13,11 +13,11 @@ namespace grab::spi
     {
         public:
 
-            OverlayDelegate()          = default;
-            virtual ~OverlayDelegate() = default;
+            OverlayDelegate()                         = default;
+            virtual ~OverlayDelegate()                = default;
             OverlayDelegate( const OverlayDelegate& ) = delete;
             OverlayDelegate&
-            operator=( const OverlayDelegate& ) = delete;
+            operator=( const OverlayDelegate& )  = delete;
             OverlayDelegate( OverlayDelegate&& ) = delete;
             OverlayDelegate&
             operator=( OverlayDelegate&& ) = delete;

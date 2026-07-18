@@ -83,16 +83,19 @@ add_executable(grab_kernel_tests
     kernel/graph/test_state_snapshot_provider.cpp
     kernel/test_ui.cpp
     kernel/test_overlay_delegate_contract.cpp
+    kernel/test_overlay_raster.cpp
     kernel/test_overlay_scene.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp
     kernel/test_fake_runtime.cpp
     query/test_query.cpp
 )
-target_link_libraries(grab_kernel_tests PRIVATE grab_kernel GTest::gtest_main)
+target_link_libraries(grab_kernel_tests PRIVATE grab_kernel grab_codec GTest::gtest_main)
 target_include_directories(grab_kernel_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests)
+target_compile_definitions(grab_kernel_tests PRIVATE
+    GRAB_OVERLAY_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/kernel/golden/overlay")
 gtest_discover_tests(grab_kernel_tests)
 
 add_executable(grab_driver_x11_tests

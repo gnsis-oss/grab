@@ -48,11 +48,11 @@ namespace grab::testing
     {
     };
 
-    using OverlayCall = std::variant<OverlayOpenCall,
-                                     OverlayApplyCall,
-                                     OverlayResyncCall,
-                                     OverlayFlushCall,
-                                     OverlayCloseCall>;
+    using OverlayCall     = std::variant<OverlayOpenCall,
+                                         OverlayApplyCall,
+                                         OverlayResyncCall,
+                                         OverlayFlushCall,
+                                         OverlayCloseCall>;
     using OverlayShapeMap = std::map<overlay::ShapeId, overlay::ShapeRecord>;
 
     class FakeOverlayDelegate final : public spi::OverlayDelegate
@@ -70,8 +70,8 @@ namespace grab::testing
                                  "overlay delegate is already open" );
                 }
 
-                state_            = OverlayDelegateState::Synced;
-                space_            = space;
+                state_ = OverlayDelegateState::Synced;
+                space_ = space;
                 epoch_.reset();
                 through_revision_ = {};
                 shapes_.clear();
@@ -110,8 +110,7 @@ namespace grab::testing
                 auto candidate_revision = through_revision_;
                 for( const auto& delta : deltas )
                 {
-                    if( candidate_epoch.has_value() &&
-                        delta.epoch != *candidate_epoch )
+                    if( candidate_epoch.has_value() && delta.epoch != *candidate_epoch )
                     {
                         return desync( "overlay scene epoch changed" );
                     }
@@ -120,7 +119,9 @@ namespace grab::testing
                     {
                         if( delta.revision.value != firstRevisionValue )
                         {
-                            return desync( "overlay delta stream did not start at revision 1" );
+                            return desync(
+                                "overlay delta stream did not start at revision 1"
+                            );
                         }
                         candidate_epoch = delta.epoch;
                     }
@@ -128,8 +129,8 @@ namespace grab::testing
                     {
                         continue;
                     }
-                    else if( delta.revision.value - candidate_revision.value !=
-                             revisionIncrement )
+                    else if( delta.revision.value -
+                             candidate_revision.value != revisionIncrement )
                     {
                         return desync( "overlay delta revision is non-contiguous" );
                     }
@@ -138,9 +139,9 @@ namespace grab::testing
                     candidate_revision = delta.revision;
                 }
 
-                shapes_            = std::move( candidate_shapes );
-                epoch_             = candidate_epoch;
-                through_revision_  = candidate_revision;
+                shapes_           = std::move( candidate_shapes );
+                epoch_            = candidate_epoch;
+                through_revision_ = candidate_revision;
                 return {};
             }
 
@@ -161,10 +162,10 @@ namespace grab::testing
                     replacement.insert_or_assign( record.id, record );
                 }
 
-                shapes_            = std::move( replacement );
-                epoch_             = scene.epoch;
-                through_revision_  = scene.through_revision;
-                state_             = OverlayDelegateState::Synced;
+                shapes_           = std::move( replacement );
+                epoch_            = scene.epoch;
+                through_revision_ = scene.through_revision;
+                state_            = OverlayDelegateState::Synced;
                 return {};
             }
 
@@ -195,8 +196,8 @@ namespace grab::testing
             close() override
             {
                 calls_.emplace_back( OverlayCloseCall{} );
-                state_            = OverlayDelegateState::Closed;
-                space_            = {};
+                state_ = OverlayDelegateState::Closed;
+                space_ = {};
                 epoch_.reset();
                 through_revision_ = {};
                 shapes_.clear();
@@ -293,18 +294,15 @@ namespace grab::testing
             }
 
             static void
-            apply_change( OverlayShapeMap&                 shapes,
+            apply_change( OverlayShapeMap&           shapes,
                           const overlay::SceneDelta& delta )
             {
-                if( const auto* upsert =
-                        std::get_if<overlay::Upsert>( &delta.change ) )
+                if( const auto* upsert = std::get_if<overlay::Upsert>( &delta.change ) )
                 {
-                    shapes.insert_or_assign( upsert->record.id,
-                                             upsert->record );
+                    shapes.insert_or_assign( upsert->record.id, upsert->record );
                     return;
                 }
-                if( const auto* remove =
-                        std::get_if<overlay::Remove>( &delta.change ) )
+                if( const auto* remove = std::get_if<overlay::Remove>( &delta.change ) )
                 {
                     shapes.erase( remove->id );
                     return;
@@ -312,16 +310,16 @@ namespace grab::testing
                 shapes.clear();
             }
 
-            static constexpr std::uint64_t firstRevisionValue = 1U;
-            static constexpr std::uint64_t revisionIncrement  = 1U;
+            static constexpr std::uint64_t     firstRevisionValue = 1U;
+            static constexpr std::uint64_t     revisionIncrement  = 1U;
 
-            OverlayDelegateState          state_{ OverlayDelegateState::Closed };
-            CoordinateSpaceId             space_{};
+            OverlayDelegateState               state_{ OverlayDelegateState::Closed };
+            CoordinateSpaceId                  space_{};
             std::optional<overlay::SceneEpoch> epoch_{};
-            overlay::Revision             through_revision_{};
-            OverlayShapeMap               shapes_{};
-            std::vector<OverlayCall>       calls_{};
-            std::optional<InjectedFailure> apply_failure_{};
+            overlay::Revision                  through_revision_{};
+            OverlayShapeMap                    shapes_{};
+            std::vector<OverlayCall>           calls_{};
+            std::optional<InjectedFailure>     apply_failure_{};
     };
 
 }    // namespace grab::testing
