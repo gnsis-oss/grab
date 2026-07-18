@@ -37,6 +37,7 @@ Its very useful if you want to :
 | Accessibility       | AT-SPI over D-Bus                   |
 | Event daemon        | gRPC + Protobuf                     |
 | Notifications       | D-Bus                               |
+| Overlay annotations | XFixes/XRender ARGB + compositor    |
 
 
 

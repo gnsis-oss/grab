@@ -6,8 +6,15 @@
   corrections, capture matrix, flush fence, ownership ruling), 1 rejected
   (public-header allowlist check *does* exist: `check_public_headers.sh`), 2
   partially accepted (no Phase-1 multi-client broker — per-Session ownership
-  instead; "top-most" contract qualified rather than dropped). Awaiting user
-  approval; implementation plan to follow.
+  instead; "top-most" contract qualified rather than dropped).
+  **Phase 1 IMPLEMENTED 2026-07-18** on `feat/grab-port` (plan:
+  `docs/superpowers/plans/2026-07-17-overlay-phase1.md`; commits
+  `584ed14..c96d3ca`). Two implementation-time amendments: §6
+  `Result<Overlay*>` (expected cannot hold references) and Task 8a —
+  `MouseMove` gained an optional space-tagged `position` stamped at the X11
+  provider edge (the event vocabulary carried only relative deltas; user
+  ruling 2026-07-18). Compositor-dependent ring-3 positives skip on hosts
+  without picom/xcompmgr.
 - **Relation to the canonical architecture:** an *addition* under the
   2026-07-13 canonical spec's rules — new named kernel concern, new SPI
   surface, new capability row, one public header (allowlist addition). It
