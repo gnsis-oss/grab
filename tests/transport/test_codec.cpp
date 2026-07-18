@@ -7,6 +7,7 @@
 #include "grab/origin.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
+#include "grab/space.hpp"
 #include "storage/jsonl_sink.hpp"
 
 // clang-format off
@@ -31,6 +32,8 @@ namespace
     constexpr double           timestamp            = 1729.125;
     constexpr double           expectedTimestamp    = timestamp;
     constexpr double           mouseDelta           = -4.5;
+    constexpr double           mousePositionX       = 321.25;
+    constexpr double           mousePositionY       = 654.5;
     constexpr double           idleSeconds          = 30.25;
     constexpr double           windowDuration       = 7.75;
     constexpr std::int64_t     pidValue             = 1'234;
@@ -38,6 +41,7 @@ namespace
     constexpr std::uint64_t    decodedSequence      = 0U;
     constexpr std::uint32_t    keyCode              = 30U;
     constexpr std::uint32_t    mouseButton          = 1U;
+    constexpr std::uint32_t    mouseSpace           = 17U;
     constexpr std::uint32_t    subjectRuntime       = 7U;
     constexpr std::uint32_t    subjectTree          = 8U;
     constexpr std::uint32_t    subjectEpoch         = 9U;
@@ -136,7 +140,15 @@ namespace
     grab::MouseMove
     mouse_move()
     {
-        return grab::MouseMove{ .axis = "0", .delta = mouseDelta };
+        return grab::MouseMove{
+            .axis     = "0",
+            .delta    = mouseDelta,
+            .position = grab::SpacePoint{
+                                         .x     = mousePositionX,
+                                         .y     = mousePositionY,
+                                         .space = grab::CoordinateSpaceId{ mouseSpace },
+                                         },
+        };
     }
 
     [[nodiscard]]
@@ -296,6 +308,16 @@ namespace
     {
         EXPECT_EQ( actual.axis, expected.axis );
         EXPECT_DOUBLE_EQ( actual.delta, expected.delta );
+        ASSERT_EQ( actual.position.has_value(), expected.position.has_value() );
+        if( !expected.position.has_value() || !actual.position.has_value() )
+        {
+            return;
+        }
+        const auto& expected_position = *expected.position;
+        const auto& actual_position   = *actual.position;
+        EXPECT_DOUBLE_EQ( actual_position.x, expected_position.x );
+        EXPECT_DOUBLE_EQ( actual_position.y, expected_position.y );
+        EXPECT_EQ( actual_position.space, expected_position.space );
     }
 
     void
@@ -629,6 +651,45 @@ TEST( Codec,
     ASSERT_TRUE( decoded.has_value() );
     EXPECT_DOUBLE_EQ( decoded->timestamp, expectedTimestamp );
     EXPECT_EQ( decoded->sequence, decodedSequence );
+}
+
+TEST( Codec,
+      MouseMovePositionUsesAdditiveTypedFieldsAndLegacyMapDropsIt )
+{
+    const auto event =
+        make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() );
+
+    const auto wire = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() ) << wire.error().message;
+    ASSERT_TRUE( wire->has_mouse_move() );
+    EXPECT_TRUE( wire->mouse_move().has_position_x() );
+    EXPECT_TRUE( wire->mouse_move().has_position_y() );
+    EXPECT_TRUE( wire->mouse_move().has_space() );
+    EXPECT_DOUBLE_EQ( wire->mouse_move().position_x(), mousePositionX );
+    EXPECT_DOUBLE_EQ( wire->mouse_move().position_y(), mousePositionY );
+    EXPECT_EQ( wire->mouse_move().space(), mouseSpace );
+    EXPECT_FALSE( wire->data().contains( "position_x" ) );
+    EXPECT_FALSE( wire->data().contains( "position_y" ) );
+    EXPECT_FALSE( wire->data().contains( "space" ) );
+
+    const auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
+    expect_payload_value_eq( mouse_move(),
+                             std::get<grab::MouseMove>( decoded->payload ) );
+}
+
+TEST( Codec,
+      LegacyMouseMoveWireDecodesWithoutPosition )
+{
+    const auto event =
+        make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() );
+    auto wire = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() ) << wire.error().message;
+    wire->clear_mouse_move();
+
+    const auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
+    EXPECT_FALSE( std::get<grab::MouseMove>( decoded->payload ).position.has_value() );
 }
 
 TEST( Codec,

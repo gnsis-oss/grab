@@ -361,7 +361,13 @@ namespace grab::compat::eventgrab_v1
                 return std::unexpected( delta.error() );
             }
 
-            return grab::MouseMove{ .axis = *axis, .delta = *delta };
+            // The v1 data-map projection predates absolute positions and
+            // intentionally drops them in both directions.
+            return grab::MouseMove{
+                .axis     = *axis,
+                .delta    = *delta,
+                .position = {},
+            };
         }
 
         [[nodiscard]]

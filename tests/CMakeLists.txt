@@ -86,6 +86,7 @@ add_executable(grab_kernel_tests
     kernel/test_overlay_raster.cpp
     kernel/test_overlay_scene.cpp
     kernel/test_overlay_service.cpp
+    kernel/test_trail_animator.cpp
     kernel/test_tree_store.cpp
     kernel/test_target_registry.cpp
     kernel/test_fake_runtime.cpp

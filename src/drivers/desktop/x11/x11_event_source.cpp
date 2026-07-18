@@ -5,6 +5,7 @@
 #include "grab/event_descriptor.hpp"
 #include "grab/origin.hpp"
 #include "grab/result.hpp"
+#include "grab/space.hpp"
 #include "spi/event_source.hpp"
 
 #include <algorithm>
@@ -23,9 +24,11 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 #include <xcb/xcb.h>
 #include <xcb/xinput.h>
+#include <xcb/xproto.h>
 
 namespace grab::drivers::desktop::x11
 {
@@ -45,6 +48,7 @@ namespace grab::drivers::desktop::x11
         constexpr int           bitsPerMaskWord           = 32;
         constexpr double        fp3232FractionDenominator = 4'294'967'296.0;
         constexpr std::uint32_t noEvents                  = 0U;
+        constexpr std::uint8_t  differentScreen           = 0U;
 
         constexpr std::size_t   keyDownDemandSlot         = 0U;
         constexpr std::size_t   keyUpDemandSlot           = 1U;
@@ -511,6 +515,66 @@ namespace grab::drivers::desktop::x11
         sink_ = std::move( sink );
     }
 
+    void
+    X11EventSource::set_global_space( grab::CoordinateSpaceId space )
+    {
+        const std::scoped_lock lock{ state_mutex_ };
+        global_space_ = space;
+    }
+
+    void
+    X11EventSource::stamp_motion_batch_position( InjectionKind             kind,
+                                                 std::vector<grab::Event>& events,
+                                                 std::size_t               first_event )
+    {
+        if( kind != InjectionKind::Motion )
+        {
+            return;
+        }
+
+        std::optional<grab::CoordinateSpaceId> space;
+        {
+            const std::scoped_lock lock{ state_mutex_ };
+            space = global_space_;
+        }
+        if( !space.has_value() )
+        {
+            return;
+        }
+
+        xcb_generic_error_t* raw_error{};
+        auto                 reply = take_xcb_owned(
+            xcb_query_pointer_reply( connection_,
+                                     xcb_query_pointer( connection_, root_ ),
+                                     &raw_error )
+        );
+        auto error = take_xcb_owned( raw_error );
+        if( error !=
+            nullptr ||
+            reply ==
+            nullptr ||
+            reply->same_screen == differentScreen )
+        {
+            return;
+        }
+
+        const grab::SpacePoint position{
+            .x     = static_cast<double>( reply->root_x ),
+            .y     = static_cast<double>( reply->root_y ),
+            .space = *space,
+        };
+        for( std::size_t event_index = first_event; event_index < events.size();
+             ++event_index )
+        {
+            auto* const motion =
+                std::get_if<grab::MouseMove>( &events.at( event_index ).payload );
+            if( motion != nullptr )
+            {
+                motion->position = position;
+            }
+        }
+    }
+
     grab::Result<void>
     X11EventSource::enable( const grab::spi::EventSpec& spec )
     {
@@ -677,6 +741,10 @@ namespace grab::drivers::desktop::x11
                 {
                     continue;
                 }
+
+                stamp_motion_batch_position( decoded.kind,
+                                             pending,
+                                             first_pending_event );
 
                 const bool source_is_xtest =
                     std::find( xtest_device_ids_.begin(),

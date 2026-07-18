@@ -88,6 +88,7 @@ add_library(grab_kernel STATIC
     src/kernel/presentation/overlay_raster.cpp
     src/kernel/presentation/overlay_scene.cpp
     src/kernel/presentation/overlay_service.cpp
+    src/kernel/presentation/trail_animator.cpp
     src/kernel/query/evaluator.cpp
     src/kernel/query/locator.cpp
     src/kernel/query/snapshot_tree_nav.cpp

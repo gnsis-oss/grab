@@ -73,6 +73,13 @@ message GraphChange {
   uint64 previous_active       = 4;
 }
 
+message MouseMove {
+  // Together these three optional scalars map atomically to grab::SpacePoint.
+  optional double position_x   = 1;
+  optional double position_y   = 2;
+  optional uint64 space        = 3;  // grab::CoordinateSpaceId::value
+}
+
 message Event {
   EventKind kind              = 1;
   EventCategory category      = 2;
@@ -84,6 +91,7 @@ message Event {
   optional uint64 before_revision = 8;
   optional uint64 after_revision = 9;
   GraphChange graph_change     = 10;
+  MouseMove mouse_move         = 11;
 }
 
 message EventFilter {

@@ -183,17 +183,44 @@ namespace grab::storage
         serialize_payload( grab::EventKind,
                            const grab::MouseMove& payload )
         {
-            auto result = ensure_json_number( payload.delta );
-            if( !result.has_value() )
+            auto numeric_status = ensure_json_number( payload.delta );
+            if( !numeric_status.has_value() )
             {
-                return std::unexpected( std::move( result.error() ) );
+                return std::unexpected( std::move( numeric_status.error() ) );
             }
-            return OrderedJson{
+
+            OrderedJson result{
                 { std::string{ grab::field_name( grab::PayloadField::Axis ) },
                  payload.axis },
                 {std::string{ grab::field_name( grab::PayloadField::Delta ) },
                  payload.delta},
             };
+            if( !payload.position.has_value() )
+            {
+                return result;
+            }
+
+            numeric_status = ensure_json_number( payload.position->x );
+            if( numeric_status.has_value() )
+            {
+                numeric_status = ensure_json_number( payload.position->y );
+            }
+            if( !numeric_status.has_value() )
+            {
+                return std::unexpected( std::move( numeric_status.error() ) );
+            }
+
+            result.emplace(
+                std::string{ grab::field_name( grab::PayloadField::PositionX ) },
+                payload.position->x
+            );
+            result.emplace(
+                std::string{ grab::field_name( grab::PayloadField::PositionY ) },
+                payload.position->y
+            );
+            result.emplace( std::string{ grab::field_name( grab::PayloadField::Space ) },
+                            payload.position->space.value );
+            return result;
         }
 
         [[nodiscard]]

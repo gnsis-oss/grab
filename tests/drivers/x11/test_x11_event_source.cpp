@@ -6,6 +6,7 @@
 #include "grab/event.hpp"
 #include "grab/origin.hpp"
 #include "grab/session.hpp"
+#include "grab/space.hpp"
 #include "kernel/events/event_bus.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
 #include "spi/event_source.hpp"
@@ -29,6 +30,8 @@ namespace
 
     constexpr std::uint8_t  test_keycode            = 38U;
     constexpr std::uint8_t  test_button             = 1U;
+    constexpr std::int16_t  test_pointer_x          = 64;
+    constexpr std::int16_t  test_pointer_y          = 72;
     constexpr std::size_t   no_subscriptions        = 0U;
     constexpr std::size_t   one_subscription        = 1U;
     constexpr std::size_t   maximum_pump_iterations = 10U;
@@ -103,6 +106,76 @@ TEST( X11EventSource,
                                            return event.origin ==
                                                   grab::EventOrigin::Unknown;
                                        } ) );
+
+    ASSERT_TRUE( runtime.stop().has_value() );
+}
+
+// GoogleTest assertion macros inflate the reported cognitive complexity.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+TEST( X11EventSource,
+      MotionBatchCarriesQueriedPositionInGlobalSpace )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    grab::drivers::desktop::x11::X11Runtime runtime;
+    const grab::OperationContext            start_context{
+        .deadline = grab::Deadline::unbounded(),
+    };
+    ASSERT_TRUE( runtime.start( start_context ).has_value() );
+    const auto* const capture_route = runtime.capture_route();
+    ASSERT_NE( capture_route, nullptr );
+
+    std::vector<grab::Event> events;
+    runtime.set_event_sink(
+        [&events]( grab::Event&& event )
+        {
+            events.push_back( std::move( event ) );
+        }
+    );
+
+    auto* const event_source = runtime.event_source();
+    ASSERT_NE( event_source, nullptr );
+    const grab::spi::EventSpec spec{ "input.mouse_move" };
+    ASSERT_TRUE( event_source->enable( spec ).has_value() );
+
+    auto* const seat = runtime.native_seat();
+    ASSERT_NE( seat, nullptr );
+    ASSERT_TRUE(
+        seat->move_pointer_absolute( test_pointer_x, test_pointer_y ).has_value()
+    );
+    ASSERT_TRUE( seat->flush().has_value() );
+
+    const grab::OperationContext wait_context{
+        .deadline = grab::Deadline::after( event_wait_budget ),
+    };
+    ASSERT_TRUE(
+        event_source->wait_for_event( spec, wait_context, event_wait_budget ).has_value()
+    );
+
+    bool saw_motion{};
+    for( const auto& event : events )
+    {
+        if( event.kind != grab::EventKind::MouseMove )
+        {
+            continue;
+        }
+        saw_motion          = true;
+        const auto& payload = std::get<grab::MouseMove>( event.payload );
+        if( !payload.position.has_value() )
+        {
+            ADD_FAILURE() << "motion batch was not position-stamped";
+            continue;
+        }
+        const auto& position = *payload.position;
+        EXPECT_DOUBLE_EQ( position.x, static_cast<double>( test_pointer_x ) );
+        EXPECT_DOUBLE_EQ( position.y, static_cast<double>( test_pointer_y ) );
+        EXPECT_EQ( position.space, capture_route->global_space() );
+    }
+    EXPECT_TRUE( saw_motion );
 
     ASSERT_TRUE( runtime.stop().has_value() );
 }

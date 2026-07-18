@@ -2,6 +2,7 @@
 
 #include "drivers/desktop/x11/injection_ledger.hpp"
 #include "grab/event.hpp"
+#include "grab/space.hpp"
 #include "spi/event_source.hpp"
 
 #include <array>
@@ -10,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 #include <xcb/xcb.h>
 
@@ -30,6 +32,9 @@ namespace grab::drivers::desktop::x11
 
             void
             set_sink( EventSink sink ) override;
+
+            void
+            set_global_space( grab::CoordinateSpaceId space );
 
             [[nodiscard]]
             grab::Result<void>
@@ -61,14 +66,20 @@ namespace grab::drivers::desktop::x11
 
             [[nodiscard]]
             grab::Result<void>
-                                       select_events( std::uint32_t mask );
+            select_events( std::uint32_t mask );
 
-            xcb_connection_t*          connection_{};
-            xcb_window_t               root_{};
-            std::uint8_t               extension_opcode_{};
-            std::vector<std::uint16_t> xtest_device_ids_;
-            InjectionLedger*           ledger_{};
+            void
+            stamp_motion_batch_position( InjectionKind             kind,
+                                         std::vector<grab::Event>& events,
+                                         std::size_t               first_event );
+
+            xcb_connection_t*                         connection_{};
+            xcb_window_t                              root_{};
+            std::uint8_t                              extension_opcode_{};
+            std::vector<std::uint16_t>                xtest_device_ids_;
+            InjectionLedger*                          ledger_{};
             std::array<std::size_t, inputDemandCount> demand_refcounts_{};
+            std::optional<grab::CoordinateSpaceId>    global_space_{};
             std::mutex                                state_mutex_;
             EventSink                                 sink_;
             std::mutex                                sink_mutex_;

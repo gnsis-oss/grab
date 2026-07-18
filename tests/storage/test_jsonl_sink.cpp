@@ -1,6 +1,7 @@
 #include "grab/event.hpp"
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
+#include "grab/space.hpp"
 #include "storage/jsonl_sink.hpp"
 
 // clang-format off
@@ -44,6 +45,9 @@ namespace
     constexpr std::string_view oldNameKey          = "name";
     constexpr std::string_view buttonKey           = "button";
     constexpr std::string_view buttonNameKey       = "button_name";
+    constexpr std::string_view positionXKey        = "position_x";
+    constexpr std::string_view positionYKey        = "position_y";
+    constexpr std::string_view spaceKey            = "space";
     constexpr std::string_view stateKey            = "state";
     constexpr std::string_view detailKey           = "detail";
     constexpr std::string_view keyName             = "A";
@@ -63,7 +67,10 @@ namespace
     constexpr std::uint64_t    secondSequence      = firstSequence + 1U;
     constexpr std::uint32_t    keyCode             = 30U;
     constexpr std::uint32_t    mouseButton         = 1U;
+    constexpr std::uint32_t    mouseSpace          = 9U;
     constexpr double           oneSecond           = 1.0;
+    constexpr double           mousePositionX      = 123.25;
+    constexpr double           mousePositionY      = 456.5;
     constexpr double           thirdDayOffsetDays  = 2.0;
     constexpr std::size_t      bufferLimit         = 3U;
     constexpr std::size_t      flushEveryWrite     = 1U;
@@ -180,6 +187,28 @@ namespace
             .payload   = grab::Payload{ grab::MouseClick{
                 .button = mouseButton,
                 .name   = std::string{ mouseButtonName },
+            } },
+        };
+    }
+
+    [[nodiscard]]
+    grab::Event
+    make_mouse_move_event( double        timestamp,
+                           std::uint64_t sequence )
+    {
+        return grab::Event{
+            .timestamp = timestamp,
+            .sequence  = sequence,
+            .kind      = grab::EventKind::MouseMove,
+            .category  = grab::EventCategory::Input,
+            .payload   = grab::Payload{ grab::MouseMove{
+                .axis     = "x",
+                .delta    = 1.0,
+                .position = grab::SpacePoint{
+                    .x     = mousePositionX,
+                    .y     = mousePositionY,
+                    .space = grab::CoordinateSpaceId{ mouseSpace },
+                },
             } },
         };
     }
@@ -546,6 +575,28 @@ TEST( JsonlSink,
     EXPECT_TRUE( has_json_key( line, buttonKey ) );
     EXPECT_TRUE( has_json_key( line, buttonNameKey ) );
     EXPECT_FALSE( has_json_key( line, oldNameKey ) );
+}
+
+TEST( JsonlSink,
+      SerializesOptionalMousePositionWithCanonicalKeys )
+{
+    const TempDir temp( "SerializesOptionalMousePositionWithCanonicalKeys" );
+    auto          sink_result = grab::storage::JsonlSink::open(
+        make_options( temp.path(), flushEveryWrite, generousFileLimit, tinyDiskBudgetMb )
+    );
+    ASSERT_TRUE( is_ok( sink_result ) );
+    auto sink = std::move( sink_result ).value();
+
+    ASSERT_TRUE( is_ok( sink.write( make_mouse_move_event( firstDayTimestamp,
+                                                           firstSequence ) ) ) );
+
+    const auto lines = read_lines( temp.path() / std::string{ firstDayFileName } );
+    ASSERT_EQ( lines.size(), singleLineCount );
+    const auto data = nlohmann::json::parse( lines.front() ).at( dataKey );
+
+    EXPECT_DOUBLE_EQ( data.at( positionXKey ).get<double>(), mousePositionX );
+    EXPECT_DOUBLE_EQ( data.at( positionYKey ).get<double>(), mousePositionY );
+    EXPECT_EQ( data.at( spaceKey ).get<std::uint32_t>(), mouseSpace );
 }
 
 TEST( JsonlSink,

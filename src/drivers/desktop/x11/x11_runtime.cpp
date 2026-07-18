@@ -135,6 +135,7 @@ namespace grab::drivers::desktop::x11
         if( capture_route.has_value() )
         {
             capture_route_.emplace( std::move( *capture_route ) );
+            event_source_->set_global_space( capture_route_->global_space() );
         }
         else
         {
@@ -146,9 +147,13 @@ namespace grab::drivers::desktop::x11
                 if( capture_route_.has_value() )
                 {
                     // Best-effort: topology changes refresh the capture authority.
-                    static_cast<void>(
-                        capture_route_->refresh_transforms()
-                    );    // NOLINT(bugprone-unused-return-value)
+                    const auto refreshed = capture_route_->refresh_transforms();
+                    if( refreshed.has_value() && event_source_ != nullptr )
+                    {
+                        event_source_->set_global_space(
+                            capture_route_->global_space()
+                        );
+                    }
                 }
             }
         );

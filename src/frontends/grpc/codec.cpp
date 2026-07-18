@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -120,6 +121,60 @@ namespace grab::transport
             }] = payload.json;
         }
 
+        void
+        encode_mouse_move_position( eventgrab::v1::Event&  wire,
+                                    const grab::MouseMove& payload )
+        {
+            if( !payload.position.has_value() )
+            {
+                return;
+            }
+
+            auto* const mouse_move = wire.mutable_mouse_move();
+            mouse_move->set_position_x( payload.position->x );
+            mouse_move->set_position_y( payload.position->y );
+            mouse_move->set_space( payload.position->space.value );
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        decode_mouse_move_position( const eventgrab::v1::Event& wire,
+                                    grab::MouseMove&            payload )
+        {
+            if( !wire.has_mouse_move() )
+            {
+                return {};
+            }
+
+            const auto& mouse_move = wire.mouse_move();
+            const bool  has_x      = mouse_move.has_position_x();
+            const bool  has_y      = mouse_move.has_position_y();
+            const bool  has_space  = mouse_move.has_space();
+            if( !has_x && !has_y && !has_space )
+            {
+                return {};
+            }
+            if( !has_x || !has_y || !has_space )
+            {
+                return protocol_error(
+                    "mouse_move position requires position_x, position_y, and space"
+                );
+            }
+            if( mouse_move.space() > std::numeric_limits<std::uint32_t>::max() )
+            {
+                return protocol_error( "mouse_move space is out of range" );
+            }
+
+            payload.position = grab::SpacePoint{
+                .x     = mouse_move.position_x(),
+                .y     = mouse_move.position_y(),
+                .space = grab::CoordinateSpaceId{
+                                                 static_cast<std::uint32_t>( mouse_move.space() ),
+                                                 },
+            };
+            return {};
+        }
+
         [[nodiscard]]
         grab::Result<void>
         validate_size( const eventgrab::v1::Event& wire )
@@ -164,7 +219,20 @@ namespace grab::transport
         {
             if( grab::compat::eventgrab_v1::is_v1_payload_kind( kind ) )
             {
-                return grab::compat::eventgrab_v1::decode_v1_payload( wire, kind );
+                auto payload =
+                    grab::compat::eventgrab_v1::decode_v1_payload( wire, kind );
+                if( !payload.has_value() || kind != grab::EventKind::MouseMove )
+                {
+                    return payload;
+                }
+
+                auto& mouse_move = std::get<grab::MouseMove>( *payload );
+                auto  position   = decode_mouse_move_position( wire, mouse_move );
+                if( !position.has_value() )
+                {
+                    return std::unexpected( std::move( position.error() ) );
+                }
+                return payload;
             }
 
             switch( kind )
@@ -236,7 +304,6 @@ namespace grab::transport
             case grab::EventKind::KeyUp :
             case grab::EventKind::KeyCombo :
             case grab::EventKind::MouseClick :
-            case grab::EventKind::MouseMove :
             case grab::EventKind::IdleStart :
             case grab::EventKind::IdleEnd :
             case grab::EventKind::WindowFocusChanged :
@@ -254,6 +321,13 @@ namespace grab::transport
                 grab::compat::eventgrab_v1::encode_v1_payload( wire,
                                                                event.kind,
                                                                event.payload );
+                break;
+            case grab::EventKind::MouseMove :
+                grab::compat::eventgrab_v1::encode_v1_payload( wire,
+                                                               event.kind,
+                                                               event.payload );
+                encode_mouse_move_position( wire,
+                                            std::get<grab::MouseMove>( event.payload ) );
                 break;
             case grab::EventKind::StateSnapshot :
                 encode_state_snapshot( wire,

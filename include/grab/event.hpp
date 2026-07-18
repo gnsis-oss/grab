@@ -3,6 +3,7 @@
 #include "grab/ids.hpp"
 #include "grab/origin.hpp"
 #include "grab/pid.hpp"
+#include "grab/space.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -77,6 +78,8 @@ namespace grab
     {
             std::string axis;
             double      delta = 0.0;
+            std::optional<SpacePoint>
+                position{};    // NOLINT(readability-redundant-member-init)
     };
 
     struct Idle
