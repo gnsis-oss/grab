@@ -777,7 +777,7 @@ TEST( OverlayService,
 }
 
 TEST( OverlayService,
-      FlushPropagatesDelegateFailure )
+      FlushPropagatesPersistentDelegateFailure )
 {
     grab::detail::SpaceGraph graph;
     const auto               delegate_space = graph.add_space( topologyGeneration );
@@ -793,8 +793,12 @@ TEST( OverlayService,
     ASSERT_TRUE( service.has_value() ) << service.error().message;
     const auto added = ( *service )->add( rect_shape( delegate_space ) );
     ASSERT_TRUE( added.has_value() ) << added.error().message;
-    runtime.fail_next_flush( grab::ErrorCode::ProviderFailed,
-                             std::string{ flushFailureMessage } );
+    // Both the fence and its one recover-and-retry must fail before the
+    // error propagates to the caller.
+    constexpr std::uint32_t persistentFenceFailures = 2U;
+    runtime.delegate().fail_next_flushes( persistentFenceFailures,
+                                          grab::ErrorCode::ProviderFailed,
+                                          std::string{ flushFailureMessage } );
 
     const auto flushed = ( *service )->flush();
 
@@ -1031,13 +1035,11 @@ TEST( OverlayService,
 
     runtime.delegate().fail_next_flush( grab::ErrorCode::DeviceInaccessible,
                                         "injected fence loss" );
-    const auto failed = ( *service )->flush();
-    ASSERT_FALSE( failed.has_value() );
 
-    // The failed fence desynchronized the delegate; the next verb must route
-    // through recovery (resync) instead of wedging on ResyncRequired.
-    const auto readded = ( *service )->add( rect_shape( space ) );
-    ASSERT_TRUE( readded.has_value() ) << readded.error().message;
+    // A failed fence desynchronizes the delegate; the SAME flush call heals
+    // by recovering (resync) and retrying the fence once.
+    const auto healed = ( *service )->flush();
+    ASSERT_TRUE( healed.has_value() ) << healed.error().message;
 
     std::size_t resync_calls = 0U;
     for( const auto& call : runtime.delegate().calls() )
@@ -1048,5 +1050,6 @@ TEST( OverlayService,
         }
     }
     EXPECT_GE( resync_calls, minimumResyncCalls );
+    EXPECT_TRUE( ( *service )->add( rect_shape( space ) ).has_value() );
     EXPECT_TRUE( ( *service )->flush().has_value() );
 }

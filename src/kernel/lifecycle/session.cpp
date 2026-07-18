@@ -23,6 +23,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -90,6 +91,16 @@ namespace grab
                 std::vector<std::pair<std::uint64_t, std::function<void()>>> pending_;
         };
 
+        // Shared between the facade and every posted execution: detach takes
+        // the writer side to wait out in-flight executions, then clears the
+        // alive flag so late-running posts settle SessionClosed instead of
+        // touching a dying SessionCore.
+        struct OverlayExecutionGate final
+        {
+                std::shared_mutex mutex;
+                std::atomic_bool  alive{ true };
+        };
+
     }    // namespace
 
     class Overlay::Impl
@@ -132,20 +143,35 @@ namespace grab
                         }
                     }
                 );
+                auto gate = execution_gate_;
                 reactor->post(
                     [completion,
                      settled,
                      registry,
+                     gate,
                      ticket,
                      core,
                      operation = std::forward<Operation>( operation )]() mutable
                     {
-                        bool expected = false;
+                        // The shared gate keeps detach() from tearing the
+                        // core down while this execution is in flight; the
+                        // alive flag rejects executions that lost the race.
+                        const std::shared_lock execution{ gate->mutex };
+                        bool                   expected = false;
                         if( settled->compare_exchange_strong( expected, true ) )
                         {
-                            completion->set_value(
-                                invoke_safely<T>( core, std::move( operation ) )
-                            );
+                            if( gate->alive.load( std::memory_order_acquire ) )
+                            {
+                                completion->set_value(
+                                    invoke_safely<T>( core, std::move( operation ) )
+                                );
+                            }
+                            else
+                            {
+                                completion->set_value( std::unexpected(
+                                    kernel::lifecycle::session_closed_error()
+                                ) );
+                            }
                         }
                         registry->remove( ticket );
                     }
@@ -196,6 +222,8 @@ namespace grab
             kernel::lifecycle::SessionCore*         core_{};
             std::shared_ptr<OverlayPendingRegistry> registry_ =
                 std::make_shared<OverlayPendingRegistry>();
+            std::shared_ptr<OverlayExecutionGate> execution_gate_ =
+                std::make_shared<OverlayExecutionGate>();
     };
 
     Overlay::Overlay() :
@@ -286,6 +314,12 @@ namespace grab
             impl_->core_           = nullptr;
             impl_->reactor_        = nullptr;
             impl_->reactor_thread_ = {};
+        }
+        // Refuse new executions, then wait out any execution already running
+        // on the reactor thread before the SessionCore may be torn down.
+        impl_->execution_gate_->alive.store( false, std::memory_order_release );
+        {
+            const std::unique_lock drain{ impl_->execution_gate_->mutex };
         }
         // Settle every invocation still waiting on a reactor that will never
         // run it; each settles exactly once.

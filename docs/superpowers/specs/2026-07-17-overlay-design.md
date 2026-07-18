@@ -91,6 +91,9 @@ Platform-free components, unit-testable without any display.
   full `resync` (same law as TreeStore), resuming deltas after
   `through_revision`. Duplicate or older revisions are ignored (this, not
   bare id+generation, is what makes upserts idempotent and replay-safe).
+  Exception: a `Clear` delta opening a new epoch (revision 1 of that epoch)
+  is the *explicit* epoch transition and is applied atomically — consumers
+  empty their state and adopt the new epoch without a resync.
 
 ### 3.2 Primitive vocabulary (closed, table-driven)
 

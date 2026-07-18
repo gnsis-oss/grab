@@ -135,6 +135,13 @@ namespace grab::drivers::desktop::x11
                 open_unmapped( X11OverlayDelegate& delegate,
                                CoordinateSpaceId   space );
 
+                // Compositor-free MAPPED open: exercises the reactor gate on
+                // hosts without a compositing manager.
+                [[nodiscard]]
+                static Result<void>
+                open_mapped_without_compositor( X11OverlayDelegate& delegate,
+                                                CoordinateSpaceId   space );
+
                 [[nodiscard]]
                 static xcb_window_t
                 window( const X11OverlayDelegate& delegate ) noexcept;

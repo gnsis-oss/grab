@@ -193,10 +193,14 @@ namespace grab::testing
                     return fail( ErrorCode::InvalidArgument,
                                  "cannot flush a closed overlay delegate" );
                 }
-                if( flush_failure_.has_value() )
+                if( flush_failure_.has_value() && flush_failures_remaining_ > 0U )
                 {
-                    auto failure = std::move( *flush_failure_ );
-                    flush_failure_.reset();
+                    --flush_failures_remaining_;
+                    auto failure = *flush_failure_;
+                    if( flush_failures_remaining_ == 0U )
+                    {
+                        flush_failure_.reset();
+                    }
                     state_ = OverlayDelegateState::Desynced;
                     return fail( failure.code, std::move( failure.message ) );
                 }
@@ -242,7 +246,16 @@ namespace grab::testing
             fail_next_flush( ErrorCode   code,
                              std::string message )
             {
-                flush_failure_ = InjectedFailure{
+                fail_next_flushes( 1U, code, std::move( message ) );
+            }
+
+            void
+            fail_next_flushes( std::uint32_t count,
+                               ErrorCode     code,
+                               std::string   message )
+            {
+                flush_failures_remaining_ = count;
+                flush_failure_            = InjectedFailure{
                     .code    = code,
                     .message = std::move( message ),
                 };
@@ -355,6 +368,7 @@ namespace grab::testing
             std::vector<OverlayCall>           calls_{};
             std::optional<InjectedFailure>     apply_failure_{};
             std::optional<InjectedFailure>     flush_failure_{};
+            std::uint32_t                      flush_failures_remaining_{};
     };
 
 }    // namespace grab::testing

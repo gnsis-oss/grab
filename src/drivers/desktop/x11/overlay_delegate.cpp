@@ -2599,6 +2599,15 @@ namespace grab::drivers::desktop::x11
             return delegate.impl_->open( space, false, false );
         }
 
+        Result<void>
+        X11OverlayDelegateTestAccess::open_mapped_without_compositor(
+            X11OverlayDelegate& delegate,
+            CoordinateSpaceId   space
+        )
+        {
+            return delegate.impl_->open( space, false, true );
+        }
+
         xcb_window_t
         X11OverlayDelegateTestAccess::window(
             const X11OverlayDelegate& delegate

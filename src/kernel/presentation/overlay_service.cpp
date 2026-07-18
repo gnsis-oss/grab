@@ -565,10 +565,21 @@ namespace grab::kernel::presentation
         auto flushed = delegate_->flush( snapshot.through_revision );
         if( !flushed.has_value() )
         {
-            // A failed fence may leave the delegate desynchronized; force the
-            // next verb (or flush retry) through recovery instead of wedging
-            // on ResyncRequired.
+            // A failed fence may leave the delegate desynchronized (topology
+            // change, compositor churn). Recover and retry the fence ONCE —
+            // flush is idempotent — so a single call heals instead of
+            // returning ResyncRequired to the caller.
             desynchronized_ = true;
+            auto recovered  = recover( snapshot );
+            if( !recovered.has_value() )
+            {
+                return std::unexpected( std::move( recovered.error() ) );
+            }
+            flushed = delegate_->flush( snapshot.through_revision );
+            if( !flushed.has_value() )
+            {
+                desynchronized_ = true;
+            }
         }
         return flushed;
     }

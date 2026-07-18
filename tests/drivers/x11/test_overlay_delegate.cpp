@@ -251,3 +251,29 @@ TEST( X11OverlayDelegate,
     ( *delegate )->close();
     ( *delegate )->close();
 }
+
+TEST( X11OverlayDelegate,
+      MappedOpenWithoutReactorFailsWithReactorReason )
+{
+    if( !display_is_available() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    auto delegate = X11OverlayDelegate::create();
+    ASSERT_TRUE( delegate.has_value() ) << delegate.error().message;
+
+    const auto opened =
+        x11_detail::X11OverlayDelegateTestAccess::open_mapped_without_compositor(
+            **delegate,
+            grab::CoordinateSpaceId{ 1U }
+        );
+
+    ASSERT_FALSE( opened.has_value() );
+    EXPECT_EQ( opened.error().code, grab::ErrorCode::CapabilityUnavailable );
+    EXPECT_TRUE( opened.error().message.contains( "bound reactor" ) )
+        << opened.error().message;
+    EXPECT_EQ( x11_detail::X11OverlayDelegateTestAccess::window( **delegate ),
+               XCB_WINDOW_NONE );
+    ( *delegate )->close();
+}

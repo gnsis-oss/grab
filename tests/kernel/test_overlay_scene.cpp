@@ -12,6 +12,7 @@
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -761,4 +762,27 @@ TEST( OverlayScene,
                      published.at( thirdOrderedIndex ).change
                  ) );
     EXPECT_EQ( scene.snapshot().shapes.size(), singleShapeCount );
+}
+
+TEST( OverlayScene,
+      ThrowingSinkIsCountedAndNeverBlocksTheMutation )
+{
+    constexpr std::uint64_t                  oneFailure = 1U;
+    std::chrono::milliseconds                now{ 0 };
+
+    grab::kernel::presentation::OverlayScene scene{ [&now]
+                                                    {
+                                                        return now;
+                                                    } };
+    scene.set_delta_sink(
+        []( const grab::overlay::SceneDelta& )
+        {
+            throw std::runtime_error{ "injected sink failure" };
+        }
+    );
+
+    const auto added = scene.add( rect_shape() );
+    ASSERT_TRUE( added.has_value() ) << added.error().message;
+    EXPECT_EQ( scene.publication_failures(), oneFailure );
+    EXPECT_EQ( scene.snapshot().shapes.size(), std::size_t{ 1U } );
 }

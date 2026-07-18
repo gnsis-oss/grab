@@ -646,8 +646,11 @@ namespace grab::cli
 
         struct ActiveOverlay
         {
-                std::unique_ptr<Session> session;
-                Overlay*                 overlay{};
+                std::unique_ptr<Session>              session;
+                Overlay*                              overlay{};
+                // Stamped immediately after add(): the shape's lifetime clock
+                // reference for remaining-duration waits.
+                std::chrono::steady_clock::time_point added_at{};
         };
 
         void
@@ -731,14 +734,16 @@ namespace grab::cli
             {
                 return std::unexpected( std::move( added.error() ) );
             }
-            auto flushed = ( *overlay )->flush();
+            const auto added_at = std::chrono::steady_clock::now();
+            auto       flushed  = ( *overlay )->flush();
             if( !flushed.has_value() )
             {
                 return std::unexpected( std::move( flushed.error() ) );
             }
             return ActiveOverlay{
-                .session = std::move( *session ),
-                .overlay = *overlay,
+                .session  = std::move( *session ),
+                .overlay  = *overlay,
+                .added_at = added_at,
             };
         }
 
