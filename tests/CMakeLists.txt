@@ -6,7 +6,9 @@ add_test(NAME grab_public_header_allowlist
 
 add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/input_command.cpp
+    ${CMAKE_SOURCE_DIR}/src/frontends/cli/overlay_command.cpp
     cli/input_command_test.cpp
+    cli/overlay_command_test.cpp
     cli/command_table_test.cpp
     core/test_capability.cpp
     core/test_command_descriptor.cpp
@@ -54,7 +56,7 @@ add_executable(grab_core_tests
     transport/test_service.cpp
     transport/test_service_hardening.cpp
 )
-target_link_libraries(grab_core_tests PRIVATE grab_core grab_vendor_l0 grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
+target_link_libraries(grab_core_tests PRIVATE grab_core grab_kernel grab_vendor_l0 grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
 target_compile_definitions(grab_core_tests PRIVATE GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs")
@@ -134,13 +136,17 @@ target_include_directories(grab_driver_x11_tests PRIVATE
 
 add_executable(grab_integration_tests
     integration/test_exit_gate.cpp
+    integration/test_overlay_ring3.cpp
 )
 target_link_libraries(grab_integration_tests PRIVATE
     grab_client
     grab_kernel
     grab_driver_x11
+    grab_screen
     grab_transport
     grab_compat_eventgrab_v1
+    PkgConfig::GRAB_XCB_RANDR
+    PkgConfig::GRAB_XCB_SHAPE
     GTest::gtest_main
 )
 target_include_directories(grab_integration_tests PRIVATE

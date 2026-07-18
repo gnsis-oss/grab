@@ -66,6 +66,13 @@ namespace grab::kernel::presentation
             Result<void>
             flush();
 
+            [[nodiscard]]
+            CoordinateSpaceId
+            delegate_space() const noexcept
+            {
+                return delegate_space_;
+            }
+
         private:
 
             OverlayService( spi::OverlayDelegate&     delegate,

@@ -1,9 +1,13 @@
 #include "grab/command_descriptor.hpp"
+#include "grab/trace.hpp"
 
-#include <array>
-#include <cstddef>
+// clang-format off
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <array>
+#include <set>
 #include <string_view>
+// clang-format on
 
 namespace
 {
@@ -21,6 +25,8 @@ namespace
         "screen.watch",
         "input.key",
         "session.open",
+        "overlay.trail",
+        "overlay.shape",
     } );
 
 }    // namespace
@@ -31,26 +37,44 @@ TEST( CommandDescriptor,
     const auto& commands = grab::list_commands();
     ASSERT_EQ( commands.size(), expectedCommandNames.size() );
 
-    for( std::size_t index = 0U; index < commands.size(); ++index )
+    EXPECT_TRUE( std::ranges::equal( commands,
+                                     expectedCommandNames,
+                                     {},
+                                     &grab::CommandDescriptor::name ) );
+}
+
+TEST( CommandDescriptor,
+      OverlayRowsCarryInProcessMutationMetadata )
+{
+    constexpr std::array overlayNames{
+        std::string_view{ "overlay.trail" },
+        std::string_view{ "overlay.shape" },
+    };
+
+    for( const auto name : overlayNames )
     {
-        EXPECT_EQ( commands[index].name, expectedCommandNames[index] );
+        const auto&       commands = grab::list_commands();
+        const auto* const found =
+            std::ranges::find( commands, name, &grab::CommandDescriptor::name );
+        ASSERT_NE( found, commands.end() ) << name;
+        EXPECT_EQ( found->retry, grab::RetryClass::ResolveOnly );
+        EXPECT_EQ( found->mutability, grab::Mutability::Mutating );
+        EXPECT_FALSE( found->idempotent );
+        EXPECT_FALSE( found->consent_gated );
     }
 }
 
 TEST( CommandDescriptor,
       NamesAreUniqueAndRoundTrip )
 {
-    const auto& commands = grab::list_commands();
-    for( std::size_t left = 0U; left < commands.size(); ++left )
+    const auto&                commands = grab::list_commands();
+    std::set<std::string_view> names;
+    for( const auto& command : commands )
     {
-        const auto kind = grab::command_kind( commands[left].name );
+        EXPECT_TRUE( names.insert( command.name ).second ) << command.name;
+        const auto kind = grab::command_kind( command.name );
         ASSERT_TRUE( kind.has_value() );
-        EXPECT_EQ( *kind, commands[left].kind );
-        EXPECT_EQ( grab::command_name( commands[left].kind ), commands[left].name );
-
-        for( std::size_t right = left + 1U; right < commands.size(); ++right )
-        {
-            EXPECT_NE( commands[left].name, commands[right].name );
-        }
+        EXPECT_EQ( *kind, command.kind );
+        EXPECT_EQ( grab::command_name( command.kind ), command.name );
     }
 }

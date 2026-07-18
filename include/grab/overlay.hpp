@@ -211,6 +211,13 @@ namespace grab
             Result<void>
             flush();
 
+            // The coordinate space the overlay surface renders in (the
+            // display-global space in Phase 1). Draw into this space to avoid
+            // any transform.
+            [[nodiscard]]
+            Result<CoordinateSpaceId>
+            space();
+
         private:
 
             friend class Session;

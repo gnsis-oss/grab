@@ -188,6 +188,17 @@ namespace grab
         );
     }
 
+    Result<CoordinateSpaceId>
+    Overlay::space()
+    {
+        return impl_->invoke<CoordinateSpaceId>(
+            []( kernel::presentation::OverlayService& service )
+            {
+                return Result<CoordinateSpaceId>{ service.delegate_space() };
+            }
+        );
+    }
+
     void
     Overlay::detach() noexcept
     {

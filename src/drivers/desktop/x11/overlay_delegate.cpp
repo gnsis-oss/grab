@@ -1285,6 +1285,13 @@ namespace grab::drivers::desktop::x11
                 return window_;
             }
 
+            void
+            simulate_topology_change( std::uint16_t width,
+                                      std::uint16_t height )
+            {
+                handle_topology_change( width, height );
+            }
+
         private:
 
             struct ShmStorage
@@ -2568,6 +2575,16 @@ namespace grab::drivers::desktop::x11
         ) noexcept
         {
             return delegate.impl_->window();
+        }
+
+        void
+        X11OverlayDelegateTestAccess::simulate_topology_change(
+            X11OverlayDelegate& delegate,
+            std::uint16_t       width,
+            std::uint16_t       height
+        )
+        {
+            delegate.impl_->simulate_topology_change( width, height );
         }
 
     }    // namespace detail

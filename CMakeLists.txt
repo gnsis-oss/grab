@@ -290,11 +290,12 @@ target_compile_features(grab_service PUBLIC cxx_std_23)
 add_executable(grab_cli
     src/frontends/cli/main.cpp
     src/frontends/cli/input_command.cpp
+    src/frontends/cli/overlay_command.cpp
     src/frontends/cli/session_command.cpp
 )
 set_target_properties(grab_cli PROPERTIES OUTPUT_NAME grab)
 target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_service
-    grab_client grab_input_x11 grab_platform_x11 grab_session)
+    grab_client grab_input_x11 grab_kernel grab_platform_x11 grab_session)
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 

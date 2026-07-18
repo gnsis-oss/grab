@@ -27,6 +27,8 @@ namespace grab
         Watch,
         Key,
         Session,
+        OverlayTrail,
+        OverlayShape,
         Count,
     };
 
@@ -142,6 +144,18 @@ namespace grab
                                 Mutability::Mutating,
                                 false,
                                 true ),
+            command_descriptor( "overlay.trail",
+                                CommandKind::OverlayTrail,
+                                RetryClass::ResolveOnly,
+                                Mutability::Mutating,
+                                false,
+                                false ),
+            command_descriptor( "overlay.shape",
+                                CommandKind::OverlayShape,
+                                RetryClass::ResolveOnly,
+                                Mutability::Mutating,
+                                false,
+                                false ),
         } );
 
         template<std::size_t Size>
@@ -159,7 +173,7 @@ namespace grab
                 text_of( CommandKind      kind,
                          std::string_view fallback ) const noexcept
                 {
-                    const auto descriptor =
+                    const auto* const descriptor =
                         std::ranges::find( commandDescriptors,
                                            kind,
                                            &CommandDescriptor::kind );
@@ -171,7 +185,7 @@ namespace grab
                 constexpr std::optional<CommandKind>
                 value_of( std::string_view name ) const noexcept
                 {
-                    const auto descriptor =
+                    const auto* const descriptor =
                         std::ranges::find( commandDescriptors,
                                            name,
                                            &CommandDescriptor::name );

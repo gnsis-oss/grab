@@ -33,6 +33,10 @@ namespace grab::cli
         {
             return "session";
         }
+        if( descriptor.kind == grab::CommandKind::OverlayShape )
+        {
+            return "overlay";
+        }
         const auto  dot = descriptor.name.find( '.' );
         std::string verb{ descriptor.name.substr( dot + 1U ) };
         std::ranges::replace( verb, '_', '-' );

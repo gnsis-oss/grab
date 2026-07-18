@@ -7,6 +7,7 @@
 #include "drivers/desktop/x11/workflow.hpp"
 #include "frontends/cli/common.hpp"
 #include "frontends/cli/input_command.hpp"
+#include "frontends/cli/overlay_command.hpp"
 #include "frontends/cli/session_command.hpp"
 #include "frontends/grpc/daemon.hpp"
 #include "grab/capture.hpp"
@@ -219,7 +220,12 @@ namespace
                             stderr );
         ( void )std::fputs( "       grab batch --window WMCLASS --out FILE.png [...]\n"
                             "       grab compare A.png B.png [--notify]\n"
-                            "       grab watch --window WMCLASS --out FILE.png\n",
+                            "       grab watch --window WMCLASS --out FILE.png\n"
+                            "       grab overlay trail [--color RRGGBB] "
+                            "[--injected-color RRGGBB] [--fade-ms N] [--width F]\n"
+                            "       grab trail [trail options]\n"
+                            "       grab overlay rect|ellipse|path --at VALUES "
+                            "[--ttl MS | --fade MS | --hold]\n",
                             stderr );
     }
 
@@ -1953,6 +1959,10 @@ namespace
                     }
                     return grab::cli::run_session_command( session_args );
                 }
+            case grab::CommandKind::OverlayTrail :
+                return grab::cli::run_trail_command( cli_args.subspan( 1 ) );
+            case grab::CommandKind::OverlayShape :
+                return grab::cli::run_overlay_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::Count :
                 break;
         }

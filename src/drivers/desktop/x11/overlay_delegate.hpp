@@ -124,7 +124,8 @@ namespace grab::drivers::desktop::x11
     {
 
         // Narrow test seam: exercises window recreation and ShapeInput without
-        // weakening the production compositor gate or mapping a bare-Xvfb window.
+        // weakening the production compositor gate, and routes fixed-mode Xvfb
+        // topology simulation through the same handler as a RandR notification.
         class X11OverlayDelegateTestAccess final
         {
             public:
@@ -137,6 +138,11 @@ namespace grab::drivers::desktop::x11
                 [[nodiscard]]
                 static xcb_window_t
                 window( const X11OverlayDelegate& delegate ) noexcept;
+
+                static void
+                simulate_topology_change( X11OverlayDelegate& delegate,
+                                          std::uint16_t       width,
+                                          std::uint16_t       height );
         };
 
     }    // namespace detail
