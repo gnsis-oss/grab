@@ -87,17 +87,17 @@ namespace:
      .overflow = NeverDrop } )` — empty scope = all descriptor-registered
      kinds (verified; note this expands at subscribe time, it is not a
      persistent wildcard).
-   - A local `grab::core::Reactor` + thread + local `EventBus` hosting a
-     `WindowTracker` (the owning Session does not compose one — the CLI
-     starts its own the same way, `src/frontends/cli/main.cpp:1740`) and any
-     `BrowserBridge` instances (below). The local bus is watched with the
-     same large-queue options.
+   - `WindowTracker` and any `BrowserBridge` instances (below) are started
+     **on the session's own reactor and bus** via the public
+     `Session::reactor()` / `Session::bus()` composition seam (the owning
+     Session does not compose a tracker itself — the CLI starts its own the
+     same way, `src/frontends/cli/main.cpp:1740`, just against a private
+     bus). One bus, one subscription, one pump — no second reactor thread.
 4. **`LogPump`** — one drain job on the **session reactor**, triggered by
-   either subscription's notify (each notify posts via `session->post`,
-   guarded by one `scheduled_` flag). `drain()` pops both queues into the
-   consumer, so all consumption is single-threaded on the session reactor.
-   Same fence discipline as `mouse_snake_trail`, plus the explicit tail
-   drain at shutdown (below).
+   the subscription's notify (posts via `session->post`, guarded by one
+   `scheduled_` flag). All consumption is single-threaded on the session
+   reactor. Same fence discipline as `mouse_snake_trail`, plus the explicit
+   tail drain at shutdown (below).
 5. **`EventLogger` (consumer)** — per event: coalescer → formatter → stdout,
    and the raw event → `JsonlSink::write()`. Sink lives on the drain path
    (single-threaded use — the sink is not thread-safe); its periodic
@@ -112,9 +112,11 @@ namespace:
 one. The example makes browser lines real:
 
 - It listens on a unix socket (default
-  `$XDG_RUNTIME_DIR/grab-event-logger.sock`, flag-overridable) on the local
-  reactor; each accepted connection is handed to a `BrowserBridge` on the
-  local reactor/bus.
+  `$XDG_RUNTIME_DIR/grab-event-logger.sock`, flag-overridable) registered on
+  the session reactor via `add_fd`; each accepted connection is handed to a
+  `BrowserBridge::start( fd, session->reactor(), session->bus() )`. The
+  bridge does not take fd ownership — the example closes accepted fds after
+  `stop()`.
 - A documented native-messaging-host manifest plus a one-line forwarder
   (e.g. `socat STDIO UNIX-CONNECT:<sock>`) connects a real browser's
   extension to it. Without a connection the feed simply carries no browser
@@ -125,9 +127,9 @@ one. The example makes browser lines real:
 
 ### Data flow
 
-session producers (XInput2, AT-SPI, tree/graph) → session bus →
-subscription A; local producers (WindowTracker, BrowserBridge) → local bus →
-subscription B; A/B notify → posted drain on session reactor →
+all producers (XInput2, AT-SPI, tree/graph via the composed session; plus
+the example-started WindowTracker and BrowserBridge) → the **session bus** →
+one subscription → notify → posted drain on session reactor →
 coalescer/formatter → stdout + JSONL.
 
 The main thread **blocks SIGINT/SIGTERM before `Session::open()`** (every
@@ -179,13 +181,13 @@ shown only where producers fill it (window close), not on title changes.
 
 ## Shutdown
 
-Ctrl+C → poll loop notices → stop local producers (listener, bridges,
-tracker) → unset both notifies → `stop_observation()` → **post one final job
-that drains both queues to exhaustion and flushes the coalescer** (the
-snake-trail fence alone does not drain the tail — verified; without this the
-last events before Ctrl+C are lost) → reactor fence → `session->close()` →
-stop/join the local reactor thread → `JsonlSink::flush()` (checked —
-`close()` is void and swallows errors) → `close()` → summary
+Ctrl+C → poll loop notices → stop example-started producers (listener,
+bridges, tracker) → unset notify → `stop_observation()` → **post one final
+job that drains the queue to exhaustion and flushes the coalescer, then
+fulfils the fence promise** (the snake-trail fence alone does not drain the
+tail — verified; without this the last events before Ctrl+C are lost) →
+`session->close()` → `JsonlSink::flush()` (checked — `close()` is void and
+swallows errors) → `close()` → summary
 (`N events observed, M lines printed, G gaps, recording: <dir>`) → exit 0.
 
 ## Error handling
@@ -208,8 +210,9 @@ stop/join the local reactor thread → `JsonlSink::flush()` (checked —
 - Example build gate: `GRAB_BUILD_EXAMPLES` compiling clean under the default
   ASan/UBSan + clang-tidy preset.
 - Scripted smoke under Xvfb (no compositor stub needed):
-  1. input lines — drive `grab::Input` synthesis from a second process;
-     assert key/click lines and one coalesced pointer line;
+  1. input lines — inject key/click/motion with `xdotool` (guarded: the
+     input section is skipped when xdotool is absent); assert key/click
+     lines and one coalesced pointer line;
   2. os lines — spawn/kill a window (e.g. `xterm`); assert
      created/focused/closed lines;
   3. browser lines — pipe a canned native-messaging frame into the unix
