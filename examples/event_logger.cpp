@@ -12,6 +12,7 @@
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "grab/watch.hpp"
+#include "storage/jsonl_sink.hpp"
 
 #include <array>
 #include <atomic>
@@ -22,11 +23,13 @@
 #include <cstdio>
 #include <ctime>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <future>
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -519,6 +522,7 @@ namespace
                 }
                 const auto& event = std::get<grab::Event>( item );
                 ++observed_;
+                record( event );
                 if( event.kind == grab::EventKind::MouseMove )
                 {
                     if( auto line = coalescer_.feed( event ); line.has_value() )
@@ -589,12 +593,39 @@ namespace
                 return error_;
             }
 
+            void
+            attach_sink( grab::storage::JsonlSink* sink ) noexcept
+            {
+                sink_ = sink;
+            }
+
+            // Recording must never kill the live feed: first failure warns
+            // once on stderr, stops recording, and is reported at exit.
+            void
+            record( const grab::Event& event )
+            {
+                if( sink_ == nullptr || sink_failed_ )
+                {
+                    return;
+                }
+                auto written = sink_->write( event );
+                if( !written.has_value() )
+                {
+                    sink_failed_ = true;
+                    std::cerr << "event_logger: recording stopped: "
+                              << written.error().message << '\n';
+                    remember_error( std::move( written.error() ) );
+                }
+            }
+
         private:
 
             MoveCoalescer              coalescer_;
-            std::size_t                observed_ = 0U;
-            std::size_t                printed_  = 0U;
-            std::size_t                gaps_     = 0U;
+            std::size_t                observed_    = 0U;
+            std::size_t                printed_     = 0U;
+            std::size_t                gaps_        = 0U;
+            grab::storage::JsonlSink*  sink_        = nullptr;
+            bool                       sink_failed_ = false;
             mutable std::mutex         error_mutex_;
             std::optional<grab::Error> error_;
     };
@@ -740,8 +771,14 @@ namespace
 
     [[nodiscard]]
     grab::Result<void>
-    run()
+    run( std::span<char*> args )
     {
+        std::filesystem::path recording_dir{ "event-log" };
+        if( !args.empty() && std::string_view{ args.front() } != "--socket" )
+        {
+            recording_dir = args.front();
+        }
+
         sigset_t signals{};
         // Block BEFORE Session::open(): the session's reactor thread (and
         // every other later-spawned thread) must inherit the mask, or a
@@ -763,7 +800,16 @@ namespace
             return std::unexpected( std::move( session.error() ) );
         }
 
-        EventLogger             logger;
+        EventLogger logger;
+
+        auto        sink = grab::storage::JsonlSink::open(
+            grab::storage::JsonlOptions{ .dir = recording_dir }
+        );
+        if( !sink.has_value() )
+        {
+            return std::unexpected( std::move( sink.error() ) );
+        }
+        logger.attach_sink( &*sink );
 
         grab::SubscriptionScope scope;    // empty scope + wildcard filter = all kinds
         auto                    subscription =
@@ -824,9 +870,16 @@ namespace
         auto stopped = pump.stop();
         ( *session )->close();
 
+        auto flushed = sink->flush();
+        sink->close();
+        if( !flushed.has_value() && !logger.error().has_value() )
+        {
+            logger.remember_error( std::move( flushed.error() ) );
+        }
+
         std::cout << "event_logger: " << logger.observed() << " events observed, "
                   << logger.printed() << " lines printed, " << logger.gaps()
-                  << " gaps\n";
+                  << " gaps, recording: " << recording_dir.string() << '\n';
         std::cout.flush();
 
         if( !stopped.has_value() )
@@ -843,9 +896,11 @@ namespace
 }    // namespace
 
 int
-main()
+main( int   argc,
+      char* argv[] )
 {
-    auto result = run();
+    auto result =
+        run( std::span{ argv, static_cast<std::size_t>( argc ) }.subspan( 1 ) );
     if( !result.has_value() )
     {
         std::cerr << "event_logger: " << result.error().message << '\n';
