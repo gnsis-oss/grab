@@ -6,6 +6,7 @@
 // Runs until Ctrl+C. Later tasks add mouse-move coalescing, JSONL
 // recording, window tracking, and a browser-bridge socket.
 
+#include "drivers/desktop/x11/window_tracker.hpp"
 #include "grab/event.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
@@ -786,6 +787,18 @@ namespace
             return std::unexpected( std::move( observing.error() ) );
         }
 
+        // The owning Session composes input + AT-SPI + tree sources but no
+        // WindowTracker; start one on the session's own reactor and bus
+        // (the public composition seam) so os-category events join the feed.
+        auto tracker =
+            grab::drivers::desktop::x11::WindowTracker::start( nullptr,
+                                                               ( *session )->reactor(),
+                                                               ( *session )->bus() );
+        if( !tracker.has_value() )
+        {
+            return std::unexpected( std::move( tracker.error() ) );
+        }
+
         std::cout << "event_logger: observing (Ctrl+C to stop)\n";
         std::cout.flush();
 
@@ -807,6 +820,7 @@ namespace
             }
         }
 
+        tracker->stop();
         auto stopped = pump.stop();
         ( *session )->close();
 
