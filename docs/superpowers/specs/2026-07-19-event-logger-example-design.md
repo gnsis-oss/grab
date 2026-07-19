@@ -1,9 +1,10 @@
 # Event logger example — design
 
-**Date:** 2026-07-19
-**Status:** approved
+**Date:** 2026-07-19 (revised same day after external review)
+**Status:** approved; revised for review findings, pending re-approval
 **Deliverable:** `examples/event_logger.cpp` — a live terminal feed of every
-event grab observes, plus a faithful JSONL recording.
+event grab observes, plus a best-effort JSONL recording — and one small
+library pre-fix (uniform event timestamps).
 
 ## Purpose
 
@@ -16,123 +17,213 @@ desktop, and watch the system narrate itself one line per event:
 ```
 
 It complements `mouse_snake_trail` (synthesis + overlay) by showcasing the
-other half of the library: subscription, the event vocabulary, and storage.
+other half of the library: subscription, the event vocabulary, composition,
+and storage.
 
-## Decisions (from brainstorming)
+## Decisions (from brainstorming + review)
 
 - **Scope:** all event kinds — semantic, discrete input, and continuous input,
   with continuous streams coalesced for the terminal.
-- **Recording:** terminal feed plus a JSONL file via `grab::storage::JsonlSink`.
-- **Lifecycle:** runs until Ctrl+C (SIGINT/SIGTERM), then clean shutdown.
-- **Form:** self-contained in-process example (own `grab::Session`), not a
-  daemon client and not a CLI verb.
+- **Recording:** terminal feed plus JSONL via `grab::storage::JsonlSink`;
+  recording is **best-effort** (bounded queues), with drops surfaced as
+  visible gap lines and a summary count — never silently.
+- **Lifecycle:** runs until Ctrl+C (SIGINT/SIGTERM), then clean shutdown with
+  an explicit tail drain.
+- **Form:** self-contained in-process example (own `grab::Session` plus a
+  local producer stack, mirroring the CLI's own composition pattern).
+- **Timestamps:** fixed at the library, not papered over in the example
+  (see "Library pre-fix").
+- **Browser events:** the example hosts the webextension bridge behind a
+  unix socket so real browser tabs can appear (see "Browser feed").
+
+## Library pre-fix: uniform event timestamps (prerequisite)
+
+Review finding (verified): `event.timestamp` mixes clocks. X11 input events
+stamp `raw.time` — an X-server *milliseconds* counter
+(`src/drivers/desktop/x11/x11_event_source.cpp`) — while the window tracker
+and AT-SPI stamp `system_clock` epoch seconds, and graph/browser events can
+carry zero. This breaks any wall-clock rendering **and** misroutes
+`JsonlSink`'s daily files library-wide (the sink partitions by timestamp
+interpreted as epoch seconds), affecting the daemon's recordings too.
+
+Pre-fix, driver/kernel-local, shipped before the example:
+
+1. `x11_event_source` stamps `system_clock` epoch seconds (like the window
+   tracker already does) instead of `raw.time`.
+2. Graph-event translation (`session_impl`) stamps epoch seconds instead of
+   leaving zero.
+3. The browser bridge stamps arrival epoch seconds when a frame carries no
+   (or zero) timestamp.
+
+Existing tests asserting `raw.time` propagation are updated. After this,
+"epoch seconds, double" is a real invariant and the example renders local
+`HH:MM:SS.mmm` directly.
 
 ## Architecture
 
 One new file `examples/event_logger.cpp` plus an `examples/CMakeLists.txt`
-entry (links the snake-trail set minus screen/image/codec, plus the storage
-target). Components, all in an anonymous namespace:
+entry (links `grab_core`, `grab_kernel`, `grab_session`, `grab_driver_x11`
+(for `WindowTracker`), `grab_driver_webextension` (for `BrowserBridge`), and
+`grab_storage`). Components, all in an anonymous
+namespace:
 
-1. **`EventFormatter`** — pure: `grab::Event` → one text line. Kind→category
-   and fallback naming come from the central `EventDescriptor` table
-   (`include/grab/event_descriptor.hpp`) — the single-source vocabulary; no
-   name tables are re-scattered in the example. Descriptions come from the
-   payload variant.
-2. **`MoveCoalescer`** — accumulates continuous `MouseMove` samples per
-   axis-group (pointer position vs scroll) and emits one summary line per
-   ~300 ms window: last position / summed delta plus sample count. All other
-   kinds pass through untouched (the descriptor table's `CoalescingClass`
-   marks discrete kinds `NeverDrop`).
-3. **`LogPump`** — the proven snake-trail notify→post→drain pattern:
-   subscription notify posts a drain job on the session reactor; drain pops
-   `SubscriptionEvent`s into the consumer. Reactor-thread-only; same
-   shutdown fence (`stop()` = unset notify → `stop_observation()` → posted
-   fence promise).
-4. **`EventLogger` (consumer)** — per event: coalescer → formatter → stdout,
-   and the raw event → `JsonlSink::write()`. Sink directory `./event-log/`
-   by default, overridable as `argv[1]`.
+1. **`EventFormatter`** — pure: `grab::Event` → one text line. Kind → category
+   and fallback naming come from the central `EventDescriptor` table; a small
+   **display-label map** turns categories into feed labels (`Input` → `input`,
+   `Window` → `os`, `Accessibility` → `a11y`, `Integration` → `browser`,
+   `State` → `state`); graph kinds (the 700-range) display as `ui`
+   (their descriptor category is `Window`; the label map special-cases them).
+   Descriptions come from the payload variant; when a producer leaves a
+   name empty (X11 fills only key/button *codes*), the formatter falls back
+   to numeric (`key #38 pressed`).
+2. **`MoveCoalescer`** — accumulates continuous `MouseMove` samples and emits
+   one summary line per ~300 ms window: last position (or summed axis delta)
+   plus sample count. All other kinds pass through untouched. The example
+   decides this itself; it does **not** claim the descriptor table's
+   `CoalescingClass` marks every discrete kind `NeverDrop` (it doesn't).
+3. **Producer stack** — mirrors what the CLI composes for itself:
+   - `grab::Session` (X11 input runtime, best-effort AT-SPI, graph/tree
+     events) with `watch( {}, QueueOptions{ .capacity = 8192,
+     .overflow = NeverDrop } )` — empty scope = all descriptor-registered
+     kinds (verified; note this expands at subscribe time, it is not a
+     persistent wildcard).
+   - A local `grab::core::Reactor` + thread + local `EventBus` hosting a
+     `WindowTracker` (the owning Session does not compose one — the CLI
+     starts its own the same way, `src/frontends/cli/main.cpp:1740`) and any
+     `BrowserBridge` instances (below). The local bus is watched with the
+     same large-queue options.
+4. **`LogPump`** — one drain job on the **session reactor**, triggered by
+   either subscription's notify (each notify posts via `session->post`,
+   guarded by one `scheduled_` flag). `drain()` pops both queues into the
+   consumer, so all consumption is single-threaded on the session reactor.
+   Same fence discipline as `mouse_snake_trail`, plus the explicit tail
+   drain at shutdown (below).
+5. **`EventLogger` (consumer)** — per event: coalescer → formatter → stdout,
+   and the raw event → `JsonlSink::write()`. Sink lives on the drain path
+   (single-threaded use — the sink is not thread-safe); its periodic
+   fsync-every-`buffer_limit` writes are an accepted, bounded stall for an
+   example. Sink directory `./event-log/` by default, `argv[1]` overrides.
+   The sink partitions by UTC event date (`<YYYY-MM-DD>.jsonl`), appends
+   across runs, and retains 30 files / 500 MiB — documented, not fought.
+
+### Browser feed
+
+`BrowserBridge` requires a native-messaging FD and nothing in-tree composes
+one. The example makes browser lines real:
+
+- It listens on a unix socket (default
+  `$XDG_RUNTIME_DIR/grab-event-logger.sock`, flag-overridable) on the local
+  reactor; each accepted connection is handed to a `BrowserBridge` on the
+  local reactor/bus.
+- A documented native-messaging-host manifest plus a one-line forwarder
+  (e.g. `socat STDIO UNIX-CONNECT:<sock>`) connects a real browser's
+  extension to it. Without a connection the feed simply carries no browser
+  lines — never an error.
+- The bridge populates `IntegrationEvent::title` from the frame's `title`
+  key; for frames that carry `tab_title` instead (as the bridge tests do),
+  the formatter falls back to reading it from the raw `json` payload.
 
 ### Data flow
 
-observers (XInput2 input, window trackers, browser bridge, AT-SPI2) →
-EventBus → subscription queue (empty `SubscriptionScope` = all kinds) →
-notify → reactor drain → coalescer/formatter → stdout + JSONL.
+session producers (XInput2, AT-SPI, tree/graph) → session bus →
+subscription A; local producers (WindowTracker, BrowserBridge) → local bus →
+subscription B; A/B notify → posted drain on session reactor →
+coalescer/formatter → stdout + JSONL.
 
-The main thread blocks SIGINT/SIGTERM and sits in the CLI's existing
-`sigtimedwait` poll pattern; each ~300 ms tick posts a coalescer-flush job to
-the reactor, so a pointer that stops moving still gets its final summary line
-without new timer machinery. Browser lines appear only while the webextension
-bridge is connected; absence is not an error — the feed simply carries
-os/input events.
+The main thread **blocks SIGINT/SIGTERM before `Session::open()`** (every
+later-spawned thread — session reactor included — inherits the mask; blocking
+after open would race a process-directed signal into an unblocked worker),
+then sits in the CLI's `sigtimedwait` poll pattern; each ~300 ms tick posts a
+coalescer-flush job so a pointer that stops moving still gets its final
+summary line.
 
 ## Output format
 
 `timestamp -> <category> event -> <description>`, category column padded so
 descriptions align.
 
-- **Timestamp:** `event.timestamp` (epoch seconds, double) as local wall
-  clock `HH:MM:SS.mmm`.
-- **Category labels** via `EventCategory`: `Input` → `input`, `Window` → `os`,
-  `Integration` → `browser`, `Accessibility` → `a11y`, `State` and graph
-  kinds → `state`.
+- **Timestamp:** `event.timestamp` (epoch seconds after the pre-fix) as
+  local wall clock `HH:MM:SS.mmm`.
 
-Representative lines:
+Representative lines — every line below is producible by a current producer
+(review pruned the aspirational ones):
 
 ```
 14:02:11.481 -> os event      -> application "firefox" opened window "Home - Mozilla Firefox"
 14:02:11.502 -> os event      -> window "Home - Mozilla Firefox" (firefox) focused
 14:02:13.114 -> browser event -> tab "GitHub - grab" focused
 14:02:14.300 -> browser event -> context updated: "https://github.com/..."
-14:02:15.020 -> input event   -> key "a" pressed
-14:02:15.180 -> input event   -> combo "ctrl+c" pressed
-14:02:16.444 -> input event   -> button "left" clicked
+14:02:15.020 -> input event   -> key "a" pressed        (falls back to: key #38 pressed)
+14:02:16.444 -> input event   -> button "left" clicked  (falls back to: button #1 clicked)
 14:02:17.001 -> input event   -> pointer moved to (812, 440) [23 samples]
-14:02:19.310 -> input event   -> scrolled vertical by -6 [4 samples]
-14:02:40.000 -> input event   -> idle started (30.0s)
+14:03:01.220 -> os event      -> window title changed "old" to "new" (firefox)
+14:03:05.850 -> os event      -> application "gedit" closed window "untitled" (48.2s)
 14:02:52.700 -> a11y event    -> button "Save" clicked in "gedit"
-14:03:01.220 -> os event      -> window title changed "old" to "new" (firefox, 48.2s)
-14:03:05.850 -> os event      -> application "gedit" closed window "untitled"
+14:02:53.000 -> ui event      -> node added #42
+14:02:54.000 -> state event   -> snapshot (1.2 KB)
 ```
 
-- `QueueGapMarker` → visible `!! gap: events dropped after seq N` line.
-- State/graph kinds → terse one-liners (`state event -> snapshot (1.2 KB)`,
-  `state event -> node added #42`).
-- Unknown/future kinds → fall back to the descriptor wire name; nothing is
-  silently dropped.
-- **JSONL is unthrottled:** every raw event, including each individual
-  mouse-move sample, is written to the sink. The recording stays faithful;
-  only the terminal is coalesced.
+The formatter still covers the **entire** vocabulary (KeyCombo, Idle, every
+graph kind, …) — kinds without a current producer simply print if they ever
+arrive; unknown kinds fall back to the descriptor wire name. Duration is
+shown only where producers fill it (window close), not on title changes.
+
+- `QueueGapMarker` → visible `!! gap: events dropped after seq N` line and a
+  counter in the exit summary. Gap markers cannot be written to JSONL
+  (`JsonlSink::write()` accepts only `Event`) — the terminal and summary are
+  their record.
+- **Recording is best-effort:** large `NeverDrop` queues make drops unlikely,
+  but under sustained overflow events are lost with a gap marker; the JSONL
+  holds exactly the events that survived the queue. Mouse moves are recorded
+  per-sample (the terminal alone is coalesced).
 
 ## Shutdown
 
-Ctrl+C → poll loop notices → post final coalescer flush → `pump.stop()`
-(reactor fence — no drain job outlives the consumer) → `session->close()` →
-`JsonlSink::flush()`/`close()` → summary line
-(`N events observed, M lines printed, recording: <dir>/<date>.jsonl`) →
-exit 0.
+Ctrl+C → poll loop notices → stop local producers (listener, bridges,
+tracker) → unset both notifies → `stop_observation()` → **post one final job
+that drains both queues to exhaustion and flushes the coalescer** (the
+snake-trail fence alone does not drain the tail — verified; without this the
+last events before Ctrl+C are lost) → reactor fence → `session->close()` →
+stop/join the local reactor thread → `JsonlSink::flush()` (checked —
+`close()` is void and swallows errors) → `close()` → summary
+(`N events observed, M lines printed, G gaps, recording: <dir>`) → exit 0.
 
 ## Error handling
 
-- Startup failures (display, session, sink open) → exit 1 with the
-  `grab::Error` message, same plumbing style as `mouse_snake_trail::run()`.
+- Startup failures (display, session, tracker, sink, socket) → exit 1 with
+  the `grab::Error` message. Known limitation, documented in the example
+  header: `Session` currently swallows the underlying X11 open error into a
+  generic "no composed display stack" message, and a mid-run observer death
+  is silent (observation-pump errors are discarded) — the example reports
+  what the API surfaces.
 - Runtime sink write failure must not kill the live feed: first error prints
-  one stderr warning, recording stops (no retry spam), the feed continues,
-  and the process exits 1 with that error in the summary.
+  one stderr warning, recording stops, the feed continues, exit 1 with that
+  error in the summary.
 - Stdout write failures are best-effort ignored.
 
 ## Testing / verification
 
-- No GTest suite for examples (matches `mouse_snake_trail`); the build gate
-  is `GRAB_BUILD_EXAMPLES` compiling clean under the default ASan/UBSan +
-  clang-tidy preset.
-- Scripted smoke: run under Xvfb (no compositor stub needed — no overlay),
-  drive `grab::Input` synthesis from a second process, then assert
-  (a) expected stdout lines including one coalesced pointer line, and
-  (b) the JSONL file exists and holds more move events than lines printed.
-- Browser-event lines verified manually on a real display with the
-  webextension attached (the bridge needs a live browser).
+- Library pre-fix: unit tests updated/added for epoch-second stamping at all
+  three producer sites.
+- Example build gate: `GRAB_BUILD_EXAMPLES` compiling clean under the default
+  ASan/UBSan + clang-tidy preset.
+- Scripted smoke under Xvfb (no compositor stub needed):
+  1. input lines — drive `grab::Input` synthesis from a second process;
+     assert key/click lines and one coalesced pointer line;
+  2. os lines — spawn/kill a window (e.g. `xterm`); assert
+     created/focused/closed lines;
+  3. browser lines — pipe a canned native-messaging frame into the unix
+     socket with `socat`; assert a `browser event` line (no real browser
+     needed);
+  4. JSONL — file exists, holds more move events than pointer lines printed,
+     timestamps are plausible epoch seconds.
+- Real-browser wiring verified manually once (manifest + forwarder doc).
 
 ## Out of scope
 
 - No daemon/gRPC client path, no CLI verb, no Wayland, no color/TTY theming,
-  no filtering flags — the example stays a minimal readable demonstration.
+  no filtering flags.
+- No fix for Session's swallowed X11 open error or silent observer death
+  (documented limitation; candidate follow-up).
+- No KeyCombo/Idle/scroll producers (formatter-ready; producers are future
+  library work).
