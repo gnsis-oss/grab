@@ -27,6 +27,8 @@ DISPLAY="$DISPLAY_NUM" xmessage -timeout 2 smoke &
 sleep 1
 if command -v xdotool >/dev/null; then
     DISPLAY="$DISPLAY_NUM" xdotool key a click 1
+    # Scroll detents arrive as buttons 4/5; the feed coalesces them.
+    DISPLAY="$DISPLAY_NUM" xdotool click 4 click 4 click 4
     # Relative motion: absolute mousemove emits no XI2 raw events on Xvfb.
     for _ in $(seq 1 30); do
         DISPLAY="$DISPLAY_NUM" xdotool mousemove_relative -- 5 3
@@ -52,6 +54,8 @@ grep -q 'browser event -> tab "SmokeTab" focused' "$FEED"
 if command -v xdotool >/dev/null; then
     grep -q 'input   event -> key' "$FEED"
     grep -q 'pointer moved' "$FEED"
+    grep -q 'scrolled up' "$FEED"
+    ! grep -q 'button #4 clicked' "$FEED"
 fi
 ls "$WORK"/events/*.jsonl >/dev/null
 echo "event_logger smoke OK"

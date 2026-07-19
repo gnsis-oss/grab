@@ -26,6 +26,7 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <csignal>
 #include <cstddef>
@@ -72,6 +73,14 @@ namespace
     constexpr int           listenBacklog         = 4;
     constexpr std::uint32_t epollInEvents         = EPOLLIN;
     constexpr int           invalidFd             = -1;
+
+    [[nodiscard]]
+    double
+    now_epoch_s()
+    {
+        const auto duration = std::chrono::system_clock::now().time_since_epoch();
+        return std::chrono::duration<double>( duration ).count();
+    }
 
     // ---- formatting -----------------------------------------------------
 
@@ -508,6 +517,21 @@ namespace
                 return line;
             }
 
+            // Tick flush: only close windows that have aged out, so a
+            // stream that is still accumulating is not chopped mid-window.
+            [[nodiscard]]
+            std::optional<std::string>
+            flush_if_older( double now_s )
+            {
+                if( !pending_.has_value() ||
+                    now_s -
+                    pending_->first_ts < coalesceWindowSeconds )
+                {
+                    return std::nullopt;
+                }
+                return flush();
+            }
+
         private:
 
             struct Pending
@@ -548,6 +572,127 @@ namespace
             std::optional<Pending> pending_;
     };
 
+    // X11 core convention: scroll wheels arrive as button 4 (up), 5 (down),
+    // 6 (left), 7 (right) — one press per detent.
+    constexpr std::uint32_t scrollButtonFirst = 4U;
+    constexpr std::uint32_t scrollButtonLast  = 7U;
+
+    [[nodiscard]]
+    constexpr bool
+    is_scroll_button( std::uint32_t button )
+    {
+        return button >= scrollButtonFirst && button <= scrollButtonLast;
+    }
+
+    [[nodiscard]]
+    constexpr std::string_view
+    scroll_direction( std::uint32_t button )
+    {
+        switch( button )
+        {
+            case scrollButtonFirst :
+                return "up";
+            case scrollButtonFirst + 1U :
+                return "down";
+            case scrollButtonFirst + 2U :
+                return "left";
+            default :
+                return "right";
+        }
+    }
+
+    // Collapses scroll detents (one button press each) into one summary line
+    // per direction per ~300 ms window, like MoveCoalescer does for motion.
+    class ScrollCoalescer
+    {
+        public:
+
+            [[nodiscard]]
+            std::optional<std::string>
+            feed( const grab::Event& event )
+            {
+                const auto* click = std::get_if<grab::MouseClick>( &event.payload );
+                if( click == nullptr || !is_scroll_button( click->button ) )
+                {
+                    return std::nullopt;
+                }
+                std::optional<std::string> line;
+                if( pending_.has_value() &&
+                    ( pending_->button !=
+                      click->button ||
+                      event.timestamp -
+                      pending_->first_ts >= coalesceWindowSeconds ) )
+                {
+                    line = render( *pending_ );
+                    pending_.reset();
+                }
+                if( !pending_.has_value() )
+                {
+                    pending_ = Pending{
+                        .first_ts = event.timestamp,
+                        .button   = click->button,
+                        .detents  = 0U,
+                    };
+                }
+                ++pending_->detents;
+                return line;
+            }
+
+            [[nodiscard]]
+            std::optional<std::string>
+            flush()
+            {
+                if( !pending_.has_value() )
+                {
+                    return std::nullopt;
+                }
+                auto line = render( *pending_ );
+                pending_.reset();
+                return line;
+            }
+
+            // Tick flush: only close windows that have aged out, so a
+            // stream that is still accumulating is not chopped mid-window.
+            [[nodiscard]]
+            std::optional<std::string>
+            flush_if_older( double now_s )
+            {
+                if( !pending_.has_value() ||
+                    now_s -
+                    pending_->first_ts < coalesceWindowSeconds )
+                {
+                    return std::nullopt;
+                }
+                return flush();
+            }
+
+        private:
+
+            struct Pending
+            {
+                    double        first_ts = 0.0;
+                    std::uint32_t button   = 0U;
+                    std::size_t   detents  = 0U;
+            };
+
+            [[nodiscard]]
+            static std::string
+            render( const Pending& pending )
+            {
+                const std::string description =
+                    "scrolled " +
+                    std::string{ scroll_direction( pending.button ) } +
+                    " [" +
+                    std::to_string( pending.detents ) +
+                    " clicks]";
+                return feed_line( pending.first_ts,
+                                  grab::EventKind::MouseClick,
+                                  description );
+            }
+
+            std::optional<Pending> pending_;
+    };
+
     // ---- consumer -------------------------------------------------------
 
     class EventLogger
@@ -571,14 +716,25 @@ namespace
                 record( event );
                 if( event.kind == grab::EventKind::MouseMove )
                 {
-                    if( auto line = coalescer_.feed( event ); line.has_value() )
-                    {
-                        print( *line );
-                    }
+                    // Motion interrupts a pending scroll summary (and vice
+                    // versa) so the feed stays chronological.
+                    print_if( scroll_coalescer_.flush() );
+                    print_if( coalescer_.feed( event ) );
                     return;
                 }
-                // A discrete event flushes the pending pointer summary first
-                // so the feed stays chronological.
+                if( const auto* click = std::get_if<grab::MouseClick>( &event.payload );
+                    event.kind ==
+                    grab::EventKind::MouseClick &&
+                    click !=
+                    nullptr &&
+                    is_scroll_button( click->button ) )
+                {
+                    print_if( coalescer_.flush() );
+                    print_if( scroll_coalescer_.feed( event ) );
+                    return;
+                }
+                // A discrete event flushes the pending summaries first so
+                // the feed stays chronological.
                 flush_pending();
                 print( feed_line( event.timestamp, event.kind, describe( event ) ) );
             }
@@ -586,7 +742,24 @@ namespace
             void
             flush_pending()
             {
-                if( auto line = coalescer_.flush(); line.has_value() )
+                print_if( coalescer_.flush() );
+                print_if( scroll_coalescer_.flush() );
+            }
+
+            // The periodic tick only closes aged-out windows; unconditional
+            // flushes are reserved for chronology breaks and shutdown.
+            void
+            tick()
+            {
+                const double now_s = now_epoch_s();
+                print_if( coalescer_.flush_if_older( now_s ) );
+                print_if( scroll_coalescer_.flush_if_older( now_s ) );
+            }
+
+            void
+            print_if( std::optional<std::string> line )
+            {
+                if( line.has_value() )
                 {
                     print( *line );
                 }
@@ -667,6 +840,7 @@ namespace
         private:
 
             MoveCoalescer              coalescer_;
+            ScrollCoalescer            scroll_coalescer_;
             std::size_t                observed_    = 0U;
             std::size_t                printed_     = 0U;
             std::size_t                gaps_        = 0U;
@@ -1062,7 +1236,7 @@ namespace
             auto ticked = session.post(
                 [&logger]
                 {
-                    logger.flush_pending();
+                    logger.tick();
                 }
             );
             if( !ticked.has_value() )
