@@ -1,10 +1,12 @@
 // event_logger — live terminal feed of everything grab observes.
 //
-//   ./event_logger [recording-dir] [--socket <path>] [--mouse]
+//   ./event_logger [recording-dir] [--socket <path>] [--mouse] [--visibility]
 //
 // One line per event: "HH:MM:SS.mmm -> <category> event -> <description>".
-// Runs until Ctrl+C. Mouse traffic (moves, scrolls, clicks) is hidden from
-// the feed unless --mouse is passed; the JSONL recording always keeps it.
+// Runs until Ctrl+C. Two high-volume, low-signal streams are hidden from the
+// feed by default (both still recorded to JSONL): mouse traffic (moves,
+// scrolls, clicks) unless --mouse, and a11y widget show/hide churn unless
+// --visibility.
 //
 // Browser wiring: register a native-messaging host in your browser whose
 // executable forwards stdio to this socket, e.g.
@@ -705,6 +707,30 @@ namespace
             std::optional<Pending> pending_;
     };
 
+    // A11y show/hide state-changes: high-volume widget-mapping churn with no
+    // user-facing meaning, unlike focus/click/menu/text/checked a11y events.
+    [[nodiscard]]
+    bool
+    is_visibility_churn( const grab::Event& event )
+    {
+        if( event.kind != grab::EventKind::A11yStateChanged )
+        {
+            return false;
+        }
+        const auto* a11y = std::get_if<grab::A11yEvent>( &event.payload );
+        if( a11y == nullptr )
+        {
+            return false;
+        }
+        return a11y->detail ==
+               "showing" ||
+               a11y->detail ==
+               "visible" ||
+               a11y->detail ==
+               "hidden" ||
+               a11y->detail == "collapsed";
+    }
+
     // ---- consumer -------------------------------------------------------
 
     class EventLogger
@@ -732,6 +758,14 @@ namespace
                 if( !show_mouse_ && ( event.kind ==
                                       grab::EventKind::MouseMove ||
                                       event.kind == grab::EventKind::MouseClick ) )
+                {
+                    return;
+                }
+                // Toolkits emit a11y show/hide state-changes for every widget
+                // they map — pure churn (e.g. gnome-shell fires dozens per
+                // second). Hidden from the feed unless --visibility was passed;
+                // still recorded.
+                if( !show_visibility_ && is_visibility_churn( event ) )
                 {
                     return;
                 }
@@ -845,6 +879,12 @@ namespace
                 show_mouse_ = show_mouse;
             }
 
+            void
+            set_show_visibility( bool show_visibility ) noexcept
+            {
+                show_visibility_ = show_visibility;
+            }
+
             // Recording must never kill the live feed: first failure warns
             // once on stderr, stops recording, and is reported at exit.
             void
@@ -868,12 +908,13 @@ namespace
 
             MoveCoalescer              coalescer_;
             ScrollCoalescer            scroll_coalescer_;
-            std::size_t                observed_    = 0U;
-            std::size_t                printed_     = 0U;
-            std::size_t                gaps_        = 0U;
-            grab::storage::JsonlSink*  sink_        = nullptr;
-            bool                       sink_failed_ = false;
-            bool                       show_mouse_  = false;
+            std::size_t                observed_        = 0U;
+            std::size_t                printed_         = 0U;
+            std::size_t                gaps_            = 0U;
+            grab::storage::JsonlSink*  sink_            = nullptr;
+            bool                       sink_failed_     = false;
+            bool                       show_mouse_      = false;
+            bool                       show_visibility_ = false;
             mutable std::mutex         error_mutex_;
             std::optional<grab::Error> error_;
     };
@@ -1285,8 +1326,9 @@ namespace
     run( std::span<char*> args )
     {
         std::filesystem::path recording_dir{ "event-log" };
-        std::string           socket_path = default_socket_path();
-        bool                  show_mouse  = false;
+        std::string           socket_path     = default_socket_path();
+        bool                  show_mouse      = false;
+        bool                  show_visibility = false;
         for( std::size_t index = 0U; index < args.size(); ++index )
         {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
@@ -1300,6 +1342,10 @@ namespace
             else if( arg == "--mouse" )
             {
                 show_mouse = true;
+            }
+            else if( arg == "--visibility" )
+            {
+                show_visibility = true;
             }
             else if( index == 0U )
             {
@@ -1339,12 +1385,18 @@ namespace
         }
         logger.attach_sink( &*sink );
         logger.set_show_mouse( show_mouse );
+        logger.set_show_visibility( show_visibility );
         if( !show_mouse )
         {
             std::cout << "event_logger: mouse events hidden"
                          " (pass --mouse to show; still recorded)\n";
-            std::cout.flush();
         }
+        if( !show_visibility )
+        {
+            std::cout << "event_logger: a11y show/hide churn hidden"
+                         " (pass --visibility to show; still recorded)\n";
+        }
+        std::cout.flush();
 
         grab::SubscriptionScope scope;    // empty scope + wildcard filter = all kinds
         auto                    subscription =
