@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "grab browser bridge",
+  "version": "0.1.0",
+  "description": "Streams browser tab events to the grab examples over native messaging.",
+  "permissions": ["tabs", "nativeMessaging"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "grab-bridge@example.com"
+    }
+  }
+}

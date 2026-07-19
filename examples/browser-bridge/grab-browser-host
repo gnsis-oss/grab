@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# grab-browser-host — native-messaging host for the grab browser bridge.
+#
+# The browser launches this with the native-messaging protocol on stdio
+# (each message is a 4-byte little-endian length header + JSON). We forward
+# that byte stream verbatim to the unix socket a grab example listens on;
+# the framing passes through untouched. The grab bridge only reads, so the
+# socket->stdout direction stays empty.
+#
+# Socket path: $GRAB_BRIDGE_SOCKET if set, else <XDG_RUNTIME_DIR|/tmp>/<name>.
+# Default name is the browser_event_screenshot socket; change GRAB_BRIDGE_SOCKET
+# (or this default) to grab-event-logger.sock to feed the event_logger example.
+set -euo pipefail
+
+runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
+sock="${GRAB_BRIDGE_SOCKET:-$runtime_dir/grab-browser-shots.sock}"
+
+exec socat STDIO "UNIX-CONNECT:$sock"
