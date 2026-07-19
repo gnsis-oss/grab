@@ -39,12 +39,13 @@ namespace
     constexpr int         signalSuccess = 0;
     // POSIX timespec::tv_nsec is specified as long.
     // NOLINTNEXTLINE(google-runtime-int)
-    constexpr long        pollTickNanos       = 300'000'000L;    // 300 ms
-    constexpr int         labelWidth          = 7;               // "browser"
-    constexpr double      millisPerSecond     = 1'000.0;
-    constexpr std::size_t timestampBufferSize = 16U;
-    constexpr std::size_t detailBufferSize    = 32U;
-    constexpr double      bytesPerKilobyte    = 1'024.0;
+    constexpr long        pollTickNanos         = 300'000'000L;    // 300 ms
+    constexpr int         labelWidth            = 7;               // "browser"
+    constexpr double      millisPerSecond       = 1'000.0;
+    constexpr std::size_t timestampBufferSize   = 16U;
+    constexpr std::size_t detailBufferSize      = 32U;
+    constexpr double      bytesPerKilobyte      = 1'024.0;
+    constexpr double      coalesceWindowSeconds = 0.3;
 
     // ---- formatting -----------------------------------------------------
 
@@ -403,6 +404,100 @@ namespace
         return std::string{ grab::wire_name( event.kind ) };
     }
 
+    // Collapses continuous MouseMove streams into one summary line per
+    // window. Discrete kinds never pass through here.
+    class MoveCoalescer
+    {
+        public:
+
+            // Returns the finished summary line when the pending window
+            // closes; the new sample opens the next window.
+            [[nodiscard]]
+            std::optional<std::string>
+            feed( const grab::Event& event )
+            {
+                const auto* move = std::get_if<grab::MouseMove>( &event.payload );
+                if( move == nullptr )
+                {
+                    return std::nullopt;
+                }
+                std::optional<std::string> line;
+                if( pending_.has_value() &&
+                    event.timestamp -
+                    pending_->first_ts >= coalesceWindowSeconds )
+                {
+                    line = render( *pending_ );
+                    pending_.reset();
+                }
+                if( !pending_.has_value() )
+                {
+                    pending_ = Pending{
+                        .first_ts      = event.timestamp,
+                        .samples       = 0U,
+                        .last_position = std::nullopt,
+                    };
+                }
+                ++pending_->samples;
+                if( move->position.has_value() )
+                {
+                    pending_->last_position = *move->position;
+                }
+                return line;
+            }
+
+            [[nodiscard]]
+            std::optional<std::string>
+            flush()
+            {
+                if( !pending_.has_value() )
+                {
+                    return std::nullopt;
+                }
+                auto line = render( *pending_ );
+                pending_.reset();
+                return line;
+            }
+
+        private:
+
+            struct Pending
+            {
+                    double                          first_ts = 0.0;
+                    std::size_t                     samples  = 0U;
+                    std::optional<grab::SpacePoint> last_position;
+            };
+
+            [[nodiscard]]
+            static std::string
+            render( const Pending& pending )
+            {
+                std::string description;
+                if( pending.last_position.has_value() )
+                {
+                    description =
+                        "pointer moved to (" +
+                        std::to_string(
+                            static_cast<std::int64_t>( pending.last_position->x )
+                        ) +
+                        ", " +
+                        std::to_string(
+                            static_cast<std::int64_t>( pending.last_position->y )
+                        ) +
+                        ")";
+                }
+                else
+                {
+                    description = "pointer moved";
+                }
+                description += " [" + std::to_string( pending.samples ) + " samples]";
+                return feed_line( pending.first_ts,
+                                  grab::EventKind::MouseMove,
+                                  description );
+            }
+
+            std::optional<Pending> pending_;
+    };
+
     // ---- consumer -------------------------------------------------------
 
     class EventLogger
@@ -416,19 +511,34 @@ namespace
                 if( const auto* gap = std::get_if<grab::QueueGapMarker>( &item ) )
                 {
                     ++gaps_;
+                    flush_pending();
                     print( "!! gap: events dropped after seq " +
                            std::to_string( gap->last_delivered_sequence ) );
                     return;
                 }
                 const auto& event = std::get<grab::Event>( item );
                 ++observed_;
+                if( event.kind == grab::EventKind::MouseMove )
+                {
+                    if( auto line = coalescer_.feed( event ); line.has_value() )
+                    {
+                        print( *line );
+                    }
+                    return;
+                }
+                // A discrete event flushes the pending pointer summary first
+                // so the feed stays chronological.
+                flush_pending();
                 print( feed_line( event.timestamp, event.kind, describe( event ) ) );
             }
 
             void
             flush_pending()
             {
-                // Coalescer arrives in Task 4.
+                if( auto line = coalescer_.flush(); line.has_value() )
+                {
+                    print( *line );
+                }
             }
 
             void
@@ -480,6 +590,7 @@ namespace
 
         private:
 
+            MoveCoalescer              coalescer_;
             std::size_t                observed_ = 0U;
             std::size_t                printed_  = 0U;
             std::size_t                gaps_     = 0U;
@@ -590,8 +701,9 @@ namespace
     [[nodiscard]]
     bool
     block_shutdown_signals(
+        // NOLINTNEXTLINE(misc-include-cleaner)
         sigset_t& signals
-    ) noexcept    // NOLINT(misc-include-cleaner)
+    ) noexcept
     {
         // NOLINTNEXTLINE(misc-include-cleaner): POSIX <signal.h>.
         if( ::sigemptyset( &signals ) != signalSuccess )
@@ -613,8 +725,9 @@ namespace
     [[nodiscard]]
     bool
     shutdown_requested(
+        // NOLINTNEXTLINE(misc-include-cleaner)
         const sigset_t& signals
-    ) noexcept    // NOLINT(misc-include-cleaner)
+    ) noexcept
     {
         const timespec timeout{ .tv_sec = 0, .tv_nsec = pollTickNanos };
         // NOLINTNEXTLINE(misc-include-cleaner): POSIX <signal.h>.
@@ -678,7 +791,20 @@ namespace
 
         while( !shutdown_requested( signals ) )
         {
-            // Tick: Task 4 posts a coalescer flush here.
+            // Bounded staleness: a pointer that stops moving still gets its
+            // final summary within one poll tick.
+            auto ticked = ( *session )
+                              ->post(
+                                  [&logger]
+                                  {
+                                      logger.flush_pending();
+                                  }
+                              );
+            if( !ticked.has_value() )
+            {
+                logger.remember_error( std::move( ticked.error() ) );
+                break;
+            }
         }
 
         auto stopped = pump.stop();

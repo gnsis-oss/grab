@@ -1104,7 +1104,9 @@ In `run()`, replace the empty tick comment:
 cmake --build build -j$(nproc)
 DISPLAY=:97 ./build/examples/event_logger > /tmp/feed.txt & LOGGER=$!
 sleep 1
-command -v xdotool >/dev/null && DISPLAY=:97 xdotool mousemove 100 100 mousemove 400 400 mousemove 700 500
+command -v xdotool >/dev/null && for i in $(seq 1 30); do DISPLAY=:97 xdotool mousemove_relative -- 5 3; sleep 0.02; done
+# NOTE: use RELATIVE motion — absolute `xdotool mousemove` (XTest warp) emits
+# no XI2 raw motion events on Xvfb, so the feed would stay empty.
 sleep 1
 kill -INT $LOGGER; wait $LOGGER
 grep "pointer moved" /tmp/feed.txt
@@ -1274,7 +1276,7 @@ Extend the summary print with `", recording: " << recording_dir.string()`.
 cmake --build build -j$(nproc)
 cd /tmp && rm -rf ev && mkdir ev && DISPLAY=:97 <worktree>/build/examples/event_logger ev > feed.txt & LOGGER=$!
 sleep 1
-command -v xdotool >/dev/null && DISPLAY=:97 xdotool mousemove 10 10 mousemove 300 300 key a
+command -v xdotool >/dev/null && { for i in $(seq 1 20); do DISPLAY=:97 xdotool mousemove_relative -- 5 3; sleep 0.02; done; DISPLAY=:97 xdotool key a; }
 sleep 1
 kill -INT $LOGGER; wait $LOGGER
 ls ev/*.jsonl && wc -l ev/*.jsonl && grep -c "pointer moved" feed.txt
@@ -1624,7 +1626,12 @@ sleep 1
 DISPLAY="$DISPLAY_NUM" xmessage -timeout 2 smoke &
 sleep 1
 if command -v xdotool >/dev/null; then
-    DISPLAY="$DISPLAY_NUM" xdotool key a click 1 mousemove 100 100 mousemove 500 400
+    DISPLAY="$DISPLAY_NUM" xdotool key a click 1
+    # Relative motion: absolute mousemove emits no XI2 raw events on Xvfb.
+    for _ in $(seq 1 30); do
+        DISPLAY="$DISPLAY_NUM" xdotool mousemove_relative -- 5 3
+        sleep 0.02
+    done
 else
     echo "smoke: xdotool absent, skipping input assertions"
 fi
