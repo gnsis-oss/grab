@@ -16,34 +16,29 @@
 // Firefox: ~/.mozilla/native-messaging-hosts/<name>.json) points "path" at
 // that script; the grab webextension then streams tab events here.
 
+#include "browser_socket.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
-#include "drivers/semantic/webextension/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "grab/watch.hpp"
-#include "kernel/scheduling/reactor.hpp"
 #include "storage/jsonl_sink.hpp"
 
 #include <array>
 #include <atomic>
-#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <ctime>
 #include <expected>
 #include <filesystem>
 #include <functional>
 #include <future>
 #include <iostream>
-#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -51,31 +46,23 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <sys/epoll.h>    // NOLINT(misc-include-cleaner): provides EPOLLIN.
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
 #include <utility>
 #include <variant>
-#include <vector>
 
 namespace
 {
 
-    constexpr std::size_t   queueCapacity = 8'192U;
-    constexpr int           signalSuccess = 0;
+    constexpr std::size_t queueCapacity = 8'192U;
+    constexpr int         signalSuccess = 0;
     // POSIX timespec::tv_nsec is specified as long.
     // NOLINTNEXTLINE(google-runtime-int)
-    constexpr long          pollTickNanos         = 300'000'000L;    // 300 ms
-    constexpr int           labelWidth            = 7;               // "browser"
-    constexpr double        millisPerSecond       = 1'000.0;
-    constexpr std::size_t   timestampBufferSize   = 16U;
-    constexpr std::size_t   detailBufferSize      = 32U;
-    constexpr double        bytesPerKilobyte      = 1'024.0;
-    constexpr double        coalesceWindowSeconds = 0.3;
-    constexpr int           listenBacklog         = 4;
-    constexpr std::uint32_t epollInEvents         = EPOLLIN;
-    constexpr int           invalidFd             = -1;
+    constexpr long        pollTickNanos         = 300'000'000L;    // 300 ms
+    constexpr int         labelWidth            = 7;               // "browser"
+    constexpr double      millisPerSecond       = 1'000.0;
+    constexpr std::size_t timestampBufferSize   = 16U;
+    constexpr std::size_t detailBufferSize      = 32U;
+    constexpr double      bytesPerKilobyte      = 1'024.0;
+    constexpr double      coalesceWindowSeconds = 0.3;
 
     [[nodiscard]]
     double
@@ -1017,212 +1004,6 @@ namespace
             std::atomic_bool   scheduled_{ false };
     };
 
-    [[nodiscard]]
-    std::string
-    default_socket_path()
-    {
-        // NOLINTNEXTLINE(concurrency-mt-unsafe): read once before threads spawn.
-        const char*       runtime_dir = std::getenv( "XDG_RUNTIME_DIR" );
-        const std::string base =
-            runtime_dir != nullptr ? std::string{ runtime_dir } : std::string{ "/tmp" };
-        return base + "/grab-event-logger.sock";
-    }
-
-    // Accepts native-messaging connections and hands each to a BrowserBridge
-    // on the session's reactor/bus. Connection state is touched only on the
-    // reactor thread; stop() serializes through a posted fence.
-    class BrowserSocket
-    {
-        public:
-
-            BrowserSocket()                       = default;
-            ~BrowserSocket()                      = default;
-
-            BrowserSocket( const BrowserSocket& ) = delete;
-            BrowserSocket&
-            operator=( const BrowserSocket& ) = delete;
-
-            BrowserSocket( BrowserSocket&& other ) noexcept :
-                path_{ std::move( other.path_ ) },
-                listen_fd_{
-                    std::exchange( other.listen_fd_,
-                                   invalidFd ),
-                },
-                token_{
-                    std::exchange( other.token_,
-                                   0U ),
-                },
-                state_{ std::move( other.state_ ) }
-            {
-            }
-
-            BrowserSocket&
-            operator=( BrowserSocket&& ) = delete;
-
-            [[nodiscard]]
-            static grab::Result<BrowserSocket>
-            open( std::string    path,
-                  grab::Session& session )
-            {
-                sockaddr_un address{};
-                if( path.size() >= sizeof( address.sun_path ) )
-                {
-                    return std::unexpected( grab::Error{
-                        .code       = grab::ErrorCode::InvalidArgument,
-                        .message    = "socket path too long: " + path,
-                        .capability = {},
-                        .target     = {},
-                        .attempts   = {},
-                    } );
-                }
-                const int fd =
-                    ::socket( AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0 );
-                if( fd == invalidFd )
-                {
-                    return std::unexpected( grab::Error{
-                        .code = grab::ErrorCode::InternalFault,
-                        .message =
-                            "socket() failed: " +
-                            // NOLINTNEXTLINE(concurrency-mt-unsafe): diagnostic only.
-                            std::string{ std::strerror( errno ) },
-                        .capability = {},
-                        .target     = {},
-                        .attempts   = {},
-                    } );
-                }
-                address.sun_family = AF_UNIX;
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
-                std::strncpy( address.sun_path,
-                              path.c_str(),
-                              sizeof( address.sun_path ) - 1U );
-                ::unlink( path.c_str() );    // stale socket from a prior run
-                if( ::bind(
-                        fd,
-                        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-                        reinterpret_cast<const sockaddr*>( &address ),
-                        sizeof( address )
-                    ) !=
-                    0 ||
-                    ::listen( fd, listenBacklog ) != 0 )
-                {
-                    const int saved = errno;
-                    ::close( fd );
-                    return std::unexpected( grab::Error{
-                        .code = grab::ErrorCode::InternalFault,
-                        .message =
-                            "bind/listen failed on " +
-                            path +
-                            ": " +
-                            // NOLINTNEXTLINE(concurrency-mt-unsafe): diagnostic only.
-                            std::string{ std::strerror( saved ) },
-                        .capability = {},
-                        .target     = {},
-                        .attempts   = {},
-                    } );
-                }
-
-                BrowserSocket socket;
-                socket.path_        = std::move( path );
-                socket.listen_fd_   = fd;
-                socket.state_       = std::make_shared<State>();
-                auto* const state   = socket.state_.get();
-                auto&       reactor = session.reactor();
-                auto&       bus     = session.bus();
-                socket.token_ =
-                    reactor.add_fd( fd,
-                                    epollInEvents,
-                                    [fd, state, &reactor, &bus]( std::uint32_t )
-                                    {
-                                        accept_pending( fd, *state, reactor, bus );
-                                    } );
-                return socket;
-            }
-
-            void
-            stop( grab::Session& session )
-            {
-                if( listen_fd_ == invalidFd )
-                {
-                    return;
-                }
-                session.reactor().remove_fd( token_ );
-                // Serialize with any in-flight accept callback.
-                std::promise<void> fence;
-                auto               reached = fence.get_future();
-                auto               posted  = session.post(
-                    [this, &fence]
-                    {
-                        for( auto& connection : state_->connections )
-                        {
-                            connection.bridge.stop();
-                            ::close( connection.fd );
-                        }
-                        state_->connections.clear();
-                        fence.set_value();
-                    }
-                );
-                if( posted.has_value() )
-                {
-                    reached.get();
-                }
-                ::close( listen_fd_ );
-                ::unlink( path_.c_str() );
-                listen_fd_ = invalidFd;
-            }
-
-        private:
-
-            struct Connection
-            {
-                    int                                                  fd;
-                    grab::drivers::semantic::webextension::BrowserBridge bridge;
-            };
-
-            struct State
-            {
-                    std::vector<Connection> connections;    // reactor thread only
-            };
-
-            static void
-            accept_pending( int                  listen_fd,
-                            State&               state,
-                            grab::core::Reactor& reactor,
-                            grab::EventBus&      bus )
-            {
-                for( ;; )
-                {
-                    const int fd = ::accept4( listen_fd,
-                                              nullptr,
-                                              nullptr,
-                                              SOCK_NONBLOCK | SOCK_CLOEXEC );
-                    if( fd == invalidFd )
-                    {
-                        return;    // EAGAIN or transient error: wait for next EPOLLIN
-                    }
-                    auto bridge =
-                        grab::drivers::semantic::webextension::BrowserBridge::start(
-                            fd,
-                            reactor,
-                            bus
-                        );
-                    if( !bridge.has_value() )
-                    {
-                        ::close( fd );
-                        continue;
-                    }
-                    state.connections.push_back(
-                        Connection{ .fd = fd, .bridge = std::move( *bridge ) }
-                    );
-                }
-            }
-
-            std::string   path_{};    // NOLINT(readability-redundant-member-init)
-            int           listen_fd_ = invalidFd;
-            std::uint64_t token_     = 0U;
-            std::shared_ptr<State>
-                state_{};    // NOLINT(readability-redundant-member-init)
-    };
-
     // ---- signals --------------------------------------------------------
 
     [[nodiscard]]
@@ -1288,7 +1069,8 @@ namespace
             return std::unexpected( std::move( tracker.error() ) );
         }
 
-        auto browser_socket = BrowserSocket::open( socket_path, session );
+        auto browser_socket =
+            grab::examples::BrowserSocket::open( socket_path, session );
         if( !browser_socket.has_value() )
         {
             tracker->stop();
@@ -1326,9 +1108,10 @@ namespace
     run( std::span<char*> args )
     {
         std::filesystem::path recording_dir{ "event-log" };
-        std::string           socket_path     = default_socket_path();
-        bool                  show_mouse      = false;
-        bool                  show_visibility = false;
+        std::string           socket_path =
+            grab::examples::default_socket_path( "grab-event-logger.sock" );
+        bool show_mouse      = false;
+        bool show_visibility = false;
         for( std::size_t index = 0U; index < args.size(); ++index )
         {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
