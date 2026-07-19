@@ -46,6 +46,54 @@ namespace grab::event
     decode_atspi_signal( const AtspiSignal& signal,
                          double             timestamp );
 
+    // The accessible object that emitted a signal, addressed on the a11y bus.
+    struct AtspiObjectRef
+    {
+            std::string sender;    // D-Bus unique name, e.g. ":1.42"
+            std::string path;      // object path of the emitting accessible
+    };
+
+    // Human identity resolved for an emitting object. An empty field means
+    // the property was unavailable.
+    struct AtspiIdentity
+    {
+            std::string app;    // friendly application name, e.g. "Firefox"
+    };
+
+    // Resolves an object reference to a human identity over the a11y bus.
+    // Injected so the caching/enrichment logic is testable without a live
+    // bus; returns nullopt when the object cannot be queried.
+    using AtspiIdentityResolver =
+        std::function<std::optional<AtspiIdentity>( const AtspiObjectRef& )>;
+
+    // Replaces the signal's raw D-Bus sender with a resolved friendly
+    // application name when one is available; other fields are preserved.
+    // Raw AT-SPI signals carry the bus sender (":1.1") but no app name, so
+    // without this a decoded event's app is an opaque connection id.
+    void
+    enrich_atspi_signal( AtspiSignal&                        signal,
+                         const std::optional<AtspiIdentity>& identity );
+
+    // Wraps a resolver with a per-sender application-name cache: every
+    // accessible of one application shares its bus sender, so the friendly
+    // name is queried at most once per application even under the visibility
+    // signal bursts a busy desktop emits.
+    class AtspiIdentityCache
+    {
+        public:
+
+            explicit AtspiIdentityCache( AtspiIdentityResolver resolve ) noexcept;
+
+            [[nodiscard]]
+            std::optional<AtspiIdentity>
+            resolve( const AtspiObjectRef& object );
+
+        private:
+
+            AtspiIdentityResolver                                            resolve_;
+            std::map<std::string, std::optional<AtspiIdentity>, std::less<>> by_sender_;
+    };
+
     // Refcounted, demand-driven AT-SPI event registration. acquire()/release() track a
     // per-event demand count; the injected registrar performs the actual D-Bus
     // RegisterEvent (enable==true) / DeregisterEvent (enable==false) only on the

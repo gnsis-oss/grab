@@ -23,8 +23,14 @@ namespace
     constexpr std::string_view focusedDetail      = "focused";
     constexpr std::string_view pressedDetail      = "pressed";
     constexpr std::string_view checkedDetail      = "checked";
+    constexpr std::string_view showingDetail      = "showing";
     constexpr std::string_view defunctDetail      = "defunct";
     constexpr std::string_view unrelatedMember    = "BoundsChanged";
+    constexpr std::string_view busSender          = ":1.1";
+    constexpr std::string_view otherSender        = ":1.42";
+    constexpr std::string_view friendlyApp        = "Firefox";
+    constexpr std::string_view objectPathA        = "/org/a11y/atspi/accessible/1";
+    constexpr std::string_view objectPathB        = "/org/a11y/atspi/accessible/2";
     constexpr std::string_view app                = "gedit";
     constexpr std::string_view buttonRole         = "push button";
     constexpr std::string_view buttonName         = "Save";
@@ -198,6 +204,103 @@ TEST( Atspi,
                                           timestamp );
 
     EXPECT_FALSE( decoded.has_value() );
+}
+
+// A resolved friendly application name replaces the raw D-Bus bus sender that
+// live signals carry as their app; the emitting object itself carries no name.
+TEST( Atspi,
+      EnrichReplacesBusSenderWithFriendlyApp )
+{
+    auto signal = atspi_signal( stateChangedMember, showingDetail );
+    signal.app  = std::string{ busSender };
+
+    grab::event::enrich_atspi_signal(
+        signal,
+        grab::event::AtspiIdentity{ .app = std::string{ friendlyApp } }
+    );
+
+    EXPECT_EQ( signal.app, friendlyApp );
+}
+
+TEST( Atspi,
+      EnrichWithoutIdentityKeepsBusSender )
+{
+    auto signal = atspi_signal( stateChangedMember, showingDetail );
+    signal.app  = std::string{ busSender };
+
+    grab::event::enrich_atspi_signal( signal, std::nullopt );
+
+    EXPECT_EQ( signal.app, busSender );
+}
+
+TEST( Atspi,
+      EnrichWithEmptyFriendlyNameKeepsBusSender )
+{
+    auto signal = atspi_signal( stateChangedMember, showingDetail );
+    signal.app  = std::string{ busSender };
+
+    grab::event::enrich_atspi_signal( signal, grab::event::AtspiIdentity{ .app = {} } );
+
+    EXPECT_EQ( signal.app, busSender );
+}
+
+// Every accessible of one application shares its bus sender, so the friendly
+// name is queried once per sender and served from cache thereafter — the
+// property that keeps visibility-signal bursts from flooding the bus.
+TEST( Atspi,
+      IdentityCacheQueriesOncePerSender )
+{
+    int                             calls = 0;
+    grab::event::AtspiIdentityCache cache(
+        [&calls]( const grab::event::AtspiObjectRef& )
+        {
+            ++calls;
+            return grab::event::AtspiIdentity{ .app = std::string{ friendlyApp } };
+        }
+    );
+
+    const grab::event::AtspiObjectRef first{
+        .sender = std::string{ busSender },
+        .path   = std::string{ objectPathA }
+    };
+    const grab::event::AtspiObjectRef second{
+        .sender = std::string{ busSender },
+        .path   = std::string{ objectPathB }
+    };
+    const grab::event::AtspiObjectRef other{
+        .sender = std::string{ otherSender },
+        .path   = std::string{ objectPathA }
+    };
+
+    EXPECT_EQ( cache.resolve( first )->app, friendlyApp );
+    EXPECT_EQ( cache.resolve( second )->app, friendlyApp );    // same sender: cached
+    EXPECT_EQ( calls, 1 );
+
+    EXPECT_EQ( cache.resolve( other )->app, friendlyApp );     // new sender: queried
+    EXPECT_EQ( calls, 2 );
+}
+
+TEST( Atspi,
+      IdentityCacheRemembersNullopt )
+{
+    int                             calls = 0;
+    grab::event::AtspiIdentityCache cache(
+        [&calls]( const grab::event::AtspiObjectRef& )
+            -> std::optional<grab::event::AtspiIdentity>
+        {
+            ++calls;
+            return std::nullopt;
+        }
+    );
+
+    const grab::event::AtspiObjectRef object{
+        .sender = std::string{ busSender },
+        .path   = std::string{ objectPathA }
+    };
+
+    EXPECT_FALSE( cache.resolve( object ).has_value() );
+    EXPECT_FALSE( cache.resolve( object ).has_value() );
+    EXPECT_EQ( calls, 1 );    // an unresolvable sender is not re-queried per event
 }
 
 TEST( Atspi,

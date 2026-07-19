@@ -51,6 +51,11 @@ namespace grab::event
         constexpr const char*   objectEventInterface  = "org.a11y.atspi.Event.Object";
         constexpr const char*   objectEventMatch =
             "type='signal',interface='org.a11y.atspi.Event.Object'";
+        constexpr const char* accessibleInterface  = "org.a11y.atspi.Accessible";
+        constexpr const char* getApplicationMethod = "GetApplication";
+        constexpr const char* propertiesInterface  = "org.freedesktop.DBus.Properties";
+        constexpr const char* propertiesGetMethod  = "Get";
+        constexpr const char* nameProperty         = "Name";
         constexpr std::string_view stateChangedMember = "StateChanged";
         constexpr std::string_view textChangedMember  = "TextChanged";
         constexpr std::string_view actionMember       = "Action";
@@ -410,8 +415,12 @@ namespace grab::event
             std::mutex                          mutex;
             grab::core::Reactor*                reactor    = nullptr;
             DBusConnection*                     connection = nullptr;
-            grab::EventBus*                     bus        = nullptr;
+            // Dedicated connection for blocking identity queries, so they
+            // never reorder the signal connection's message queue.
+            DBusConnection*                     query_connection = nullptr;
+            grab::EventBus*                     bus              = nullptr;
             std::unique_ptr<AtspiEventRegistry> registry;
+            std::unique_ptr<AtspiIdentityCache> identities;
             bool                                active = true;
             std::vector<WatchRegistration>      watches;
     };
@@ -421,14 +430,16 @@ namespace grab::event
 
         [[nodiscard]]
         std::vector<grab::Event>
-        take_events_from_message( DBusMessage* message )
+        take_events_from_message( DBusMessage*        message,
+                                  AtspiIdentityCache* identities )
         {
             std::vector<grab::Event> events;
-            AtspiSignal              signal{
+            const std::string sender = dbus_text( dbus_message_get_sender( message ) );
+            AtspiSignal       signal{
                 .interface = dbus_text( dbus_message_get_interface( message ) ),
                 .member    = dbus_text( dbus_message_get_member( message ) ),
                 .detail    = {},
-                .app       = dbus_text( dbus_message_get_sender( message ) ),
+                .app       = sender,
                 .role      = {},
                 .name      = {},
             };
@@ -448,6 +459,18 @@ namespace grab::event
                 signal.detail = dbus_text( detail );
             }
 
+            // Resolve the raw bus sender to a friendly application name.
+            // Cached per sender, so a burst of visibility signals from one
+            // app costs at most one bus query.
+            if( identities != nullptr )
+            {
+                const AtspiObjectRef object{
+                    .sender = sender,
+                    .path   = dbus_text( dbus_message_get_path( message ) ),
+                };
+                enrich_atspi_signal( signal, identities->resolve( object ) );
+            }
+
             auto decoded = decode_atspi_signal( signal, current_timestamp() );
             if( decoded.has_value() )
             {
@@ -458,6 +481,7 @@ namespace grab::event
 
         void
         append_pending_events( DBusConnection*           connection,
+                               AtspiIdentityCache*       identities,
                                std::vector<grab::Event>& pending_events )
         {
             while( true )
@@ -468,7 +492,7 @@ namespace grab::event
                     break;
                 }
 
-                auto decoded = take_events_from_message( message.get() );
+                auto decoded = take_events_from_message( message.get(), identities );
                 pending_events.insert( pending_events.end(),
                                        std::make_move_iterator( decoded.begin() ),
                                        std::make_move_iterator( decoded.end() ) );
@@ -717,6 +741,176 @@ namespace grab::event
             return {};
         }
 
+        // Reads a string reply body, unwrapping a variant if present. Returns
+        // false when the reply does not hold a string.
+        [[nodiscard]]
+        bool
+        read_string_reply( DBusMessage* reply,
+                           std::string& out )
+        {
+            DBusMessageIter iterator{};
+            if( dbus_message_iter_init( reply, &iterator ) == 0 )
+            {
+                return false;
+            }
+            if( dbus_message_iter_get_arg_type( &iterator ) == DBUS_TYPE_VARIANT )
+            {
+                DBusMessageIter variant{};
+                dbus_message_iter_recurse( &iterator, &variant );
+                iterator = variant;
+            }
+            if( dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_STRING )
+            {
+                return false;
+            }
+            const char* text = nullptr;
+            dbus_message_iter_get_basic( &iterator, static_cast<void*>( &text ) );
+            out = dbus_text( text );
+            return true;
+        }
+
+        // GetApplication returns (so): the application's (bus name, path).
+        [[nodiscard]]
+        std::optional<AtspiObjectRef>
+        query_application_ref( DBusConnection*       connection,
+                               const AtspiObjectRef& object )
+        {
+            const DbusMessage request{
+                dbus_message_new_method_call( object.sender.c_str(),
+                                              object.path.c_str(),
+                                              accessibleInterface,
+                                              getApplicationMethod )
+            };
+            if( request == nullptr )
+            {
+                return std::nullopt;
+            }
+            DbusError         reply_error;
+            const DbusMessage reply{
+                dbus_connection_send_with_reply_and_block( connection,
+                                                           request.get(),
+                                                           dbusCallTimeoutMs,
+                                                           &reply_error.value )
+            };
+            if( reply == nullptr )
+            {
+                return std::nullopt;
+            }
+            DBusMessageIter iterator{};
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
+                dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_STRUCT )
+            {
+                return std::nullopt;
+            }
+            DBusMessageIter fields{};
+            dbus_message_iter_recurse( &iterator, &fields );
+            if( dbus_message_iter_get_arg_type( &fields ) != DBUS_TYPE_STRING )
+            {
+                return std::nullopt;
+            }
+            const char* bus_name = nullptr;
+            dbus_message_iter_get_basic( &fields, static_cast<void*>( &bus_name ) );
+            dbus_message_iter_next( &fields );
+            if( dbus_message_iter_get_arg_type( &fields ) != DBUS_TYPE_OBJECT_PATH )
+            {
+                return std::nullopt;
+            }
+            const char* app_path = nullptr;
+            dbus_message_iter_get_basic( &fields, static_cast<void*>( &app_path ) );
+            AtspiObjectRef application{
+                .sender = dbus_text( bus_name ),
+                .path   = dbus_text( app_path ),
+            };
+            // An empty bus name means "the same connection as the object".
+            if( application.sender.empty() )
+            {
+                application.sender = object.sender;
+            }
+            return application;
+        }
+
+        // Properties.Get(org.a11y.atspi.Accessible, "Name") on the object.
+        [[nodiscard]]
+        std::optional<std::string>
+        query_accessible_name( DBusConnection*       connection,
+                               const AtspiObjectRef& object )
+        {
+            const DbusMessage request{
+                dbus_message_new_method_call( object.sender.c_str(),
+                                              object.path.c_str(),
+                                              propertiesInterface,
+                                              propertiesGetMethod )
+            };
+            if( request == nullptr )
+            {
+                return std::nullopt;
+            }
+            DBusMessageIter args{};
+            dbus_message_iter_init_append( request.get(), &args );
+            const char* interface_name = accessibleInterface;
+            const char* property_name  = nameProperty;
+            if( dbus_message_iter_append_basic(
+                    &args,
+                    DBUS_TYPE_STRING,
+                    static_cast<const void*>( &interface_name )
+                ) ==
+                0 ||
+                dbus_message_iter_append_basic(
+                    &args,
+                    DBUS_TYPE_STRING,
+                    static_cast<const void*>( &property_name )
+                ) == 0 )
+            {
+                return std::nullopt;
+            }
+            DbusError         reply_error;
+            const DbusMessage reply{
+                dbus_connection_send_with_reply_and_block( connection,
+                                                           request.get(),
+                                                           dbusCallTimeoutMs,
+                                                           &reply_error.value )
+            };
+            if( reply == nullptr )
+            {
+                return std::nullopt;
+            }
+            std::string name;
+            if( !read_string_reply( reply.get(), name ) )
+            {
+                return std::nullopt;
+            }
+            return name;
+        }
+
+        // Resolves the friendly application name for an emitting object
+        // (GetApplication -> Name). Any failure yields nullopt, so the caller
+        // keeps the raw bus sender. NOTE: the live libdbus path needs a real
+        // a11y bus, so it is verified on a desktop, not in the unit tests;
+        // the caching and enrichment logic around it is unit-tested via an
+        // injected fake resolver.
+        [[nodiscard]]
+        std::optional<AtspiIdentity>
+        query_application_identity( DBusConnection*       connection,
+                                    const AtspiObjectRef& object )
+        {
+            if( connection == nullptr || object.sender.empty() || object.path.empty() )
+            {
+                return std::nullopt;
+            }
+            const auto application = query_application_ref( connection, object );
+            if( !application.has_value() )
+            {
+                return std::nullopt;
+            }
+            const auto name = query_accessible_name( connection, *application );
+            if( !name.has_value() || name->empty() )
+            {
+                return std::nullopt;
+            }
+            return AtspiIdentity{ .app = *name };
+        }
+
     }    // namespace
 
     std::optional<grab::Event>
@@ -730,6 +924,38 @@ namespace grab::event
         }
 
         return make_a11y_event( *kind, signal, timestamp );
+    }
+
+    void
+    enrich_atspi_signal( AtspiSignal&                        signal,
+                         const std::optional<AtspiIdentity>& identity )
+    {
+        if( identity.has_value() && !identity->app.empty() )
+        {
+            signal.app = identity->app;
+        }
+    }
+
+    AtspiIdentityCache::AtspiIdentityCache( AtspiIdentityResolver resolve ) noexcept :
+        resolve_( std::move( resolve ) )
+    {
+    }
+
+    std::optional<AtspiIdentity>
+    AtspiIdentityCache::resolve( const AtspiObjectRef& object )
+    {
+        if( const auto cached = by_sender_.find( object.sender );
+            cached != by_sender_.end() )
+        {
+            return cached->second;
+        }
+        std::optional<AtspiIdentity> identity;
+        if( resolve_ )
+        {
+            identity = resolve_( object );
+        }
+        by_sender_.emplace( object.sender, identity );
+        return identity;
     }
 
     AtspiMonitor::AtspiMonitor( grab::core::Reactor&   reactor,
@@ -997,6 +1223,24 @@ namespace grab::event
             }
         );
         state->connection = connection->release();
+
+        // A second, dedicated connection for blocking identity queries keeps
+        // them off the signal connection's queue. Best-effort: if it can't be
+        // opened, enrichment is simply skipped and events keep the raw bus
+        // sender as their app.
+        if( auto query_connection = open_a11y_connection( *address );
+            query_connection.has_value() )
+        {
+            DBusConnection* const query = query_connection->get();
+            state->query_connection     = query_connection->release();
+            state->identities           = std::make_unique<AtspiIdentityCache>(
+                [query]( const AtspiObjectRef& object )
+                {
+                    return query_application_identity( query, object );
+                }
+            );
+        }
+
         return AtspiMonitor{ reactor, std::move( state ) };
     }
 
@@ -1089,7 +1333,9 @@ namespace grab::event
                     return;
                 }
 
-                append_pending_events( state->connection, pending_events );
+                append_pending_events( state->connection,
+                                       state->identities.get(),
+                                       pending_events );
                 if( dbus_connection_get_is_connected( state->connection ) == 0 )
                 {
                     state->active = false;
@@ -1122,7 +1368,8 @@ namespace grab::event
             return;
         }
 
-        DBusConnection* connection = nullptr;
+        DBusConnection* connection       = nullptr;
+        DBusConnection* query_connection = nullptr;
         {
             std::vector<std::uint64_t> tokens;
             try
@@ -1131,7 +1378,11 @@ namespace grab::event
                 state->active  = false;
                 state->bus     = nullptr;
                 state->reactor = nullptr;
-                connection     = std::exchange( state->connection, nullptr );
+                // Drop the cache first: no resolve() runs after this, so the
+                // query connection is safe to close below.
+                state->identities.reset();
+                connection       = std::exchange( state->connection, nullptr );
+                query_connection = std::exchange( state->query_connection, nullptr );
                 for( const auto& watch : state->watches )
                 {
                     if( watch.token != noToken )
@@ -1156,6 +1407,11 @@ namespace grab::event
         {
             dbus_connection_close( connection );
             dbus_connection_unref( connection );
+        }
+        if( query_connection != nullptr )
+        {
+            dbus_connection_close( query_connection );
+            dbus_connection_unref( query_connection );
         }
     }
 
