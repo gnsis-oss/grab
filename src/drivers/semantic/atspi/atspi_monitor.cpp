@@ -57,6 +57,7 @@ namespace grab::event
         constexpr std::string_view clickedMember      = "Clicked";
         constexpr std::string_view focusedDetail      = "focused";
         constexpr std::string_view pressedDetail      = "pressed";
+        constexpr std::string_view checkedDetail      = "checked";
         constexpr std::string_view clickedDetail      = "clicked";
         constexpr std::string_view clickDetail        = "click";
         constexpr std::string_view activateDetail     = "activate";
@@ -259,7 +260,23 @@ namespace grab::event
                 return grab::EventKind::A11yButtonClicked;
             }
 
-            if( signal.member == stateChangedMember )
+            // Only details in the registered vocabulary decode; the broad
+            // D-Bus match rule also delivers details other bus clients
+            // registered ("defunct" fires for every accessible object an
+            // app destroys — file dialogs and list scrolling emit hundreds).
+            if( signal.member ==
+                stateChangedMember &&
+                ( signal.detail ==
+                  checkedDetail ||
+                  signal.detail ==
+                  pressedDetail ||
+                  signal.detail ==
+                  showingDetail ||
+                  signal.detail ==
+                  visibleDetail ||
+                  signal.detail ==
+                  hiddenDetail ||
+                  signal.detail == collapsedDetail ) )
             {
                 return grab::EventKind::A11yStateChanged;
             }

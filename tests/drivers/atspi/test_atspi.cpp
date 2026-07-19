@@ -22,6 +22,8 @@ namespace
     constexpr std::string_view stateChangedMember = "StateChanged";
     constexpr std::string_view focusedDetail      = "focused";
     constexpr std::string_view pressedDetail      = "pressed";
+    constexpr std::string_view checkedDetail      = "checked";
+    constexpr std::string_view defunctDetail      = "defunct";
     constexpr std::string_view unrelatedMember    = "BoundsChanged";
     constexpr std::string_view app                = "gedit";
     constexpr std::string_view buttonRole         = "push button";
@@ -29,6 +31,7 @@ namespace
     constexpr auto             a11yCategory       = grab::EventCategory::Accessibility;
     constexpr auto             focusChangedKind   = grab::EventKind::A11yFocusChanged;
     constexpr auto             buttonClickedKind  = grab::EventKind::A11yButtonClicked;
+    constexpr auto             stateChangedKind   = grab::EventKind::A11yStateChanged;
     constexpr auto deviceInaccessibleCode         = grab::ErrorCode::DeviceInaccessible;
     constexpr auto threadReadyTimeout             = std::chrono::seconds{ 2 };
     constexpr std::string_view reactorDidNotStart = "reactor thread did not start";
@@ -165,6 +168,33 @@ TEST( Atspi,
 {
     const auto decoded =
         grab::event::decode_atspi_signal( atspi_signal( unrelatedMember, focusedDetail ),
+                                          timestamp );
+
+    EXPECT_FALSE( decoded.has_value() );
+}
+
+// The registry registration list is the vocabulary. StateChanged details we
+// registered decode; anything else — most loudly "defunct", which fires for
+// every accessible object an app destroys (file dialogs, list scrolling) —
+// must not flood the bus with A11yStateChanged events.
+TEST( Atspi,
+      RegisteredStateDetailDecodesToStateChanged )
+{
+    const auto decoded =
+        grab::event::decode_atspi_signal( atspi_signal( stateChangedMember,
+                                                        checkedDetail ),
+                                          timestamp );
+
+    ASSERT_TRUE( decoded.has_value() );
+    EXPECT_EQ( decoded->kind, stateChangedKind );
+}
+
+TEST( Atspi,
+      UnregisteredStateDetailReturnsNullopt )
+{
+    const auto decoded =
+        grab::event::decode_atspi_signal( atspi_signal( stateChangedMember,
+                                                        defunctDetail ),
                                           timestamp );
 
     EXPECT_FALSE( decoded.has_value() );
