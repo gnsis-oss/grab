@@ -376,14 +376,25 @@ namespace
                                    a11y->app +
                                    ")";
                         default :
-                            return a11y->role +
-                                   " \"" +
-                                   a11y->name +
-                                   "\" state: " +
-                                   a11y->detail +
-                                   " (" +
-                                   a11y->app +
-                                   ")";
+                            {
+                                // Visibility/state signals often carry no
+                                // widget name or role; render what is known
+                                // so the line is never a bare "" .
+                                std::string line = a11y->detail;
+                                if( !a11y->role.empty() )
+                                {
+                                    line = a11y->role + " " + line;
+                                }
+                                if( !a11y->name.empty() )
+                                {
+                                    line += " \"" + a11y->name + "\"";
+                                }
+                                if( !a11y->app.empty() )
+                                {
+                                    line += " in " + a11y->app;
+                                }
+                                return line;
+                            }
                     }
                 }
             case Kind::AppTabChanged :
