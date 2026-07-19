@@ -37,6 +37,7 @@ namespace
     constexpr std::size_t   maximum_pump_iterations = 10U;
     constexpr std::uint64_t initial_generation      = 0U;
     constexpr std::size_t   no_refreshes            = 0U;
+    constexpr double        timestampSlackSeconds   = 60.0;
     constexpr auto          event_wait_budget       = std::chrono::seconds{ 5 };
     constexpr auto          short_context_budget    = std::chrono::milliseconds{ 400 };
     constexpr auto          short_wait_budget       = std::chrono::milliseconds{ 250 };
@@ -100,6 +101,14 @@ TEST( X11EventSource,
         }
     );
     ASSERT_NE( injected_key_down, events.end() );
+    // Timestamps are wall-clock epoch seconds (spec: uniform event clock),
+    // not the X server's millisecond counter.
+    const double now_s = std::chrono::duration<double>(
+                             std::chrono::system_clock::now().time_since_epoch()
+    )
+                             .count();
+    EXPECT_GT( injected_key_down->timestamp, now_s - timestampSlackSeconds );
+    EXPECT_LT( injected_key_down->timestamp, now_s + timestampSlackSeconds );
     EXPECT_TRUE( std::ranges::none_of( events,
                                        []( const grab::Event& event )
                                        {

@@ -6,6 +6,7 @@
 #include "grab/origin.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/events/wall_clock.hpp"
 #include "spi/event_source.hpp"
 
 #include <algorithm>
@@ -193,7 +194,7 @@ namespace grab::drivers::desktop::x11
                         const xcb_input_raw_key_press_event_t& raw )
         {
             return grab::Event{
-                .timestamp = static_cast<double>( raw.time ),
+                .timestamp = grab::kernel::now_timestamp_s(),
                 .sequence  = initialSequence,
                 .kind      = kind,
                 .category  = grab::EventCategory::Input,
@@ -209,7 +210,7 @@ namespace grab::drivers::desktop::x11
         make_button_event( const xcb_input_raw_button_press_event_t& raw )
         {
             return grab::Event{
-                .timestamp = static_cast<double>( raw.time ),
+                .timestamp = grab::kernel::now_timestamp_s(),
                 .sequence  = initialSequence,
                 .kind      = grab::EventKind::MouseClick,
                 .category  = grab::EventCategory::Input,
@@ -295,7 +296,7 @@ namespace grab::drivers::desktop::x11
 
                         const int axis = word_index * bitsPerMaskWord + bit_index;
                         append_motion_axis( events,
-                                            static_cast<double>( raw.time ),
+                                            grab::kernel::now_timestamp_s(),
                                             axis,
                                             fp3232_to_double( values[value_index] ) );
                         ++value_index;
@@ -305,7 +306,7 @@ namespace grab::drivers::desktop::x11
 
             if( events.size() == initial_event_count )
             {
-                events.push_back( make_motion_event( static_cast<double>( raw.time ),
+                events.push_back( make_motion_event( grab::kernel::now_timestamp_s(),
                                                      motionAxisName,
                                                      static_cast<double>( noEvents ) ) );
             }

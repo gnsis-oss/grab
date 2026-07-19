@@ -4,6 +4,7 @@
 #include "grab/pid.hpp"
 #include "grab/result.hpp"
 #include "kernel/events/event_bus.hpp"
+#include "kernel/events/wall_clock.hpp"
 #include "kernel/scheduling/reactor.hpp"
 
 #include <algorithm>
@@ -76,15 +77,6 @@ namespace grab::drivers::desktop::x11
         take_xcb_owned( T* pointer ) noexcept
         {
             return XcbOwned<T>{ pointer, &std::free };
-        }
-
-        [[nodiscard]]
-        double
-        now_timestamp_s()
-        {
-            const auto now      = std::chrono::system_clock::now();
-            const auto duration = now.time_since_epoch();
-            return std::chrono::duration<double>( duration ).count();
         }
 
         [[nodiscard]]
@@ -445,7 +437,7 @@ namespace grab::drivers::desktop::x11
                            grab::WindowChange payload )
         {
             return grab::Event{
-                .timestamp = now_timestamp_s(),
+                .timestamp = grab::kernel::now_timestamp_s(),
                 .sequence  = 0U,
                 .kind      = kind,
                 .category  = grab::EventCategory::Window,
@@ -459,7 +451,7 @@ namespace grab::drivers::desktop::x11
                                  xcb_window_t current_active )
         {
             return grab::Event{
-                .timestamp = now_timestamp_s(),
+                .timestamp = grab::kernel::now_timestamp_s(),
                 .sequence  = 0U,
                 .kind      = grab::EventKind::ActiveChildChanged,
                 .category  = grab::EventCategory::Window,
