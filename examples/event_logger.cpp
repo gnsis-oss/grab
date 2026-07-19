@@ -3,53 +3,75 @@
 //   ./event_logger [recording-dir] [--socket <path>]
 //
 // One line per event: "HH:MM:SS.mmm -> <category> event -> <description>".
-// Runs until Ctrl+C. Later tasks add mouse-move coalescing, JSONL
-// recording, window tracking, and a browser-bridge socket.
+// Runs until Ctrl+C.
+//
+// Browser wiring: register a native-messaging host in your browser whose
+// executable forwards stdio to this socket, e.g.
+//   #!/bin/sh
+//   exec socat STDIO UNIX-CONNECT:"$XDG_RUNTIME_DIR/grab-event-logger.sock"
+// Manifest (Chrome: ~/.config/google-chrome/NativeMessagingHosts/<name>.json,
+// Firefox: ~/.mozilla/native-messaging-hosts/<name>.json) points "path" at
+// that script; the grab webextension then streams tab events here.
 
 #include "drivers/desktop/x11/window_tracker.hpp"
+#include "drivers/semantic/webextension/browser_bridge.hpp"
 #include "grab/event.hpp"
 #include "grab/event_descriptor.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 #include "grab/watch.hpp"
+#include "kernel/scheduling/reactor.hpp"
 #include "storage/jsonl_sink.hpp"
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <expected>
 #include <filesystem>
 #include <functional>
 #include <future>
 #include <iostream>
+#include <memory>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <sys/epoll.h>    // NOLINT(misc-include-cleaner): provides EPOLLIN.
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace
 {
 
-    constexpr std::size_t queueCapacity = 8'192U;
-    constexpr int         signalSuccess = 0;
+    constexpr std::size_t   queueCapacity = 8'192U;
+    constexpr int           signalSuccess = 0;
     // POSIX timespec::tv_nsec is specified as long.
     // NOLINTNEXTLINE(google-runtime-int)
-    constexpr long        pollTickNanos         = 300'000'000L;    // 300 ms
-    constexpr int         labelWidth            = 7;               // "browser"
-    constexpr double      millisPerSecond       = 1'000.0;
-    constexpr std::size_t timestampBufferSize   = 16U;
-    constexpr std::size_t detailBufferSize      = 32U;
-    constexpr double      bytesPerKilobyte      = 1'024.0;
-    constexpr double      coalesceWindowSeconds = 0.3;
+    constexpr long          pollTickNanos         = 300'000'000L;    // 300 ms
+    constexpr int           labelWidth            = 7;               // "browser"
+    constexpr double        millisPerSecond       = 1'000.0;
+    constexpr std::size_t   timestampBufferSize   = 16U;
+    constexpr std::size_t   detailBufferSize      = 32U;
+    constexpr double        bytesPerKilobyte      = 1'024.0;
+    constexpr double        coalesceWindowSeconds = 0.3;
+    constexpr int           listenBacklog         = 4;
+    constexpr std::uint32_t epollInEvents         = EPOLLIN;
+    constexpr int           invalidFd             = -1;
 
     // ---- formatting -----------------------------------------------------
 
@@ -136,6 +158,30 @@ namespace
             return "\"" + name + "\"";
         }
         return std::string{ fallback_prefix } + std::to_string( code );
+    }
+
+    constexpr std::string_view tabTitleKey = "tab_title";
+
+    [[nodiscard]]
+    std::string
+    integration_title( const grab::IntegrationEvent& event )
+    {
+        if( !event.title.empty() )
+        {
+            return event.title;
+        }
+        const auto parsed =
+            // NOLINTNEXTLINE(misc-include-cleaner): provided by nlohmann/json.hpp.
+            nlohmann::json::parse( event.json, nullptr, /*allow_exceptions=*/false );
+        if( parsed.is_object() )
+        {
+            if( const auto entry = parsed.find( tabTitleKey );
+                entry != parsed.end() && entry->is_string() )
+            {
+                return entry->get<std::string>();
+            }
+        }
+        return {};
     }
 
     [[nodiscard]]
@@ -341,7 +387,7 @@ namespace
                     }
                     if( event.kind == Kind::AppTabChanged )
                     {
-                        return "tab \"" + app->title + "\" focused";
+                        return "tab \"" + integration_title( *app ) + "\" focused";
                     }
                     return "context updated: \"" + app->detail + "\"";
                 }
@@ -728,6 +774,212 @@ namespace
             std::atomic_bool   scheduled_{ false };
     };
 
+    [[nodiscard]]
+    std::string
+    default_socket_path()
+    {
+        // NOLINTNEXTLINE(concurrency-mt-unsafe): read once before threads spawn.
+        const char*       runtime_dir = std::getenv( "XDG_RUNTIME_DIR" );
+        const std::string base =
+            runtime_dir != nullptr ? std::string{ runtime_dir } : std::string{ "/tmp" };
+        return base + "/grab-event-logger.sock";
+    }
+
+    // Accepts native-messaging connections and hands each to a BrowserBridge
+    // on the session's reactor/bus. Connection state is touched only on the
+    // reactor thread; stop() serializes through a posted fence.
+    class BrowserSocket
+    {
+        public:
+
+            BrowserSocket()                       = default;
+            ~BrowserSocket()                      = default;
+
+            BrowserSocket( const BrowserSocket& ) = delete;
+            BrowserSocket&
+            operator=( const BrowserSocket& ) = delete;
+
+            BrowserSocket( BrowserSocket&& other ) noexcept :
+                path_{ std::move( other.path_ ) },
+                listen_fd_{
+                    std::exchange( other.listen_fd_,
+                                   invalidFd ),
+                },
+                token_{
+                    std::exchange( other.token_,
+                                   0U ),
+                },
+                state_{ std::move( other.state_ ) }
+            {
+            }
+
+            BrowserSocket&
+            operator=( BrowserSocket&& ) = delete;
+
+            [[nodiscard]]
+            static grab::Result<BrowserSocket>
+            open( std::string    path,
+                  grab::Session& session )
+            {
+                sockaddr_un address{};
+                if( path.size() >= sizeof( address.sun_path ) )
+                {
+                    return std::unexpected( grab::Error{
+                        .code       = grab::ErrorCode::InvalidArgument,
+                        .message    = "socket path too long: " + path,
+                        .capability = {},
+                        .target     = {},
+                        .attempts   = {},
+                    } );
+                }
+                const int fd =
+                    ::socket( AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0 );
+                if( fd == invalidFd )
+                {
+                    return std::unexpected( grab::Error{
+                        .code = grab::ErrorCode::InternalFault,
+                        .message =
+                            "socket() failed: " +
+                            // NOLINTNEXTLINE(concurrency-mt-unsafe): diagnostic only.
+                            std::string{ std::strerror( errno ) },
+                        .capability = {},
+                        .target     = {},
+                        .attempts   = {},
+                    } );
+                }
+                address.sun_family = AF_UNIX;
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
+                std::strncpy( address.sun_path,
+                              path.c_str(),
+                              sizeof( address.sun_path ) - 1U );
+                ::unlink( path.c_str() );    // stale socket from a prior run
+                if( ::bind(
+                        fd,
+                        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+                        reinterpret_cast<const sockaddr*>( &address ),
+                        sizeof( address )
+                    ) !=
+                    0 ||
+                    ::listen( fd, listenBacklog ) != 0 )
+                {
+                    const int saved = errno;
+                    ::close( fd );
+                    return std::unexpected( grab::Error{
+                        .code = grab::ErrorCode::InternalFault,
+                        .message =
+                            "bind/listen failed on " +
+                            path +
+                            ": " +
+                            // NOLINTNEXTLINE(concurrency-mt-unsafe): diagnostic only.
+                            std::string{ std::strerror( saved ) },
+                        .capability = {},
+                        .target     = {},
+                        .attempts   = {},
+                    } );
+                }
+
+                BrowserSocket socket;
+                socket.path_        = std::move( path );
+                socket.listen_fd_   = fd;
+                socket.state_       = std::make_shared<State>();
+                auto* const state   = socket.state_.get();
+                auto&       reactor = session.reactor();
+                auto&       bus     = session.bus();
+                socket.token_ =
+                    reactor.add_fd( fd,
+                                    epollInEvents,
+                                    [fd, state, &reactor, &bus]( std::uint32_t )
+                                    {
+                                        accept_pending( fd, *state, reactor, bus );
+                                    } );
+                return socket;
+            }
+
+            void
+            stop( grab::Session& session )
+            {
+                if( listen_fd_ == invalidFd )
+                {
+                    return;
+                }
+                session.reactor().remove_fd( token_ );
+                // Serialize with any in-flight accept callback.
+                std::promise<void> fence;
+                auto               reached = fence.get_future();
+                auto               posted  = session.post(
+                    [this, &fence]
+                    {
+                        for( auto& connection : state_->connections )
+                        {
+                            connection.bridge.stop();
+                            ::close( connection.fd );
+                        }
+                        state_->connections.clear();
+                        fence.set_value();
+                    }
+                );
+                if( posted.has_value() )
+                {
+                    reached.get();
+                }
+                ::close( listen_fd_ );
+                ::unlink( path_.c_str() );
+                listen_fd_ = invalidFd;
+            }
+
+        private:
+
+            struct Connection
+            {
+                    int                                                  fd;
+                    grab::drivers::semantic::webextension::BrowserBridge bridge;
+            };
+
+            struct State
+            {
+                    std::vector<Connection> connections;    // reactor thread only
+            };
+
+            static void
+            accept_pending( int                  listen_fd,
+                            State&               state,
+                            grab::core::Reactor& reactor,
+                            grab::EventBus&      bus )
+            {
+                for( ;; )
+                {
+                    const int fd = ::accept4( listen_fd,
+                                              nullptr,
+                                              nullptr,
+                                              SOCK_NONBLOCK | SOCK_CLOEXEC );
+                    if( fd == invalidFd )
+                    {
+                        return;    // EAGAIN or transient error: wait for next EPOLLIN
+                    }
+                    auto bridge =
+                        grab::drivers::semantic::webextension::BrowserBridge::start(
+                            fd,
+                            reactor,
+                            bus
+                        );
+                    if( !bridge.has_value() )
+                    {
+                        ::close( fd );
+                        continue;
+                    }
+                    state.connections.push_back(
+                        Connection{ .fd = fd, .bridge = std::move( *bridge ) }
+                    );
+                }
+            }
+
+            std::string   path_{};    // NOLINT(readability-redundant-member-init)
+            int           listen_fd_ = invalidFd;
+            std::uint64_t token_     = 0U;
+            std::shared_ptr<State>
+                state_{};    // NOLINT(readability-redundant-member-init)
+    };
+
     // ---- signals --------------------------------------------------------
 
     [[nodiscard]]
@@ -769,14 +1021,83 @@ namespace
 
     // ---- main flow ------------------------------------------------------
 
+    // The live phase: everything that runs while the pump is installed and
+    // observation is on. Producers started here are stopped here on every
+    // path; failures return WITHOUT touching pump/logger teardown, so run()
+    // can always fence the pump before destroying it (the same invariant
+    // mouse_snake_trail routes through sweep_and_hold()).
     [[nodiscard]]
     grab::Result<void>
+    observe_and_log( grab::Session&     session,
+                     EventLogger&       logger,
+                     const std::string& socket_path,
+                     const sigset_t&    signals )    // NOLINT(misc-include-cleaner)
+    {
+        // The owning Session composes input + AT-SPI + tree sources but no
+        // WindowTracker; start one on the session's own reactor and bus
+        // (the public composition seam) so os-category events join the feed.
+        auto tracker =
+            grab::drivers::desktop::x11::WindowTracker::start( nullptr,
+                                                               session.reactor(),
+                                                               session.bus() );
+        if( !tracker.has_value() )
+        {
+            return std::unexpected( std::move( tracker.error() ) );
+        }
+
+        auto browser_socket = BrowserSocket::open( socket_path, session );
+        if( !browser_socket.has_value() )
+        {
+            tracker->stop();
+            return std::unexpected( std::move( browser_socket.error() ) );
+        }
+        std::cout << "event_logger: browser socket at " << socket_path << '\n';
+        std::cout << "event_logger: observing (Ctrl+C to stop)\n";
+        std::cout.flush();
+
+        while( !shutdown_requested( signals ) )
+        {
+            // Bounded staleness: a pointer that stops moving still gets its
+            // final summary within one poll tick.
+            auto ticked = session.post(
+                [&logger]
+                {
+                    logger.flush_pending();
+                }
+            );
+            if( !ticked.has_value() )
+            {
+                logger.remember_error( std::move( ticked.error() ) );
+                break;
+            }
+        }
+
+        browser_socket->stop( session );
+        tracker->stop();
+        return {};
+    }
+
+    [[nodiscard]]
+    grab::Result<void>
+    // NOLINTNEXTLINE(readability-function-size): lifecycle is intentionally linear.
     run( std::span<char*> args )
     {
         std::filesystem::path recording_dir{ "event-log" };
-        if( !args.empty() && std::string_view{ args.front() } != "--socket" )
+        std::string           socket_path = default_socket_path();
+        for( std::size_t index = 0U; index < args.size(); ++index )
         {
-            recording_dir = args.front();
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            const std::string_view arg{ args[index] };
+            if( arg == "--socket" && index + 1U < args.size() )
+            {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                socket_path = args[index + 1U];
+                ++index;
+            }
+            else if( index == 0U )
+            {
+                recording_dir = arg;
+            }
         }
 
         sigset_t signals{};
@@ -833,41 +1154,14 @@ namespace
             return std::unexpected( std::move( observing.error() ) );
         }
 
-        // The owning Session composes input + AT-SPI + tree sources but no
-        // WindowTracker; start one on the session's own reactor and bus
-        // (the public composition seam) so os-category events join the feed.
-        auto tracker =
-            grab::drivers::desktop::x11::WindowTracker::start( nullptr,
-                                                               ( *session )->reactor(),
-                                                               ( *session )->bus() );
-        if( !tracker.has_value() )
-        {
-            return std::unexpected( std::move( tracker.error() ) );
-        }
-
-        std::cout << "event_logger: observing (Ctrl+C to stop)\n";
-        std::cout.flush();
-
-        while( !shutdown_requested( signals ) )
-        {
-            // Bounded staleness: a pointer that stops moving still gets its
-            // final summary within one poll tick.
-            auto ticked = ( *session )
-                              ->post(
-                                  [&logger]
-                                  {
-                                      logger.flush_pending();
-                                  }
-                              );
-            if( !ticked.has_value() )
-            {
-                logger.remember_error( std::move( ticked.error() ) );
-                break;
-            }
-        }
-
-        tracker->stop();
-        auto stopped = pump.stop();
+        // pump/logger are live (install() ran above): from here on, every
+        // exit path must run pump.stop()'s fence before pump/logger are
+        // destroyed, or a queued drain() could touch freed memory. Route
+        // every early return of the live phase through observe_and_log()
+        // instead of returning directly, so that invariant holds
+        // unconditionally (same structure as mouse_snake_trail).
+        auto observed = observe_and_log( **session, logger, socket_path, signals );
+        auto stopped  = pump.stop();
         ( *session )->close();
 
         auto flushed = sink->flush();
@@ -882,6 +1176,10 @@ namespace
                   << " gaps, recording: " << recording_dir.string() << '\n';
         std::cout.flush();
 
+        if( !observed.has_value() )
+        {
+            return observed;
+        }
         if( !stopped.has_value() )
         {
             return stopped;
