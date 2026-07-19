@@ -1162,13 +1162,13 @@ In the shutdown path, stop producers before the pump (spec order):
 cmake --build build -j$(nproc)
 DISPLAY=:97 ./build/examples/event_logger > /tmp/feed.txt & LOGGER=$!
 sleep 1
-DISPLAY=:97 xterm -e sleep 2 &
+DISPLAY=:97 xmessage -timeout 2 smoke &
 sleep 3
 kill -INT $LOGGER; wait $LOGGER
 grep "os      event" /tmp/feed.txt
 ```
 
-Expected: `application "xterm" opened window ...` / `... focused` / `... closed ...` lines.
+Expected: `application "xmessage" opened window ...` / `... focused` / `... closed ...` lines.
 
 - [ ] **Step 3: Commit**
 
@@ -1597,7 +1597,7 @@ Create `examples/event_logger_smoke.sh` (`chmod +x`):
 
 ```bash
 #!/usr/bin/env bash
-# Smoke for examples/event_logger: Xvfb + xterm (os events), xdotool
+# Smoke for examples/event_logger: Xvfb + xmessage (os events), xdotool
 # (input events, skipped if absent), a canned native-messaging frame
 # (browser events), and JSONL assertions. Usage: event_logger_smoke.sh [build-dir]
 set -euo pipefail
@@ -1621,7 +1621,7 @@ DISPLAY="$DISPLAY_NUM" "$BUILD_DIR/examples/event_logger" "$WORK/events" --socke
 LOGGER_PID=$!
 sleep 1
 
-DISPLAY="$DISPLAY_NUM" xterm -e sleep 2 &
+DISPLAY="$DISPLAY_NUM" xmessage -timeout 2 smoke &
 sleep 1
 if command -v xdotool >/dev/null; then
     DISPLAY="$DISPLAY_NUM" xdotool key a click 1 mousemove 100 100 mousemove 500 400
