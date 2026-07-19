@@ -21,3 +21,16 @@ target_link_libraries(event_logger PRIVATE
     grab_driver_webextension
     grab_storage)
 target_compile_features(event_logger PRIVATE cxx_std_23)
+
+add_executable(browser_event_screenshot browser_event_screenshot.cpp)
+target_link_libraries(browser_event_screenshot PRIVATE
+    grab_core
+    grab_kernel
+    grab_session
+    grab_platform_x11
+    grab_driver_x11
+    grab_driver_webextension
+    grab_screen
+    grab_image
+    grab_codec)
+target_compile_features(browser_event_screenshot PRIVATE cxx_std_23)
