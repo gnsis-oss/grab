@@ -15,6 +15,7 @@
 #include "grab/trace.hpp"
 #include "kernel/action/transaction.hpp"
 #include "kernel/events/event_bus.hpp"
+#include "kernel/events/wall_clock.hpp"
 #include "kernel/graph/target_registry.hpp"
 #include "kernel/graph/tree_store.hpp"
 #include "kernel/lifecycle/observation_pump.hpp"
@@ -731,8 +732,9 @@ namespace grab::kernel::lifecycle
             [&binding, &event]( EventKind kind, std::uint64_t previous_active )
         {
             return Event{
-                .kind     = kind,
-                .category = EventCategory::Window,
+                .timestamp = grab::kernel::now_timestamp_s(),
+                .kind      = kind,
+                .category  = EventCategory::Window,
                 .payload =
                     GraphChange{
                                 .node            = event.node.value,

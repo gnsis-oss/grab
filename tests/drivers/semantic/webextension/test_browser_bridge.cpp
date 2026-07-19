@@ -24,23 +24,24 @@
 namespace
 {
 
-    constexpr int              invalidFd            = -1;
-    constexpr int              posixFailure         = -1;
-    constexpr int              posixSuccess         = 0;
-    constexpr int              pipeReadIndex        = 0;
-    constexpr int              pipeWriteIndex       = 1;
-    constexpr std::size_t      pipeFdCount          = 2U;
-    constexpr ssize_t          noBytesWritten       = 0;
-    constexpr std::size_t      frameHeaderBytes     = 4U;
-    constexpr unsigned int     lengthByteOneShift   = 8U;
-    constexpr unsigned int     lengthByteTwoShift   = 16U;
-    constexpr unsigned int     lengthByteThreeShift = 24U;
-    constexpr std::uint32_t    byteMask             = 0XFFU;
-    constexpr std::size_t      subscriptionDepth    = 32U;
-    constexpr auto             threadReadyTimeout   = std::chrono::seconds{ 2 };
-    constexpr auto             registrationTimeout  = std::chrono::seconds{ 2 };
-    constexpr auto             eventTimeout         = std::chrono::seconds{ 2 };
-    constexpr auto             pollInterval         = std::chrono::milliseconds{ 10 };
+    constexpr int              invalidFd             = -1;
+    constexpr int              posixFailure          = -1;
+    constexpr int              posixSuccess          = 0;
+    constexpr int              pipeReadIndex         = 0;
+    constexpr int              pipeWriteIndex        = 1;
+    constexpr std::size_t      pipeFdCount           = 2U;
+    constexpr ssize_t          noBytesWritten        = 0;
+    constexpr std::size_t      frameHeaderBytes      = 4U;
+    constexpr unsigned int     lengthByteOneShift    = 8U;
+    constexpr unsigned int     lengthByteTwoShift    = 16U;
+    constexpr unsigned int     lengthByteThreeShift  = 24U;
+    constexpr std::uint32_t    byteMask              = 0XFFU;
+    constexpr std::size_t      subscriptionDepth     = 32U;
+    constexpr auto             threadReadyTimeout    = std::chrono::seconds{ 2 };
+    constexpr auto             registrationTimeout   = std::chrono::seconds{ 2 };
+    constexpr auto             eventTimeout          = std::chrono::seconds{ 2 };
+    constexpr auto             pollInterval          = std::chrono::milliseconds{ 10 };
+    constexpr double           timestampSlackSeconds = 60.0;
     constexpr std::string_view tabSwitchedJson =
         R"({"type":"browser.tab_switched","tab_title":"Gmail","prev_tab_title":"Docs","app":"chrome","pid":"42"})";
     constexpr std::string_view secondTabSwitchedJson =
@@ -313,6 +314,12 @@ TEST( BrowserBridge,
 
     ASSERT_TRUE( event.has_value() ) << event.error().message;
     EXPECT_EQ( event->kind, grab::EventKind::AppTabChanged );
+    const double now_s = std::chrono::duration<double>(
+                             std::chrono::system_clock::now().time_since_epoch()
+    )
+                             .count();
+    EXPECT_GT( event->timestamp, now_s - timestampSlackSeconds );
+    EXPECT_LT( event->timestamp, now_s + timestampSlackSeconds );
     EXPECT_EQ( event->category, grab::EventCategory::Integration );
     const auto* payload = std::get_if<grab::IntegrationEvent>( &event->payload );
     ASSERT_NE( payload, nullptr );

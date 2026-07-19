@@ -14,10 +14,18 @@
 
 // clang-format off
 #include <gtest/gtest.h>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <variant>
 // clang-format on
+
+namespace
+{
+
+    constexpr double timestampSlackSeconds = 60.0;
+
+}    // namespace
 
 // NOLINTBEGIN(readability-trailing-comma)
 TEST( SessionCore,
@@ -43,6 +51,12 @@ TEST( SessionCore,
     const auto event = watch.try_pop();
     ASSERT_TRUE( event.has_value() );
     EXPECT_EQ( event->kind, grab::EventKind::NodeAdded );
+    const double now_s = std::chrono::duration<double>(
+                             std::chrono::system_clock::now().time_since_epoch()
+    )
+                             .count();
+    EXPECT_GT( event->timestamp, now_s - timestampSlackSeconds );
+    EXPECT_LT( event->timestamp, now_s + timestampSlackSeconds );
     EXPECT_EQ( event->category, grab::EventCategory::Window );
     EXPECT_EQ( event->after_revision, core->store().revision() );
     EXPECT_EQ( event->before_revision, 0U );

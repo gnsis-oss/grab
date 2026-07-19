@@ -4,6 +4,7 @@
 #include "grab/payload_fields.hpp"
 #include "grab/result.hpp"
 #include "kernel/events/event_bus.hpp"
+#include "kernel/events/wall_clock.hpp"
 #include "kernel/scheduling/reactor.hpp"
 
 #include <algorithm>
@@ -227,11 +228,13 @@ namespace grab::drivers::semantic::webextension
                                 std::string_view      original_json )
         {
             return grab::Event{
-                .timestamp = timestamp_field( object ).value_or( 0.0 ),
-                .sequence  = 0U,
-                .kind      = kind,
-                .category  = grab::category_of( kind ),
-                .payload   = grab::Payload{ grab::IntegrationEvent{
+                .timestamp = timestamp_field( object ).value_or(
+                    grab::kernel::now_timestamp_s()
+                ),
+                .sequence = 0U,
+                .kind     = kind,
+                .category = grab::category_of( kind ),
+                .payload  = grab::Payload{ grab::IntegrationEvent{
                     .app =
                         field_or_empty( object, grab::field_name( PayloadField::App ) ),
                     .title  = field_or_empty( object,
