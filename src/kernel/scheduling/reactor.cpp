@@ -479,19 +479,19 @@ namespace grab::core
             {
                 case PendingKind::AddFd :
                     {
-                        if( auto result = add_fd_on_reactor( op ); !result.has_value() )
-                        {
-                            return result;
-                        }
+                        // A client may close its fd (e.g. an immediate stop
+                        // after start) between enqueueing the registration
+                        // and this drain. That loses the one registration —
+                        // never the shared loop: every other client's fence
+                        // and fd would silently hang if run() exited here.
+                        static_cast<void>( add_fd_on_reactor( op ) );
                         break;
                     }
                 case PendingKind::RemoveFd :
                     {
-                        if( auto result = remove_fd_on_reactor( op.token );
-                            !result.has_value() )
-                        {
-                            return result;
-                        }
+                        // Same containment: a failed deregistration affects
+                        // only that token.
+                        static_cast<void>( remove_fd_on_reactor( op.token ) );
                         break;
                     }
                 case PendingKind::AddTimer :
