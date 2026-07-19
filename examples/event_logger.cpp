@@ -1,9 +1,10 @@
 // event_logger — live terminal feed of everything grab observes.
 //
-//   ./event_logger [recording-dir] [--socket <path>]
+//   ./event_logger [recording-dir] [--socket <path>] [--mouse]
 //
 // One line per event: "HH:MM:SS.mmm -> <category> event -> <description>".
-// Runs until Ctrl+C.
+// Runs until Ctrl+C. Mouse traffic (moves, scrolls, clicks) is hidden from
+// the feed unless --mouse is passed; the JSONL recording always keeps it.
 //
 // Browser wiring: register a native-messaging host in your browser whose
 // executable forwards stdio to this socket, e.g.
@@ -714,6 +715,15 @@ namespace
                 const auto& event = std::get<grab::Event>( item );
                 ++observed_;
                 record( event );
+                // Mouse traffic (moves, scrolls, clicks) dominates a live
+                // desktop; the feed hides it unless --mouse was passed. The
+                // JSONL recording above stays complete either way.
+                if( !show_mouse_ && ( event.kind ==
+                                      grab::EventKind::MouseMove ||
+                                      event.kind == grab::EventKind::MouseClick ) )
+                {
+                    return;
+                }
                 if( event.kind == grab::EventKind::MouseMove )
                 {
                     // Motion interrupts a pending scroll summary (and vice
@@ -818,6 +828,12 @@ namespace
                 sink_ = sink;
             }
 
+            void
+            set_show_mouse( bool show_mouse ) noexcept
+            {
+                show_mouse_ = show_mouse;
+            }
+
             // Recording must never kill the live feed: first failure warns
             // once on stderr, stops recording, and is reported at exit.
             void
@@ -846,6 +862,7 @@ namespace
             std::size_t                gaps_        = 0U;
             grab::storage::JsonlSink*  sink_        = nullptr;
             bool                       sink_failed_ = false;
+            bool                       show_mouse_  = false;
             mutable std::mutex         error_mutex_;
             std::optional<grab::Error> error_;
     };
@@ -1258,6 +1275,7 @@ namespace
     {
         std::filesystem::path recording_dir{ "event-log" };
         std::string           socket_path = default_socket_path();
+        bool                  show_mouse  = false;
         for( std::size_t index = 0U; index < args.size(); ++index )
         {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
@@ -1267,6 +1285,10 @@ namespace
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 socket_path = args[index + 1U];
                 ++index;
+            }
+            else if( arg == "--mouse" )
+            {
+                show_mouse = true;
             }
             else if( index == 0U )
             {
@@ -1305,6 +1327,13 @@ namespace
             return std::unexpected( std::move( sink.error() ) );
         }
         logger.attach_sink( &*sink );
+        logger.set_show_mouse( show_mouse );
+        if( !show_mouse )
+        {
+            std::cout << "event_logger: mouse events hidden"
+                         " (pass --mouse to show; still recorded)\n";
+            std::cout.flush();
+        }
 
         grab::SubscriptionScope scope;    // empty scope + wildcard filter = all kinds
         auto                    subscription =

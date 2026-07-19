@@ -19,7 +19,7 @@ Xvfb "$DISPLAY_NUM" -noreset -screen 0 1280x800x24 &
 XVFB_PID=$!
 sleep 1
 
-DISPLAY="$DISPLAY_NUM" "$BUILD_DIR/examples/event_logger" "$WORK/events" --socket "$SOCK" > "$FEED" &
+DISPLAY="$DISPLAY_NUM" "$BUILD_DIR/examples/event_logger" "$WORK/events" --socket "$SOCK" --mouse > "$FEED" &
 LOGGER_PID=$!
 sleep 1
 
