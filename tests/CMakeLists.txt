@@ -10,6 +10,7 @@ add_executable(grab_core_tests
     cli/input_command_test.cpp
     cli/overlay_command_test.cpp
     cli/command_table_test.cpp
+    config/test_load.cpp
     core/test_capability.cpp
     core/test_command_descriptor.cpp
     core/test_capture.cpp
@@ -217,9 +218,9 @@ option(GRAB_TEST_PROVISION_XVFB
     "Auto-provision Xvfb displays for X-backed tests via a CTest fixture" ON)
 
 if(GRAB_TEST_PROVISION_XVFB)
-    gtest_discover_tests(grab_core_tests TEST_FILTER "Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference")
+    gtest_discover_tests(grab_core_tests TEST_FILTER "Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference:Config*.*")
     gtest_discover_tests(grab_core_tests
-        TEST_FILTER "-Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference"
+        TEST_FILTER "-Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference:Config*.*"
         PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
     add_test(NAME grab_xvfb_setup
         COMMAND ${CMAKE_COMMAND} -E env XVFB_PIDFILE=${CMAKE_BINARY_DIR}/grab-xvfb.pids

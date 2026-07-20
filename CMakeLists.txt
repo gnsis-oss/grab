@@ -38,6 +38,7 @@ add_library(grab_vendor_l0 INTERFACE)
 target_include_directories(grab_vendor_l0 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/vendor/l0)
 
 add_library(grab_core STATIC
+    src/config/load.cpp
     src/spi/monitor.cpp
     src/kernel/lifecycle/context.cpp
     src/kernel/routing/doctor.cpp

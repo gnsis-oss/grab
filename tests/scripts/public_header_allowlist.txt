@@ -4,6 +4,7 @@ active_kind_probe.hpp
 capability.hpp
 capture.hpp
 command_descriptor.hpp
+config.hpp
 context.hpp
 drag.hpp
 enum_table.hpp
