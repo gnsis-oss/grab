@@ -1,7 +1,8 @@
 # browser_event_screenshot example — design
 
 **Date:** 2026-07-19
-**Status:** approved
+**Status:** retired — example removed 2026-07-20 (superseded by the JSON
+config feature, see `2026-07-20-json-config-design.md`); kept as a record
 **Deliverable:** `examples/browser_event_screenshot.cpp` — capture a full-display
 screenshot on every browser event and save it as a timestamped PNG — plus a
 shared `examples/browser_socket.hpp` factored out of `event_logger`.
