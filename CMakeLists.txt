@@ -38,6 +38,7 @@ add_library(grab_vendor_l0 INTERFACE)
 target_include_directories(grab_vendor_l0 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/vendor/l0)
 
 add_library(grab_core STATIC
+    src/config/batch_manifest.cpp
     src/config/environment.cpp
     src/config/load.cpp
     src/config/pattern.cpp
@@ -127,8 +128,9 @@ target_compile_features(grab_screen PUBLIC cxx_std_23)
 
 add_library(grab_image STATIC
     src/image/compare.cpp
+    src/image/compare_dirs.cpp
 )
-target_link_libraries(grab_image PUBLIC grab_core)
+target_link_libraries(grab_image PUBLIC grab_core PRIVATE grab_codec)
 target_include_directories(grab_image PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_include_directories(grab_image PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_compile_features(grab_image PUBLIC cxx_std_23)

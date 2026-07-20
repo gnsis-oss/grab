@@ -10,6 +10,7 @@ add_executable(grab_core_tests
     cli/input_command_test.cpp
     cli/overlay_command_test.cpp
     cli/command_table_test.cpp
+    config/test_batch_manifest.cpp
     config/test_environment.cpp
     config/test_load.cpp
     config/test_pattern.cpp
@@ -34,6 +35,7 @@ add_executable(grab_core_tests
     core/test_prober.cpp
     core/test_permission.cpp
     core/test_process_ref.cpp
+    core/test_process_wait.cpp
     core/test_monitor.cpp
     core/test_overlay_types.cpp
     core/test_registry.cpp
@@ -50,7 +52,10 @@ add_executable(grab_core_tests
     codec/test_image.cpp
     codec/test_png.cpp
     screen/test_screen.cpp
+    screen/test_enumerate_fallback.cpp
+    screen/test_capture_window_id.cpp
     image/test_compare.cpp
+    image/test_compare_dirs.cpp
     input/test_keymap.cpp
     input/test_input.cpp
     event/test_event_descriptor.cpp
