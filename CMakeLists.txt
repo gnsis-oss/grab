@@ -195,6 +195,7 @@ target_include_directories(grab_platform_x11 PRIVATE ${CMAKE_CURRENT_LIST_DIR}/s
 target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 
 add_library(grab_driver_x11 STATIC
+    src/drivers/desktop/x11/config_watch.cpp
     src/drivers/desktop/x11/coordinate_authority.cpp
     src/drivers/desktop/x11/enumerate.cpp
     src/drivers/desktop/x11/overlay_delegate.cpp
@@ -299,10 +300,11 @@ add_executable(grab_cli
     src/frontends/cli/input_command.cpp
     src/frontends/cli/overlay_command.cpp
     src/frontends/cli/session_command.cpp
+    src/frontends/cli/watch_daemon.cpp
 )
 set_target_properties(grab_cli PROPERTIES OUTPUT_NAME grab)
 target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_service
-    grab_client grab_input_x11 grab_kernel grab_platform_x11 grab_session)
+    grab_client grab_driver_x11 grab_input_x11 grab_kernel grab_platform_x11 grab_session)
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 

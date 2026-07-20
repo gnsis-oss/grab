@@ -7,8 +7,10 @@ add_test(NAME grab_public_header_allowlist
 add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/input_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/overlay_command.cpp
+    ${CMAKE_SOURCE_DIR}/src/frontends/cli/watch_daemon.cpp
     cli/input_command_test.cpp
     cli/overlay_command_test.cpp
+    cli/watch_daemon_test.cpp
     cli/command_table_test.cpp
     config/test_batch_manifest.cpp
     config/test_environment.cpp
@@ -149,6 +151,7 @@ target_include_directories(grab_driver_x11_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/tests)
 
 add_executable(grab_integration_tests
+    integration/test_config_watch.cpp
     integration/test_exit_gate.cpp
     integration/test_overlay_ring3.cpp
 )
@@ -157,6 +160,9 @@ target_link_libraries(grab_integration_tests PRIVATE
     grab_kernel
     grab_driver_x11
     grab_screen
+    grab_input
+    grab_input_x11
+    grab_session
     grab_transport
     grab_compat_eventgrab_v1
     PkgConfig::GRAB_XCB_RANDR
@@ -241,6 +247,10 @@ if(GRAB_TEST_PROVISION_XVFB)
     add_test(NAME grab_xvfb_cleanup
         COMMAND ${CMAKE_COMMAND} -E env XVFB_PIDFILE=${CMAKE_BINARY_DIR}/grab-xvfb.pids
                 sh ${CMAKE_CURRENT_SOURCE_DIR}/xvfb_fixture.sh stop)
+    add_test(NAME grab_config_watch_smoke
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/config_watch_smoke.sh
+                ${CMAKE_BINARY_DIR})
+    set_tests_properties(grab_config_watch_smoke PROPERTIES TIMEOUT 120)
     set_tests_properties(grab_xvfb_cleanup PROPERTIES FIXTURES_CLEANUP grab_xvfb)
     gtest_discover_tests(grab_integration_tests
         DISCOVERY_MODE PRE_TEST

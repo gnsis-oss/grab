@@ -2,6 +2,7 @@
 #include "client/loopback_transport.hpp"
 #include "client/unix_socket_transport.hpp"
 #include "codec/png.hpp"
+#include "drivers/desktop/x11/config_watch.hpp"
 #include "drivers/desktop/x11/window_match.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
@@ -9,9 +10,11 @@
 #include "frontends/cli/input_command.hpp"
 #include "frontends/cli/overlay_command.hpp"
 #include "frontends/cli/session_command.hpp"
+#include "frontends/cli/watch_daemon.hpp"
 #include "frontends/grpc/daemon.hpp"
 #include "grab/capture.hpp"
 #include "grab/command_descriptor.hpp"
+#include "grab/config.hpp"
 #include "grab/event.hpp"
 #include "grab/geometry/rectangle.hpp"
 #include "grab/image.hpp"
@@ -35,6 +38,7 @@
 #include "notify/notifier.hpp"
 
 #include <charconv>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -71,8 +75,10 @@ namespace
     constexpr char          dimensionSeparator      = 'x';
     constexpr char          upperDimensionSeparator = 'X';
     constexpr std::uint64_t noDiffPixels            = 0U;
+    constexpr std::uint32_t minimumWatchIntervalMs  = 20U;
     constexpr std::time_t   signalPollSeconds       = 0;
     constexpr auto signalPollNanoseconds = decltype( timespec{}.tv_nsec ){ 100'000'000 };
+    constexpr auto watchStatusInterval   = std::chrono::seconds{ 1 };
 
     enum class CaptureTarget : std::uint8_t
     {
@@ -117,6 +123,20 @@ namespace
             std::filesystem::path output;
             bool                  has_window = false;
             bool                  has_output = false;
+    };
+
+    struct ConfigWatchOptions
+    {
+            std::vector<std::filesystem::path>   config_paths;
+            std::optional<std::uint32_t>         interval_ms;
+            std::optional<std::filesystem::path> output;
+            bool                                 daemon = false;
+    };
+
+    struct ActiveConfigWatcher
+    {
+            std::string                 config_path;
+            grab::screen::ConfigWatcher watcher;
     };
 
     struct TypeOptions
@@ -220,6 +240,10 @@ namespace
                             stderr );
         ( void )std::fputs( "       grab batch --window WMCLASS --out FILE.png [...]\n"
                             "       grab compare A.png B.png [--notify]\n"
+                            "       grab watch start CONFIG... [--daemon] "
+                            "[--interval MS] [--output DIR]\n"
+                            "       grab watch stop\n"
+                            "       grab watch status [--json]\n"
                             "       grab watch --window WMCLASS --out FILE.png\n"
                             "       grab overlay trail [--color RRGGBB] "
                             "[--injected-color RRGGBB] [--fade-ms N] [--width F]\n"
@@ -290,6 +314,29 @@ namespace
         }
 
         return static_cast<std::uint16_t>( value );
+    }
+
+    [[nodiscard]]
+    grab::Result<std::uint32_t>
+    parse_watch_interval( std::string_view text )
+    {
+        std::uint64_t     value  = 0U;
+        const auto* const begin  = text.begin();
+        const auto* const end    = text.end();
+        const auto        parsed = std::from_chars( begin, end, value );
+        if( text.empty() ||
+            parsed.ec !=
+            std::errc{} ||
+            parsed.ptr !=
+            end ||
+            value <
+            minimumWatchIntervalMs ||
+            value > std::numeric_limits<std::uint32_t>::max() )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "--interval must be in range 20..4294967295" );
+        }
+        return static_cast<std::uint32_t>( value );
     }
 
     [[nodiscard]]
@@ -1213,6 +1260,86 @@ namespace
     }
 
     [[nodiscard]]
+    grab::Result<ConfigWatchOptions>
+    parse_config_watch_options( std::span<char*> args )
+    {
+        constexpr std::string_view daemonFlag{ "--daemon" };
+        constexpr std::string_view intervalFlag{ "--interval" };
+        constexpr std::string_view outputFlag{ "--output" };
+
+        ConfigWatchOptions         options;
+        auto                       current = args.begin();
+        while( current != args.end() )
+        {
+            const std::string_view argument = *current;
+            ++current;
+            if( argument == daemonFlag )
+            {
+                if( options.daemon )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "watch start accepts one --daemon" );
+                }
+                options.daemon = true;
+                continue;
+            }
+            if( argument == intervalFlag )
+            {
+                if( options.interval_ms.has_value() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "watch start accepts one --interval" );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--interval requires a value" );
+                }
+                auto interval = parse_watch_interval( *current );
+                if( !interval.has_value() )
+                {
+                    return std::unexpected( std::move( interval.error() ) );
+                }
+                options.interval_ms = *interval;
+                ++current;
+                continue;
+            }
+            if( argument == outputFlag )
+            {
+                if( options.output.has_value() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "watch start accepts one --output" );
+                }
+                if( current ==
+                    args.end() ||
+                    std::string_view{ *current }.empty() ||
+                    std::string_view{ *current }.starts_with( '-' ) )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--output requires a directory" );
+                }
+                options.output = std::filesystem::path{ *current };
+                ++current;
+                continue;
+            }
+            if( argument.starts_with( '-' ) )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "unknown option for watch start: " +
+                                       std::string{ argument } );
+            }
+            if( argument.empty() )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "watch config path must not be empty" );
+            }
+            options.config_paths.emplace_back( argument );
+        }
+        return options;
+    }
+
+    [[nodiscard]]
     grab::Result<grab::Image>
     capture_image( grab::Screen&         screen,
                    const CaptureOptions& options )
@@ -1714,8 +1841,198 @@ namespace
         return diff->diff_pixels == noDiffPixels ? 0 : runtimeError;
     }
 
+    [[nodiscard]]
+    grab::Result<std::vector<grab::config::Config>>
+    load_watch_configs( const ConfigWatchOptions& options )
+    {
+        if( options.config_paths.empty() )
+        {
+            return grab::config::resolve( std::span<const std::string_view>{} );
+        }
+
+        std::vector<grab::config::Config> configs;
+        configs.reserve( options.config_paths.size() );
+        for( const auto& path : options.config_paths )
+        {
+            auto config = grab::config::load( path );
+            if( !config.has_value() )
+            {
+                return std::unexpected( std::move( config.error() ) );
+            }
+            configs.push_back( std::move( *config ) );
+        }
+        return configs;
+    }
+
+    [[nodiscard]]
+    grab::Result<void>
+    apply_watch_overrides( std::vector<grab::config::Config>& configs,
+                           const ConfigWatchOptions&          options )
+    {
+        for( auto& config : configs )
+        {
+            if( !config.watch.has_value() )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   config.source.string() +
+                                       ":/watch: watch section is required" );
+            }
+            if( options.interval_ms.has_value() )
+            {
+                config.watch->interval_ms = *options.interval_ms;
+            }
+            if( options.output.has_value() )
+            {
+                config.watch->output = *options.output;
+            }
+        }
+        return {};
+    }
+
+    void
+    stop_config_watchers( std::vector<ActiveConfigWatcher>& watchers )
+    {
+        for( auto& active : watchers )
+        {
+            active.watcher.stop();
+        }
+    }
+
+    [[nodiscard]]
+    grab::Result<std::vector<ActiveConfigWatcher>>
+    start_config_watchers( const std::vector<grab::config::Config>& configs )
+    {
+        std::vector<ActiveConfigWatcher> watchers;
+        watchers.reserve( configs.size() );
+        for( const auto& config : configs )
+        {
+            auto watcher = grab::screen::ConfigWatcher::start( config );
+            if( !watcher.has_value() )
+            {
+                stop_config_watchers( watchers );
+                return std::unexpected( std::move( watcher.error() ) );
+            }
+            watchers.push_back( ActiveConfigWatcher{
+                .config_path = config.source.string(),
+                .watcher     = std::move( *watcher ),
+            } );
+        }
+        return watchers;
+    }
+
+    [[nodiscard]]
+    grab::Result<void>
+    write_config_watch_status( const grab::cli::DaemonPaths&           paths,
+                               const std::vector<ActiveConfigWatcher>& watchers )
+    {
+        std::vector<std::pair<std::string, grab::screen::WatchStats>> snapshots;
+        snapshots.reserve( watchers.size() );
+        for( const auto& active : watchers )
+        {
+            snapshots.emplace_back( active.config_path, active.watcher.stats() );
+        }
+        return grab::cli::write_status( paths, snapshots );
+    }
+
     int
-    run_watch_command( std::span<char*> args )
+    run_config_watch_start( std::span<char*> args )
+    {
+        auto options = parse_config_watch_options( args );
+        if( !options.has_value() )
+        {
+            print_error( options.error().message );
+            print_usage();
+            return usageError;
+        }
+
+        auto configs = load_watch_configs( *options );
+        if( !configs.has_value() )
+        {
+            print_fatal( configs.error().message.c_str() );
+            return runtimeError;
+        }
+        auto overridden = apply_watch_overrides( *configs, *options );
+        if( !overridden.has_value() )
+        {
+            print_fatal( overridden.error().message.c_str() );
+            return runtimeError;
+        }
+
+        sigset_t signals{};
+        if( !configure_daemon_signal_mask( signals ) )
+        {
+            print_fatal( "failed to configure config watch signal handling" );
+            return runtimeError;
+        }
+
+        const auto daemon_paths = grab::cli::DaemonPaths::standard();
+        if( options->daemon )
+        {
+            auto detached = grab::cli::daemonize( daemon_paths );
+            if( !detached.has_value() )
+            {
+                restore_daemon_signal_mask( signals );
+                print_fatal( detached.error().message.c_str() );
+                return runtimeError;
+            }
+        }
+
+        auto watchers = start_config_watchers( *configs );
+        if( !watchers.has_value() )
+        {
+            restore_daemon_signal_mask( signals );
+            print_fatal( watchers.error().message.c_str() );
+            return runtimeError;
+        }
+
+        if( !options->daemon )
+        {
+            ( void )std::fputs( "watching configured captures; press Ctrl-C to stop\n",
+                                stdout );
+        }
+
+        bool        status_failed = false;
+        std::string status_failure;
+        auto        next_status = std::chrono::steady_clock::now();
+        if( options->daemon )
+        {
+            auto status = write_config_watch_status( daemon_paths, *watchers );
+            if( !status.has_value() )
+            {
+                status_failed  = true;
+                status_failure = status.error().message;
+            }
+            next_status += watchStatusInterval;
+        }
+
+        while( !status_failed && !watch_signal_pending( signals ) )
+        {
+            if( !options->daemon || std::chrono::steady_clock::now() < next_status )
+            {
+                continue;
+            }
+            auto status = write_config_watch_status( daemon_paths, *watchers );
+            if( !status.has_value() )
+            {
+                status_failed  = true;
+                status_failure = status.error().message;
+                break;
+            }
+            next_status = std::chrono::steady_clock::now() + watchStatusInterval;
+        }
+
+        stop_config_watchers( *watchers );
+        restore_daemon_signal_mask( signals );
+        if( status_failed )
+        {
+            print_fatal( status_failure.c_str() );
+            return runtimeError;
+        }
+        return 0;
+    }
+
+    int
+    run_legacy_watch_command( std::span<char*> args )
     {
         auto options = parse_watch_options( args );
         if( !options.has_value() )
@@ -1823,6 +2140,62 @@ namespace
 
         print_watch_success( captured );
         return 0;
+    }
+
+    int
+    run_watch_command( std::span<char*> args )
+    {
+        constexpr std::string_view startCommand{ "start" };
+        constexpr std::string_view stopCommand{ "stop" };
+        constexpr std::string_view statusCommand{ "status" };
+        constexpr std::string_view jsonFlag{ "--json" };
+
+        if( args.empty() )
+        {
+            print_error( "watch requires start, stop, status, or legacy options" );
+            print_usage();
+            return usageError;
+        }
+
+        const std::string_view command = args.front();
+        if( command.starts_with( '-' ) )
+        {
+            return run_legacy_watch_command( args );
+        }
+        if( command == startCommand )
+        {
+            return run_config_watch_start( args.subspan( 1 ) );
+        }
+        if( command == stopCommand )
+        {
+            if( args.size() != 1U )
+            {
+                print_error( "usage: grab watch stop" );
+                return usageError;
+            }
+            return grab::cli::run_watch_stop( grab::cli::DaemonPaths::standard() );
+        }
+        if( command == statusCommand )
+        {
+            if( args.size() == 1U )
+            {
+                return grab::cli::run_watch_status( grab::cli::DaemonPaths::standard(),
+                                                    false );
+            }
+            if( args.size() ==
+                2U &&
+                std::string_view{ args.subspan( 1 ).front() } == jsonFlag )
+            {
+                return grab::cli::run_watch_status( grab::cli::DaemonPaths::standard(),
+                                                    true );
+            }
+            print_error( "usage: grab watch status [--json]" );
+            return usageError;
+        }
+
+        print_error( "unknown watch command: " + std::string{ command } );
+        print_usage();
+        return usageError;
     }
 
     int
