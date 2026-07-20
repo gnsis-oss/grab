@@ -5,6 +5,7 @@
 #include <chrono>
 #include <compare>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -84,6 +85,11 @@ namespace grab
             bool
             alive() const;
 
+            // Reaps one exit status. A zero timeout is a non-blocking probe.
+            [[nodiscard]]
+            Result<int>
+            wait( std::chrono::milliseconds timeout );
+
             [[nodiscard]]
             Result<void>
             terminate( std::chrono::nanoseconds grace );
@@ -94,9 +100,12 @@ namespace grab
                           std::int64_t  pid,
                           std::uint64_t start_token ) noexcept;
 
-            int           pidfd_{ -1 };
-            std::int64_t  pid_{ -1 };
-            std::uint64_t start_token_{};
+            int                pidfd_{ -1 };
+            std::int64_t       pid_{ -1 };
+            std::uint64_t      start_token_{};
+            // terminate() preserves its reaped status for one later wait().
+            std::optional<int> pending_wait_status_;
+            bool               reaped_{};
     };
 
 }    // namespace grab

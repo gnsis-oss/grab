@@ -13,6 +13,7 @@
 #include <iterator>
 #include <limits>
 #include <linux/sched.h>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <string>
@@ -207,11 +208,15 @@ namespace grab
             {
                 return PidfdState::Running;
             }
-            if( ( descriptor.revents & POLLNVAL ) != 0 )
+            if( ( descriptor.revents & ( POLLNVAL | POLLERR ) ) != 0 )
             {
                 return PidfdState::Error;
             }
-            return PidfdState::Exited;
+            if( ( descriptor.revents & ( POLLIN | POLLHUP ) ) != 0 )
+            {
+                return PidfdState::Exited;
+            }
+            return PidfdState::Error;
         }
 
         [[nodiscard]]
@@ -229,7 +234,7 @@ namespace grab
         // NOLINTBEGIN(misc-include-cleaner): these POSIX types and constants are
         // provided through the documented platform headers above.
         [[nodiscard]]
-        Result<void>
+        Result<int>
         reap_pidfd( int pidfd )
         {
             siginfo_t process_info{};
@@ -246,12 +251,16 @@ namespace grab
                 }
             }
 
-            if( wait_result == posixFailure && errno != ECHILD )
+            if( wait_result == posixFailure )
             {
+                if( errno == ECHILD )
+                {
+                    return ownership_failure( "process has already been reaped" );
+                }
                 return fail( ErrorCode::ProviderFailed,
                              posix_message( "waitid(P_PIDFD)", errno ) );
             }
-            return {};
+            return process_info.si_status;
         }
 
         void
@@ -402,7 +411,11 @@ namespace grab
         pid_( std::exchange( other.pid_,
                              -1 ) ),
         start_token_( std::exchange( other.start_token_,
-                                     0U ) )
+                                     0U ) ),
+        pending_wait_status_( std::exchange( other.pending_wait_status_,
+                                             std::nullopt ) ),
+        reaped_( std::exchange( other.reaped_,
+                                false ) )
     {
     }
 
@@ -419,6 +432,9 @@ namespace grab
             pidfd_       = std::exchange( other.pidfd_, posixFailure );
             pid_         = std::exchange( other.pid_, -1 );
             start_token_ = std::exchange( other.start_token_, 0U );
+            pending_wait_status_ =
+                std::exchange( other.pending_wait_status_, std::nullopt );
+            reaped_ = std::exchange( other.reaped_, false );
         }
         return *this;
     }
@@ -557,9 +573,7 @@ namespace grab
             !is_direct_child( *second_identity ) ||
             first_identity->start_token !=
             second_identity->start_token ||
-            is_dead_state( first_identity->state ) ||
-            is_dead_state( second_identity->state ) ||
-            state != PidfdState::Running )
+            ( state != PidfdState::Running && state != PidfdState::Exited ) )
         {
             if( state == PidfdState::Exited )
             {
@@ -569,9 +583,7 @@ namespace grab
             {
                 clean_spawn_with_pidfd( pidfd.get() );
             }
-            return ownership_failure(
-                "spawned child is not live with a stable identity"
-            );
+            return ownership_failure( "spawned child does not have a stable identity" );
         }
 
         return OwnedProcess{
@@ -640,6 +652,50 @@ namespace grab
         return pidfd_ != posixFailure && poll_pidfd_now( pidfd_ ) == PidfdState::Running;
     }
 
+    Result<int>
+    OwnedProcess::wait( std::chrono::milliseconds timeout )
+    {
+        if( pidfd_ == posixFailure )
+        {
+            return ownership_failure( "process handle is empty" );
+        }
+        if( pending_wait_status_.has_value() )
+        {
+            const int status = *pending_wait_status_;
+            pending_wait_status_.reset();
+            return status;
+        }
+        if( reaped_ )
+        {
+            return ownership_failure( "process has already been reaped" );
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto maximum_timeout =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::time_point::max() - now
+            );
+        const auto bounded_timeout =
+            std::clamp( timeout, std::chrono::milliseconds::zero(), maximum_timeout );
+        const auto state = wait_until( pidfd_, now + bounded_timeout );
+        if( state == PidfdState::Running )
+        {
+            return fail( ErrorCode::DeadlineExceeded, "process wait timed out" );
+        }
+        if( state == PidfdState::Error )
+        {
+            return fail( ErrorCode::ProviderFailed, "poll(pidfd) failed" );
+        }
+
+        auto status = reap_pidfd( pidfd_ );
+        if( !status.has_value() )
+        {
+            return std::unexpected( std::move( status.error() ) );
+        }
+        reaped_ = true;
+        return *status;
+    }
+
     Result<void>
     // NOLINTNEXTLINE(readability-make-member-function-const): signals and reaps the
     // owned child.
@@ -650,13 +706,25 @@ namespace grab
             return ownership_failure( "process identity no longer matches" );
         }
 
+        const auto reap_and_cache_status = [this]() -> Result<void>
+        {
+            auto status = reap_pidfd( pidfd_ );
+            if( !status.has_value() )
+            {
+                return std::unexpected( std::move( status.error() ) );
+            }
+            pending_wait_status_ = *status;
+            reaped_              = true;
+            return {};
+        };
+
         const int term_result =
             ::pidfd_send_signal( pidfd_, SIGTERM, nullptr, noPidfdFlags );
         if( term_result == posixFailure )
         {
             if( errno == ESRCH && poll_pidfd_now( pidfd_ ) == PidfdState::Exited )
             {
-                return reap_pidfd( pidfd_ );
+                return reap_and_cache_status();
             }
             return fail( ErrorCode::ProviderFailed,
                          posix_message( "pidfd_send_signal(SIGTERM)", errno ) );
@@ -672,7 +740,7 @@ namespace grab
         const auto state    = wait_until( pidfd_, deadline );
         if( state == PidfdState::Exited )
         {
-            return reap_pidfd( pidfd_ );
+            return reap_and_cache_status();
         }
         if( state == PidfdState::Error )
         {
@@ -683,7 +751,7 @@ namespace grab
         {
             if( poll_pidfd_now( pidfd_ ) == PidfdState::Exited )
             {
-                return reap_pidfd( pidfd_ );
+                return reap_and_cache_status();
             }
             return ownership_failure( "process identity no longer matches" );
         }
@@ -695,7 +763,7 @@ namespace grab
             return fail( ErrorCode::ProviderFailed,
                          posix_message( "pidfd_send_signal(SIGKILL)", errno ) );
         }
-        return reap_pidfd( pidfd_ );
+        return reap_and_cache_status();
     }
 
 }    // namespace grab
