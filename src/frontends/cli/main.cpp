@@ -2,6 +2,7 @@
 #include "client/loopback_transport.hpp"
 #include "client/unix_socket_transport.hpp"
 #include "codec/png.hpp"
+#include "drivers/desktop/x11/config_batch.hpp"
 #include "drivers/desktop/x11/config_watch.hpp"
 #include "drivers/desktop/x11/window_match.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
@@ -238,7 +239,8 @@ namespace
                             "       grab capture --display --out FILE.png\n"
                             "       grab capture --region X,Y,WxH --out FILE.png\n",
                             stderr );
-        ( void )std::fputs( "       grab batch --window WMCLASS --out FILE.png [...]\n"
+        ( void )std::fputs( "       grab batch --config PATH\n"
+                            "       grab batch --window WMCLASS --out FILE.png [...]\n"
                             "       grab compare A.png B.png [--notify]\n"
                             "       grab watch start CONFIG... [--daemon] "
                             "[--interval MS] [--output DIR]\n"
@@ -1509,6 +1511,36 @@ namespace
     }
 
     void
+    print_config_batch_result( const grab::screen::ConfigBatchResult& result,
+                               bool                                   show_comparison )
+    {
+        std::size_t compare_passes{};
+        for( const auto& entry : result.manifest.compare )
+        {
+            if( entry.passed )
+            {
+                ++compare_passes;
+            }
+        }
+
+        const std::string session  = result.session_dir.string();
+        const std::string passes   = std::to_string( compare_passes );
+        const std::string failures = std::to_string( result.compare_failures );
+        ( void )std::fputs( "session ", stdout );
+        ( void )std::fwrite( session.data(), sizeof( char ), session.size(), stdout );
+        ( void )std::fputc( '\n', stdout );
+        if( !show_comparison )
+        {
+            return;
+        }
+        ( void )std::fputs( "comparison: ", stdout );
+        ( void )std::fwrite( passes.data(), sizeof( char ), passes.size(), stdout );
+        ( void )std::fputs( " passed, ", stdout );
+        ( void )std::fwrite( failures.data(), sizeof( char ), failures.size(), stdout );
+        ( void )std::fputs( " failed\n", stdout );
+    }
+
+    void
     print_compare_success( const grab::image::DiffResult& diff )
     {
         const std::string match_ratio = std::to_string( diff.match_ratio );
@@ -1776,8 +1808,75 @@ namespace
     }
 
     int
+    run_config_batch_command( std::span<char*> args )
+    {
+        constexpr std::string_view configFlag{ "--config" };
+        constexpr std::size_t      configArgumentCount = 2U;
+
+        if( args.size() !=
+            configArgumentCount ||
+            std::string_view{ args.front() } !=
+            configFlag ||
+            std::string_view{ args[1U] }.empty() )
+        {
+            print_error( "usage: grab batch --config PATH" );
+            print_usage();
+            return usageError;
+        }
+
+        auto config = grab::config::load( std::filesystem::path{ args[1U] } );
+        if( !config.has_value() )
+        {
+            print_fatal( config.error().message.c_str() );
+            return runtimeError;
+        }
+        if( config->targets.empty() )
+        {
+            const std::string message = config->source.string() +
+                                        ":/targets: batch requires a non-empty target "
+                                        "array";
+            print_fatal( message.c_str() );
+            return runtimeError;
+        }
+
+        std::optional<grab::notify::Notifier> notifier;
+        if( config->notifications.enabled &&
+            config->notifications.strategy == grab::config::NotifyStrategy::Os )
+        {
+            auto opened = grab::notify::Notifier::open();
+            if( !opened.has_value() )
+            {
+                print_fatal( opened.error().message.c_str() );
+                return runtimeError;
+            }
+            notifier.emplace( std::move( *opened ) );
+        }
+
+        auto result = grab::screen::run_config_batch( *config,
+                                                      notifier.has_value()
+                                                          ? std::addressof( *notifier )
+                                                          : nullptr );
+        if( !result.has_value() )
+        {
+            print_fatal( result.error().message.c_str() );
+            return runtimeError;
+        }
+
+        print_config_batch_result( *result, config->compare.ref.has_value() );
+        return result->target_errors == 0U && result->compare_failures == 0U
+                 ? grab::cli::successExitCode
+                 : runtimeError;
+    }
+
+    int
     run_batch_command( std::span<char*> args )
     {
+        constexpr std::string_view configFlag{ "--config" };
+        if( !args.empty() && std::string_view{ args.front() } == configFlag )
+        {
+            return run_config_batch_command( args );
+        }
+
         auto options = parse_batch_options( args );
         if( !options.has_value() )
         {

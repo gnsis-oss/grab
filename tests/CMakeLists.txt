@@ -150,11 +150,19 @@ target_include_directories(grab_driver_x11_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests)
 
+add_executable(grab_config_batch_window fake/config_batch_window.cpp)
+target_link_libraries(grab_config_batch_window PRIVATE PkgConfig::GRAB_XCB)
+target_compile_features(grab_config_batch_window PRIVATE cxx_std_23)
+
 add_executable(grab_integration_tests
+    integration/test_config_batch.cpp
     integration/test_config_watch.cpp
     integration/test_exit_gate.cpp
     integration/test_overlay_ring3.cpp
 )
+add_dependencies(grab_integration_tests grab_config_batch_window)
+target_compile_definitions(grab_integration_tests PRIVATE
+    GRAB_CONFIG_BATCH_WINDOW_PATH="$<TARGET_FILE:grab_config_batch_window>")
 target_link_libraries(grab_integration_tests PRIVATE
     grab_client
     grab_kernel
@@ -251,6 +259,10 @@ if(GRAB_TEST_PROVISION_XVFB)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/config_watch_smoke.sh
                 ${CMAKE_BINARY_DIR})
     set_tests_properties(grab_config_watch_smoke PROPERTIES TIMEOUT 120)
+    add_test(NAME grab_config_batch_smoke
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/config_batch_smoke.sh
+                ${CMAKE_BINARY_DIR} $<TARGET_FILE:grab_config_batch_window>)
+    set_tests_properties(grab_config_batch_smoke PROPERTIES TIMEOUT 120)
     set_tests_properties(grab_xvfb_cleanup PROPERTIES FIXTURES_CLEANUP grab_xvfb)
     gtest_discover_tests(grab_integration_tests
         DISCOVERY_MODE PRE_TEST

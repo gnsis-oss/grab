@@ -195,6 +195,7 @@ target_include_directories(grab_platform_x11 PRIVATE ${CMAKE_CURRENT_LIST_DIR}/s
 target_compile_features(grab_platform_x11 PUBLIC cxx_std_23)
 
 add_library(grab_driver_x11 STATIC
+    src/drivers/desktop/x11/config_batch.cpp
     src/drivers/desktop/x11/config_watch.cpp
     src/drivers/desktop/x11/coordinate_authority.cpp
     src/drivers/desktop/x11/enumerate.cpp
