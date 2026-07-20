@@ -1,8 +1,8 @@
 // background.js — grab browser bridge
 //
 // Sends flat tab-change frames to the grab native-messaging host, which
-// forwards them to the unix socket the browser examples (event_logger,
-// browser_event_screenshot) listen on.
+// forwards them to the unix socket the browser examples (event_logger)
+// listen on.
 //
 // IMPORTANT: the grab C++ bridge accepts only FLAT JSON objects (scalar
 // fields, no nested objects). connectNative frames each postMessage with the

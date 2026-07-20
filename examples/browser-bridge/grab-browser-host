@@ -8,11 +8,11 @@
 # socket->stdout direction stays empty.
 #
 # Socket path: $GRAB_BRIDGE_SOCKET if set, else <XDG_RUNTIME_DIR|/tmp>/<name>.
-# Default name is the browser_event_screenshot socket; change GRAB_BRIDGE_SOCKET
-# (or this default) to grab-event-logger.sock to feed the event_logger example.
+# Default name is the event_logger socket; set GRAB_BRIDGE_SOCKET to feed a
+# different example.
 set -euo pipefail
 
 runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
-sock="${GRAB_BRIDGE_SOCKET:-$runtime_dir/grab-browser-shots.sock}"
+sock="${GRAB_BRIDGE_SOCKET:-$runtime_dir/grab-event-logger.sock}"
 
 exec socat STDIO "UNIX-CONNECT:$sock"

@@ -1,8 +1,8 @@
 # grab browser bridge
 
 Wires a real browser's tab events to the grab browser examples
-(`event_logger`, `browser_event_screenshot`). The example opens a unix socket;
-this kit connects the browser to it via a native-messaging host.
+(`event_logger`). The example opens a unix socket; this kit connects the
+browser to it via a native-messaging host.
 
 ```
 browser + extension  --native messaging-->  grab-browser-host (socat)
@@ -23,10 +23,10 @@ Contents:
 
 - `socat` on PATH (`apt install socat`).
 - Run the example first so the socket exists, e.g.
-  `./build/examples/browser_event_screenshot shots` — it prints
-  `browser socket at <path>`. That path must match `grab-browser-host`
-  (default `$XDG_RUNTIME_DIR/grab-browser-shots.sock`; for event_logger set
-  `GRAB_BRIDGE_SOCKET=$XDG_RUNTIME_DIR/grab-event-logger.sock`).
+  `./build/examples/event_logger` — it prints `browser socket at <path>`.
+  That path must match `grab-browser-host` (default
+  `$XDG_RUNTIME_DIR/grab-event-logger.sock`; override with
+  `GRAB_BRIDGE_SOCKET`).
 
 ## Install (Chrome / Chromium)
 
@@ -41,8 +41,8 @@ Contents:
 4. Install the manifest (filename must equal the host name):
    `cp com.eventgrab.bridge.json ~/.config/google-chrome/NativeMessagingHosts/`
    (Chromium: `~/.config/chromium/NativeMessagingHosts/`).
-5. Reload the extension. Switch tabs — screenshots appear in the example's
-   output folder.
+5. Reload the extension. Switch tabs — `app.tab_changed` events appear in the
+   example's live feed and JSONL output.
 
 ## Install (Firefox)
 
@@ -58,7 +58,7 @@ a fixed id (`grab-bridge@example.com`) already listed in the manifest's
 Confirm the socket/capture pipeline independently by sending one frame:
 
 ```bash
-python3 - "$XDG_RUNTIME_DIR/grab-browser-shots.sock" <<'EOF'
+python3 - "$XDG_RUNTIME_DIR/grab-event-logger.sock" <<'EOF'
 import socket, struct, sys
 f = b'{"type":"app.tab_changed","app":"test","title":"Hello","url":"http://x"}'
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -66,8 +66,8 @@ s.connect(sys.argv[1]); s.sendall(struct.pack('<I', len(f)) + f); s.close()
 EOF
 ```
 
-A screenshot should appear immediately. If this works but the browser doesn't,
-the issue is the extension/manifest wiring, not grab.
+The event should appear in the feed immediately. If this works but the browser
+doesn't, the issue is the extension/manifest wiring, not grab.
 
 ## Troubleshooting
 
