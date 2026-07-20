@@ -28,17 +28,20 @@ namespace grab::screen
     {
 
         // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <sys/types.h>.
-        constexpr pid_t       invalidPid          = static_cast<pid_t>( -1 );
-        constexpr int         xcbOk               = 0;
-        constexpr int         spawnSuccess        = 0;
-        constexpr int         pathExistsMode      = F_OK;
-        constexpr int         firstDisplayNumber  = 100;
-        constexpr int         lastDisplayNumber   = 199;
-        constexpr mode_t      noFileMode          = 0;
-        constexpr std::size_t xvfbArgumentCount   = 6U;
-        constexpr const char* devNullPath         = "/dev/null";
-        constexpr const char* xvfbExecutable      = "Xvfb";
-        constexpr const char* screenOption        = "-screen";
+        constexpr pid_t       invalidPid         = static_cast<pid_t>( -1 );
+        constexpr int         xcbOk              = 0;
+        constexpr int         spawnSuccess       = 0;
+        constexpr int         pathExistsMode     = F_OK;
+        constexpr int         firstDisplayNumber = 100;
+        constexpr int         lastDisplayNumber  = 199;
+        constexpr mode_t      noFileMode         = 0;
+        constexpr std::size_t xvfbArgumentCount  = 7U;
+        constexpr const char* devNullPath        = "/dev/null";
+        constexpr const char* xvfbExecutable     = "Xvfb";
+        constexpr const char* screenOption       = "-screen";
+        // The readiness probe connects and disconnects; without -noreset that
+        // last-client disconnect resets the server and races later connects.
+        constexpr const char* noResetOption       = "-noreset";
         constexpr const char* defaultScreenNumber = "0";
         constexpr const char* displayLockPrefix   = "/tmp/.X";
         constexpr const char* displayLockSuffix   = "-lock";
@@ -161,7 +164,7 @@ namespace grab::screen
         std::string
         display_name_for( int display_number )
         {
-            return std::string{ 1U, displayPrefix } + std::to_string( display_number );
+            return std::string( 1U, displayPrefix ) + std::to_string( display_number );
         }
 
         [[nodiscard]]
@@ -268,9 +271,11 @@ namespace grab::screen
             std::string                          screen_number{ defaultScreenNumber };
             std::string                          display_argument{ display };
             std::string                          geometry_argument{ geometry };
+            std::string                          no_reset_option{ noResetOption };
             std::array<char*, xvfbArgumentCount> arguments{
                 executable.data(),
                 display_argument.data(),
+                no_reset_option.data(),
                 screen_option.data(),
                 screen_number.data(),
                 geometry_argument.data(),
