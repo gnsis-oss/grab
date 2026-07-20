@@ -1,7 +1,9 @@
 #include "codec/png.hpp"
+#include "drivers/desktop/x11/enumerate.hpp"
 #include "drivers/desktop/x11/window_match.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
+#include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "grab/context.hpp"
 #include "grab/event.hpp"
 #include "grab/geometry/size.hpp"
@@ -331,6 +333,90 @@ namespace grab::screen
         }
 
         return *diff;
+    }
+
+    grab::Result<std::uint32_t>
+    resolve_target( grab::Screen&                    screen,
+                    const grab::config::TargetMatch& match )
+    {
+        static_cast<void>( screen );
+        if( match.kind == grab::config::MatchKind::Count )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               "target match kind is invalid" );
+        }
+
+        auto windows = grab::screen::list_windows();
+        if( !windows.has_value() )
+        {
+            return std::unexpected( std::move( windows.error() ) );
+        }
+
+        std::vector<std::string> wm_class_candidates;
+        if( match.kind == grab::config::MatchKind::WmClass )
+        {
+            wm_class_candidates = grab::screen::normalized_wm_class_candidates(
+                std::vector<std::string>{ match.text }
+            );
+        }
+
+        for( const grab::screen::WindowInfo& window : *windows )
+        {
+            bool matches = false;
+            switch( match.kind )
+            {
+                case grab::config::MatchKind::Pid :
+                    matches = window.pid.has_value() && *window.pid == match.pid;
+                    break;
+                case grab::config::MatchKind::WmClass :
+                    matches = grab::screen::wm_class_matches_any( window.wm_class,
+                                                                  wm_class_candidates );
+                    break;
+                case grab::config::MatchKind::Title :
+                    matches = window.title.contains( match.text );
+                    break;
+                case grab::config::MatchKind::WindowId :
+                    matches = window.id == match.window_id;
+                    break;
+                case grab::config::MatchKind::Count :
+                    break;
+            }
+
+            if( matches )
+            {
+                return window.id;
+            }
+        }
+
+        return grab::fail( grab::ErrorCode::WindowNotFound,
+                           "no window matched the requested target" );
+    }
+
+    grab::Result<void>
+    capture_window_to( grab::Screen&      screen,
+                       std::uint32_t      window_id,
+                       const std::string& out_path )
+    {
+        static_cast<void>( screen );
+        auto route = grab::drivers::desktop::x11::X11CaptureRoute::open();
+        if( !route.has_value() )
+        {
+            return std::unexpected( std::move( route.error() ) );
+        }
+
+        auto frame = route->capture_window( window_id );
+        if( !frame.has_value() )
+        {
+            return std::unexpected( std::move( frame.error() ) );
+        }
+
+        auto encoded = grab::codec::encode_png( frame->image );
+        if( !encoded.has_value() )
+        {
+            return std::unexpected( std::move( encoded.error() ) );
+        }
+
+        return write_binary_file( std::filesystem::path{ out_path }, *encoded );
     }
 
     grab::Result<std::uint32_t>

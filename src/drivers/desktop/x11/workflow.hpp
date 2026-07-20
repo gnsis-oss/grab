@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/config.hpp"
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
 #include "image/compare.hpp"
@@ -35,6 +36,17 @@ namespace grab::screen
     compare_files( const std::string&      path_a,
                    const std::string&      path_b,
                    grab::notify::Notifier* notifier = nullptr );
+
+    [[nodiscard]]
+    grab::Result<std::uint32_t>
+    resolve_target( grab::Screen&                    screen,
+                    const grab::config::TargetMatch& match );
+
+    [[nodiscard]]
+    grab::Result<void>
+    capture_window_to( grab::Screen&      screen,
+                       std::uint32_t      window_id,
+                       const std::string& out_path );
 
     [[nodiscard]]
     grab::Result<std::uint32_t>
