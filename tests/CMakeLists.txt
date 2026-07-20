@@ -10,7 +10,12 @@ add_executable(grab_core_tests
     cli/input_command_test.cpp
     cli/overlay_command_test.cpp
     cli/command_table_test.cpp
+    config/test_environment.cpp
     config/test_load.cpp
+    config/test_pattern.cpp
+    config/test_profiles.cpp
+    config/test_rotation.cpp
+    config/test_schedule.cpp
     core/test_capability.cpp
     core/test_command_descriptor.cpp
     core/test_capture.cpp
@@ -60,7 +65,9 @@ add_executable(grab_core_tests
 target_link_libraries(grab_core_tests PRIVATE grab_core grab_kernel grab_vendor_l0 grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
-target_compile_definitions(grab_core_tests PRIVATE GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs")
+target_compile_definitions(grab_core_tests PRIVATE
+    GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs"
+    GRAB_PROFILES_DIR="${CMAKE_SOURCE_DIR}/profiles")
 include(GoogleTest)
 
 add_executable(grab_client_tests
