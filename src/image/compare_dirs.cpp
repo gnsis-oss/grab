@@ -26,10 +26,12 @@ namespace grab::image
     namespace
     {
 
-        constexpr std::string_view pngExtension  = ".png";
-        constexpr std::string_view errorPrefix   = "directory comparison: ";
-        constexpr std::string_view pathSeparator = ": ";
-        constexpr std::size_t      singleByte    = 1U;
+        constexpr std::string_view pngExtension = ".png";
+        constexpr std::string_view errorPrefix  = "directory comparison: ";
+        // Sentinel for pairs that cannot be scored (decode/dimension failure).
+        constexpr double           notComparableScore = -1.0;
+        constexpr std::string_view pathSeparator      = ": ";
+        constexpr std::size_t      singleByte         = 1U;
 
         struct ImageLayout
         {
@@ -457,9 +459,20 @@ namespace grab::image
                                                 threshold );
             if( !result.has_value() )
             {
-                return std::unexpected( std::move( result.error() ) );
+                // A pair that cannot be compared (decode failure, dimension
+                // mismatch) is a per-file failure, not a directory-level error.
+                results.push_back( FileCompareResult{
+                    .name       = ref_files->at( ref_index ).name,
+                    .in_ref     = true,
+                    .in_current = true,
+                    .score      = notComparableScore,
+                    .passed     = false,
+                } );
             }
-            results.push_back( std::move( *result ) );
+            else
+            {
+                results.push_back( std::move( *result ) );
+            }
             ++ref_index;
             ++current_index;
         }

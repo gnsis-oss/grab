@@ -460,3 +460,42 @@ TEST( CompareDirs,
     EXPECT_NEAR( over_result->score, static_cast<double>( overDelta ), scoreTolerance );
     EXPECT_FALSE( over_result->passed );
 }
+
+TEST( CompareDirs,
+      DimensionMismatchIsFailedEntryNotError )
+{
+    constexpr std::uint32_t    tallHeight          = knownHeight + 1U;
+    constexpr double           notComparableScore  = -1.0;
+    constexpr std::size_t      mismatchedFileCount = 1U;
+    constexpr std::string_view mismatchedFileName  = "mismatched.png";
+    constexpr std::uint8_t     mismatchedGray      = 33U;
+
+    const TempDirectories      directories;
+    const auto                 flat = make_gray_image( mismatchedGray );
+    grab::Image                tall = make_gray_image( mismatchedGray );
+    tall.height                     = tallHeight;
+    tall.pixels.resize( static_cast<std::size_t>( tall.stride ) *
+                            static_cast<std::size_t>( tallHeight ),
+                        byte_from( mismatchedGray ) );
+
+    const auto ref_write =
+        write_png_file( directories.ref_file( mismatchedFileName ), tall );
+    ASSERT_TRUE( ref_write.has_value() ) << ref_write.error().message;
+    const auto current_write =
+        write_png_file( directories.current_file( mismatchedFileName ), flat );
+    ASSERT_TRUE( current_write.has_value() ) << current_write.error().message;
+
+    const auto result = grab::image::compare_dirs( directories.ref(),
+                                                   directories.current(),
+                                                   grab::image::DirCompareMode::Rmse,
+                                                   rmseThreshold );
+
+    ASSERT_TRUE( result.has_value() ) << result.error().message;
+    ASSERT_EQ( result->size(), mismatchedFileCount );
+    const auto& entry = result->front();
+    EXPECT_EQ( entry.name, mismatchedFileName );
+    EXPECT_TRUE( entry.in_ref );
+    EXPECT_TRUE( entry.in_current );
+    EXPECT_FALSE( entry.passed );
+    EXPECT_EQ( entry.score, notComparableScore );
+}
