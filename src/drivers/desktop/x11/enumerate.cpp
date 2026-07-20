@@ -540,6 +540,72 @@ namespace grab::screen
         }
 
         [[nodiscard]]
+        grab::Result<std::vector<xcb_window_t>>
+        query_tree_windows( xcb_connection_t* connection,
+                            xcb_window_t      root )
+        {
+            xcb_generic_error_t* raw_tree_error = nullptr;
+            const auto           tree =
+                take_xcb_owned( xcb_query_tree_reply( connection,
+                                                      xcb_query_tree( connection, root ),
+                                                      &raw_tree_error ) );
+            const auto tree_error = take_xcb_owned( raw_tree_error );
+            if( tree_error != nullptr || tree == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::ProtocolError,
+                                   "XCB query tree failed" );
+            }
+
+            const int child_count = xcb_query_tree_children_length( tree.get() );
+            if( child_count <= 0 )
+            {
+                return std::vector<xcb_window_t>{};
+            }
+
+            const std::span<const xcb_window_t> children{
+                xcb_query_tree_children( tree.get() ),
+                static_cast<std::size_t>( child_count ),
+            };
+            std::vector<xcb_window_t> windows;
+            windows.reserve( children.size() );
+
+            for( const xcb_window_t window : children )
+            {
+                xcb_generic_error_t* raw_attributes_error = nullptr;
+                const auto attributes = take_xcb_owned( xcb_get_window_attributes_reply(
+                    connection,
+                    xcb_get_window_attributes( connection, window ),
+                    &raw_attributes_error
+                ) );
+                const auto attributes_error = take_xcb_owned( raw_attributes_error );
+                if( attributes_error != nullptr )
+                {
+                    if( stale_window_error( *attributes_error ) )
+                    {
+                        continue;
+                    }
+                    return grab::fail( grab::ErrorCode::ProtocolError,
+                                       "XCB window attributes query failed" );
+                }
+                if( attributes == nullptr )
+                {
+                    return grab::fail( grab::ErrorCode::ProtocolError,
+                                       "XCB window attributes reply is unavailable" );
+                }
+                if( attributes->map_state !=
+                    XCB_MAP_STATE_VIEWABLE ||
+                    attributes->override_redirect != 0U )
+                {
+                    continue;
+                }
+
+                windows.push_back( window );
+            }
+
+            return windows;
+        }
+
+        [[nodiscard]]
         grab::Result<std::optional<Geometry>>
         read_geometry( xcb_connection_t* connection,
                        xcb_window_t      root,
@@ -797,6 +863,14 @@ namespace grab::screen
         if( !windows.has_value() )
         {
             return std::unexpected( std::move( windows.error() ) );
+        }
+        if( windows->empty() )
+        {
+            windows = query_tree_windows( connection, root );
+            if( !windows.has_value() )
+            {
+                return std::unexpected( std::move( windows.error() ) );
+            }
         }
 
         std::vector<WindowInfo> result;
