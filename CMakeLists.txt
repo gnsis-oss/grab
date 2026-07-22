@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 # Single source of truth for the project's semantic version.
-project(grab VERSION 0.0.1 LANGUAGES CXX C)
+project(grab VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

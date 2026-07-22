@@ -7,10 +7,10 @@
 namespace
 {
 
-    constexpr std::string_view expectedVersion = "0.0.1";
+    constexpr std::string_view expectedVersion = "0.1.0";
     constexpr int              expectedMajor   = 0;
-    constexpr int              expectedMinor   = 0;
-    constexpr int              expectedPatch   = 1;
+    constexpr int              expectedMinor   = 1;
+    constexpr int              expectedPatch   = 0;
 
 }    // namespace
 
