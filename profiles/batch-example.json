@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "defaults": {
+    "format": "png",
+    "timeout_s": 15,
+    "kill_after": true
+  },
+  "display": {
+    "backend": "xvfb",
+    "width": 1280,
+    "height": 720,
+    "depth": 24
+  },
+  "targets": [
+    {
+      "name": "xmessage",
+      "argv": [
+        "xmessage",
+        "-title",
+        "grab-batch-example",
+        "-buttons",
+        "OK:0",
+        "grab batch example"
+      ],
+      "match": "title",
+      "pattern": "grab-batch-example",
+      "frames": 3,
+      "interval_ms": 200,
+      "delay_ms": 500
+    }
+  ],
+  "batch": {
+    "output_root": "~/.cache/grab/batch"
+  },
+  "notifications": {
+    "enabled": true,
+    "strategy": "os",
+    "popup_timeout_ms": 2000
+  },
+  "compare": {
+    "mode": "rmse",
+    "threshold": 5.0
+  }
+}

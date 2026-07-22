@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "watch": {
+    "interval_ms": 60000,
+    "output": "~/.cache/grab/watch",
+    "format": "png",
+    "filename": "capture_{timestamp}",
+    "limits": {
+      "max_files": 1000,
+      "max_age_days": 30,
+      "max_disk_mib": 5000
+    }
+  },
+  "notifications": {
+    "enabled": true,
+    "strategy": "os",
+    "popup_timeout_ms": 2000
+  }
+}

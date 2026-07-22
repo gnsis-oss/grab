@@ -1,0 +1,710 @@
+#include "eventgrab/v1/events.pb.h"
+#include "frontends/grpc/codec.hpp"
+#include "frontends/grpc/proto_descriptor.hpp"
+#include "grab/event.hpp"
+#include "grab/event_descriptor.hpp"
+#include "grab/ids.hpp"
+#include "grab/origin.hpp"
+#include "grab/pid.hpp"
+#include "grab/result.hpp"
+#include "grab/space.hpp"
+#include "storage/jsonl_sink.hpp"
+
+// clang-format off
+#include <gtest/gtest.h>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <set>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
+// clang-format on
+
+namespace
+{
+
+    constexpr double           timestamp            = 1729.125;
+    constexpr double           expectedTimestamp    = timestamp;
+    constexpr double           mouseDelta           = -4.5;
+    constexpr double           mousePositionX       = 321.25;
+    constexpr double           mousePositionY       = 654.5;
+    constexpr double           idleSeconds          = 30.25;
+    constexpr double           windowDuration       = 7.75;
+    constexpr std::int64_t     pidValue             = 1'234;
+    constexpr std::uint64_t    sequence             = 42U;
+    constexpr std::uint64_t    decodedSequence      = 0U;
+    constexpr std::uint32_t    keyCode              = 30U;
+    constexpr std::uint32_t    mouseButton          = 1U;
+    constexpr std::uint32_t    mouseSpace           = 17U;
+    constexpr std::uint32_t    subjectRuntime       = 7U;
+    constexpr std::uint32_t    subjectTree          = 8U;
+    constexpr std::uint32_t    subjectEpoch         = 9U;
+    constexpr std::uint64_t    subjectNode          = 10U;
+    constexpr std::uint64_t    subjectRevision      = 11U;
+    constexpr std::uint64_t    beforeRevision       = 12U;
+    constexpr std::uint64_t    afterRevision        = 13U;
+    constexpr std::uint64_t    graphNode            = 7U;
+    constexpr std::uint64_t    graphRelated         = 9U;
+    constexpr std::uint32_t    graphRelation        = 5U;
+    constexpr std::uint64_t    graphPreviousActive  = 3U;
+    constexpr std::uint64_t    graphBeforeRevision  = 41U;
+    constexpr std::uint64_t    graphAfterRevision   = 42U;
+    constexpr std::uint8_t     causeMarker          = 0XA5U;
+    constexpr int              unknownKindNumber    = 9'999;
+    constexpr int              oversizedEntryPad    = 1;
+    constexpr int              singleErasedEntry    = 1;
+    constexpr std::size_t      jsonlFlushEveryWrite = 1U;
+    constexpr std::size_t      jsonlMaxFiles        = 4U;
+    constexpr std::size_t      jsonlMaxDiskMb       = 1U;
+    constexpr std::size_t      singleJsonlLine      = 1U;
+    constexpr auto             protocolErrorCode    = grab::ErrorCode::ProtocolError;
+    constexpr auto             inputCategory        = grab::EventCategory::Input;
+    constexpr auto             windowCategory       = grab::EventCategory::Window;
+    constexpr auto             a11yCategory         = grab::EventCategory::Accessibility;
+    constexpr auto             integrationCategory  = grab::EventCategory::Integration;
+    constexpr auto             stateCategory        = grab::EventCategory::State;
+    constexpr std::string_view codecJsonlTempRoot   = "codec_jsonl_tmp";
+    constexpr std::string_view unixEpochFileName    = "1970-01-01.jsonl";
+    constexpr std::string_view dataKey              = "data";
+    constexpr std::string_view inputKeyTempName     = "InputKeyPayloadKeyParity";
+    constexpr std::string_view mouseClickTempName   = "MouseClickPayloadKeyParity";
+    constexpr std::string_view a11yStateTempName    = "A11yStatePayloadKeyParity";
+
+    class TempDir
+    {
+        public:
+
+            explicit TempDir( std::string_view name ) :
+                path_( std::filesystem::current_path() /
+                       std::string{ codecJsonlTempRoot } /
+                       std::string{ name } )
+            {
+                std::error_code ec;
+                std::filesystem::remove_all( path_, ec );
+                std::filesystem::create_directories( path_, ec );
+            }
+
+            ~TempDir() noexcept
+            {
+                std::error_code ec;
+                std::filesystem::remove_all( path_, ec );
+            }
+
+            TempDir( const TempDir& ) = delete;
+            TempDir&
+            operator=( const TempDir& ) = delete;
+            TempDir( TempDir&& )        = delete;
+            TempDir&
+            operator=( TempDir&& ) = delete;
+
+            [[nodiscard]]
+            const std::filesystem::path&
+            path() const noexcept
+            {
+                return path_;
+            }
+
+        private:
+
+            std::filesystem::path path_;
+    };
+
+    [[nodiscard]]
+    grab::InputKey
+    input_key()
+    {
+        return grab::InputKey{ .code = keyCode, .name = "A" };
+    }
+
+    [[nodiscard]]
+    grab::KeyCombo
+    key_combo()
+    {
+        return grab::KeyCombo{ .text = "Ctrl+A" };
+    }
+
+    [[nodiscard]]
+    grab::MouseClick
+    mouse_click()
+    {
+        return grab::MouseClick{ .button = mouseButton, .name = "left" };
+    }
+
+    [[nodiscard]]
+    grab::MouseMove
+    mouse_move()
+    {
+        return grab::MouseMove{
+            .axis     = "0",
+            .delta    = mouseDelta,
+            .position = grab::SpacePoint{
+                                         .x     = mousePositionX,
+                                         .y     = mousePositionY,
+                                         .space = grab::CoordinateSpaceId{ mouseSpace },
+                                         },
+        };
+    }
+
+    [[nodiscard]]
+    grab::Idle
+    idle()
+    {
+        return grab::Idle{ .idle_s = idleSeconds };
+    }
+
+    [[nodiscard]]
+    grab::WindowChange
+    window_change()
+    {
+        return grab::WindowChange{
+            .app        = "Firefox",
+            .pid        = grab::Pid{ pidValue },
+            .title      = "New title",
+            .prev_title = "Old title",
+            .duration_s = windowDuration,
+        };
+    }
+
+    [[nodiscard]]
+    grab::GraphChange
+    graph_change()
+    {
+        return grab::GraphChange{
+            .node            = graphNode,
+            .related         = graphRelated,
+            .relation        = graphRelation,
+            .previous_active = graphPreviousActive,
+        };
+    }
+
+    [[nodiscard]]
+    grab::A11yEvent
+    a11y_event()
+    {
+        return grab::A11yEvent{
+            .app    = "Editor",
+            .role   = "push button",
+            .name   = "Save",
+            .detail = "pressed",
+        };
+    }
+
+    [[nodiscard]]
+    grab::IntegrationEvent
+    integration_event()
+    {
+        return grab::IntegrationEvent{
+            .app    = "Browser",
+            .title  = "Inbox",
+            .detail = "context",
+            .json   = R"({"tab":1})",
+        };
+    }
+
+    [[nodiscard]]
+    grab::StateSnapshot
+    state_snapshot()
+    {
+        return grab::StateSnapshot{ .json = R"({"focused_app":"Firefox"})" };
+    }
+
+    [[nodiscard]]
+    grab::Event
+    make_event( grab::EventKind     kind,
+                grab::EventCategory category,
+                grab::Payload       payload )
+    {
+        return grab::Event{
+            .timestamp = timestamp,
+            .sequence  = sequence,
+            .kind      = kind,
+            .category  = category,
+            .payload   = std::move( payload ),
+        };
+    }
+
+    [[nodiscard]]
+    std::vector<grab::Event>
+    all_payload_events()
+    {
+        return {
+            make_event( grab::EventKind::KeyDown, inputCategory, input_key() ),
+            make_event( grab::EventKind::KeyUp, inputCategory, input_key() ),
+            make_event( grab::EventKind::KeyCombo, inputCategory, key_combo() ),
+            make_event( grab::EventKind::MouseClick, inputCategory, mouse_click() ),
+            make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() ),
+            make_event( grab::EventKind::IdleStart, inputCategory, idle() ),
+            make_event( grab::EventKind::IdleEnd, inputCategory, idle() ),
+            make_event( grab::EventKind::WindowFocusChanged,
+                        windowCategory,
+                        window_change() ),
+            make_event( grab::EventKind::WindowTitleChanged,
+                        windowCategory,
+                        window_change() ),
+            make_event( grab::EventKind::WindowCreated,
+                        windowCategory,
+                        window_change() ),
+            make_event( grab::EventKind::WindowClosed, windowCategory, window_change() ),
+            make_event( grab::EventKind::NodeAdded, windowCategory, graph_change() ),
+            make_event( grab::EventKind::NodeRemoved, windowCategory, graph_change() ),
+            make_event( grab::EventKind::NodeChanged, windowCategory, graph_change() ),
+            make_event( grab::EventKind::RelationAdded, windowCategory, graph_change() ),
+            make_event( grab::EventKind::RelationRemoved,
+                        windowCategory,
+                        graph_change() ),
+            make_event( grab::EventKind::ActiveChildChanged,
+                        windowCategory,
+                        graph_change() ),
+            make_event( grab::EventKind::A11yButtonClicked, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yMenuOpened, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yMenuClosed, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yFocusChanged, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yTextChanged, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::A11yStateChanged, a11yCategory, a11y_event() ),
+            make_event( grab::EventKind::AppTabChanged,
+                        integrationCategory,
+                        integration_event() ),
+            make_event( grab::EventKind::AppContextUpdate,
+                        integrationCategory,
+                        integration_event() ),
+            make_event( grab::EventKind::StateSnapshot,
+                        stateCategory,
+                        state_snapshot() ),
+        };
+    }
+
+    void
+    expect_payload_value_eq( const grab::InputKey& expected,
+                             const grab::InputKey& actual )
+    {
+        EXPECT_EQ( actual.code, expected.code );
+        EXPECT_EQ( actual.name, expected.name );
+    }
+
+    void
+    expect_payload_value_eq( const grab::KeyCombo& expected,
+                             const grab::KeyCombo& actual )
+    {
+        EXPECT_EQ( actual.text, expected.text );
+    }
+
+    void
+    expect_payload_value_eq( const grab::MouseClick& expected,
+                             const grab::MouseClick& actual )
+    {
+        EXPECT_EQ( actual.button, expected.button );
+        EXPECT_EQ( actual.name, expected.name );
+    }
+
+    void
+    expect_payload_value_eq( const grab::MouseMove& expected,
+                             const grab::MouseMove& actual )
+    {
+        EXPECT_EQ( actual.axis, expected.axis );
+        EXPECT_DOUBLE_EQ( actual.delta, expected.delta );
+        ASSERT_EQ( actual.position.has_value(), expected.position.has_value() );
+        if( !expected.position.has_value() || !actual.position.has_value() )
+        {
+            return;
+        }
+        const auto& expected_position = *expected.position;
+        const auto& actual_position   = *actual.position;
+        EXPECT_DOUBLE_EQ( actual_position.x, expected_position.x );
+        EXPECT_DOUBLE_EQ( actual_position.y, expected_position.y );
+        EXPECT_EQ( actual_position.space, expected_position.space );
+    }
+
+    void
+    expect_payload_value_eq( const grab::Idle& expected,
+                             const grab::Idle& actual )
+    {
+        EXPECT_DOUBLE_EQ( actual.idle_s, expected.idle_s );
+    }
+
+    void
+    expect_payload_value_eq( const grab::WindowChange& expected,
+                             const grab::WindowChange& actual )
+    {
+        EXPECT_EQ( actual.app, expected.app );
+        EXPECT_EQ( actual.pid, expected.pid );
+        EXPECT_EQ( actual.title, expected.title );
+        EXPECT_EQ( actual.prev_title, expected.prev_title );
+        EXPECT_DOUBLE_EQ( actual.duration_s, expected.duration_s );
+    }
+
+    void
+    expect_payload_value_eq( const grab::GraphChange& expected,
+                             const grab::GraphChange& actual )
+    {
+        EXPECT_EQ( actual.node, expected.node );
+        EXPECT_EQ( actual.related, expected.related );
+        EXPECT_EQ( actual.relation, expected.relation );
+        EXPECT_EQ( actual.previous_active, expected.previous_active );
+    }
+
+    void
+    expect_payload_value_eq( const grab::A11yEvent& expected,
+                             const grab::A11yEvent& actual )
+    {
+        EXPECT_EQ( actual.app, expected.app );
+        EXPECT_EQ( actual.role, expected.role );
+        EXPECT_EQ( actual.name, expected.name );
+        EXPECT_EQ( actual.detail, expected.detail );
+    }
+
+    void
+    expect_payload_value_eq( const grab::IntegrationEvent& expected,
+                             const grab::IntegrationEvent& actual )
+    {
+        EXPECT_EQ( actual.app, expected.app );
+        EXPECT_EQ( actual.title, expected.title );
+        EXPECT_EQ( actual.detail, expected.detail );
+        EXPECT_EQ( actual.json, expected.json );
+    }
+
+    void
+    expect_payload_value_eq( const grab::StateSnapshot& expected,
+                             const grab::StateSnapshot& actual )
+    {
+        EXPECT_EQ( actual.json, expected.json );
+    }
+
+    void
+    expect_payload_eq( const grab::Payload& expected,
+                       const grab::Payload& actual )
+    {
+        ASSERT_EQ( expected.index(), actual.index() );
+
+        std::visit(
+            []( const auto& lhs, const auto& rhs )
+            {
+                using Left  = std::decay_t<decltype( lhs )>;
+                using Right = std::decay_t<decltype( rhs )>;
+                if constexpr( std::is_same_v<Left, Right> )
+                {
+                    expect_payload_value_eq( lhs, rhs );
+                }
+            },
+            expected,
+            actual
+        );
+    }
+
+    void
+    expect_event_eq_after_wire( const grab::Event& expected,
+                                const grab::Event& actual )
+    {
+        EXPECT_EQ( actual.kind, expected.kind );
+        EXPECT_EQ( actual.category, expected.category );
+        EXPECT_DOUBLE_EQ( actual.timestamp, expected.timestamp );
+        EXPECT_EQ( actual.sequence, decodedSequence );
+        expect_payload_eq( expected.payload, actual.payload );
+    }
+
+    [[nodiscard]]
+    eventgrab::v1::Event
+    valid_key_down_wire()
+    {
+        const auto event =
+            make_event( grab::EventKind::KeyDown, inputCategory, input_key() );
+        auto wire = grab::transport::to_wire( event );
+        EXPECT_TRUE( wire.has_value() );
+        return *wire;
+    }
+
+    [[nodiscard]]
+    grab::storage::JsonlOptions
+    jsonl_options( const std::filesystem::path& dir )
+    {
+        return grab::storage::JsonlOptions{
+            .dir          = dir,
+            .buffer_limit = jsonlFlushEveryWrite,
+            .max_files    = jsonlMaxFiles,
+            .max_disk_mb  = jsonlMaxDiskMb,
+        };
+    }
+
+    [[nodiscard]]
+    std::vector<std::string>
+    read_lines( const std::filesystem::path& file )
+    {
+        std::ifstream            input( file );
+        std::vector<std::string> lines;
+        std::string              line;
+        while( std::getline( input, line ) )
+        {
+            lines.push_back( line );
+        }
+        return lines;
+    }
+
+    [[nodiscard]]
+    std::set<std::string>
+    proto_data_keys( const eventgrab::v1::Event& wire )
+    {
+        std::set<std::string> keys;
+        for( const auto& [key, value] : wire.data() )
+        {
+            static_cast<void>( value );
+            keys.insert( key );
+        }
+        return keys;
+    }
+
+    [[nodiscard]]
+    std::set<std::string>
+    json_data_keys( const nlohmann::json& data )
+    {
+        std::set<std::string> keys;
+        for( const auto& [key, value] : data.items() )
+        {
+            static_cast<void>( value );
+            keys.insert( key );
+        }
+        return keys;
+    }
+
+    void
+    expect_jsonl_and_proto_payload_keys_match( const grab::Event& event,
+                                               std::string_view   temp_name )
+    {
+        const TempDir temp( temp_name );
+        auto          sink_result =
+            grab::storage::JsonlSink::open( jsonl_options( temp.path() ) );
+        ASSERT_TRUE( sink_result.has_value() ) << sink_result.error().message;
+        auto sink         = std::move( sink_result ).value();
+
+        auto write_result = sink.write( event );
+        ASSERT_TRUE( write_result.has_value() ) << write_result.error().message;
+
+        const auto lines = read_lines( temp.path() / std::string{ unixEpochFileName } );
+        ASSERT_EQ( lines.size(), singleJsonlLine );
+        const auto line = nlohmann::json::parse( lines.front() );
+        ASSERT_TRUE( line.contains( std::string{ dataKey } ) );
+
+        auto wire = grab::transport::to_wire( event );
+        ASSERT_TRUE( wire.has_value() ) << wire.error().message;
+
+        EXPECT_EQ( json_data_keys( line.at( std::string{ dataKey } ) ),
+                   proto_data_keys( *wire ) );
+    }
+
+}    // namespace
+
+TEST( Codec,
+      RoundTripsEveryKind )
+{
+    for( const auto& event : all_payload_events() )
+    {
+        auto wire = grab::transport::to_wire( event );
+        ASSERT_TRUE( wire.has_value() );
+
+        auto decoded = grab::transport::from_wire( *wire );
+        ASSERT_TRUE( decoded.has_value() );
+        expect_event_eq_after_wire( event, *decoded );
+    }
+}
+
+TEST( Codec,
+      GraphChangeRoundTripsWithSubjectAndRevisions )
+{
+    grab::Event event;
+    event.kind            = grab::EventKind::ActiveChildChanged;
+    event.category        = windowCategory;
+    event.before_revision = graphBeforeRevision;
+    event.after_revision  = graphAfterRevision;
+    event.payload         = graph_change();
+
+    const auto wire       = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() );
+
+    const auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() );
+    EXPECT_EQ( decoded->after_revision, graphAfterRevision );
+    EXPECT_EQ( std::get<grab::GraphChange>( decoded->payload ).previous_active,
+               graphPreviousActive );
+}
+
+TEST( Codec,
+      RoundTripsEventEnvelope )
+{
+    auto event    = make_event( grab::EventKind::KeyDown, inputCategory, input_key() );
+    event.origin  = grab::EventOrigin::InjectedSelf;
+    event.subject = grab::EventSubject{
+        .runtime  = grab::RuntimeId{ subjectRuntime },
+        .tree     = subjectTree,
+        .epoch    = grab::TreeEpoch{ subjectEpoch },
+        .node     = subjectNode,
+        .revision = subjectRevision,
+    };
+    grab::OperationId cause{};
+    cause.value.bytes.front() = causeMarker;
+    event.cause               = cause;
+    event.before_revision     = beforeRevision;
+    event.after_revision      = afterRevision;
+
+    auto wire                 = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() ) << wire.error().message;
+
+    auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
+    EXPECT_EQ( decoded->origin, event.origin );
+    ASSERT_TRUE( decoded->subject.has_value() );
+    EXPECT_EQ( decoded->subject->runtime, event.subject->runtime );
+    EXPECT_EQ( decoded->subject->tree, event.subject->tree );
+    EXPECT_EQ( decoded->subject->epoch, event.subject->epoch );
+    EXPECT_EQ( decoded->subject->node, event.subject->node );
+    EXPECT_EQ( decoded->subject->revision, event.subject->revision );
+    ASSERT_TRUE( decoded->cause.has_value() );
+    EXPECT_EQ( decoded->cause->value.bytes, event.cause->value.bytes );
+    EXPECT_EQ( decoded->before_revision, event.before_revision );
+    EXPECT_EQ( decoded->after_revision, event.after_revision );
+}
+
+TEST( Codec,
+      KindAndCategoryRoundTripThroughParityTable )
+{
+    for( const auto& descriptor : grab::detail::eventDescriptors )
+    {
+        const auto wire_kind = grab::transport::to_wire_kind( descriptor.kind );
+        const auto kind      = grab::transport::to_grab_kind( wire_kind );
+        ASSERT_TRUE( kind.has_value() );
+        EXPECT_EQ( *kind, descriptor.kind );
+
+        const auto wire_category =
+            grab::transport::to_wire_category( grab::category_of( descriptor.kind ) );
+        const auto category = grab::transport::to_grab_category( wire_category );
+        ASSERT_TRUE( category.has_value() );
+        EXPECT_EQ( *category, grab::category_of( descriptor.kind ) );
+    }
+}
+
+TEST( Codec,
+      UnknownKindRejected )
+{
+    eventgrab::v1::Event unspecified_wire = valid_key_down_wire();
+    unspecified_wire.set_kind( eventgrab::v1::EVENT_KIND_UNSPECIFIED );
+
+    const auto unspecified_decoded = grab::transport::from_wire( unspecified_wire );
+
+    ASSERT_FALSE( unspecified_decoded.has_value() );
+    EXPECT_EQ( unspecified_decoded.error().code, protocolErrorCode );
+
+    eventgrab::v1::Event unknown_wire = valid_key_down_wire();
+    unknown_wire.set_kind( static_cast<eventgrab::v1::EventKind>( unknownKindNumber ) );
+
+    const auto unknown_decoded = grab::transport::from_wire( unknown_wire );
+
+    ASSERT_FALSE( unknown_decoded.has_value() );
+    EXPECT_EQ( unknown_decoded.error().code, protocolErrorCode );
+}
+
+TEST( Codec,
+      MissingRequiredFieldRejected )
+{
+    eventgrab::v1::Event wire = valid_key_down_wire();
+    EXPECT_EQ( wire.mutable_data()->erase( "key_code" ), singleErasedEntry );
+
+    const auto decoded = grab::transport::from_wire( wire );
+
+    ASSERT_FALSE( decoded.has_value() );
+    EXPECT_EQ( decoded.error().code, protocolErrorCode );
+}
+
+TEST( Codec,
+      OversizedDataRejected )
+{
+    eventgrab::v1::Event wire = valid_key_down_wire();
+    for( int index = 0; index < grab::transport::maxDataEntries + oversizedEntryPad;
+         ++index )
+    {
+        const auto [iter, inserted] =
+            wire.mutable_data()->try_emplace( "extra_" + std::to_string( index ),
+                                              "value" );
+        EXPECT_TRUE( inserted );
+        EXPECT_EQ( iter->second, "value" );
+    }
+
+    const auto decoded = grab::transport::from_wire( wire );
+
+    ASSERT_FALSE( decoded.has_value() );
+    EXPECT_EQ( decoded.error().code, protocolErrorCode );
+}
+
+TEST( Codec,
+      TimestampPreserved )
+{
+    const auto event =
+        make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() );
+
+    auto wire = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() );
+    EXPECT_DOUBLE_EQ( wire->timestamp(), expectedTimestamp );
+
+    auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() );
+    EXPECT_DOUBLE_EQ( decoded->timestamp, expectedTimestamp );
+    EXPECT_EQ( decoded->sequence, decodedSequence );
+}
+
+TEST( Codec,
+      MouseMovePositionUsesAdditiveTypedFieldsAndLegacyMapDropsIt )
+{
+    const auto event =
+        make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() );
+
+    const auto wire = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() ) << wire.error().message;
+    ASSERT_TRUE( wire->has_mouse_move() );
+    EXPECT_TRUE( wire->mouse_move().has_position_x() );
+    EXPECT_TRUE( wire->mouse_move().has_position_y() );
+    EXPECT_TRUE( wire->mouse_move().has_space() );
+    EXPECT_DOUBLE_EQ( wire->mouse_move().position_x(), mousePositionX );
+    EXPECT_DOUBLE_EQ( wire->mouse_move().position_y(), mousePositionY );
+    EXPECT_EQ( wire->mouse_move().space(), mouseSpace );
+    EXPECT_FALSE( wire->data().contains( "position_x" ) );
+    EXPECT_FALSE( wire->data().contains( "position_y" ) );
+    EXPECT_FALSE( wire->data().contains( "space" ) );
+
+    const auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
+    expect_payload_value_eq( mouse_move(),
+                             std::get<grab::MouseMove>( decoded->payload ) );
+}
+
+TEST( Codec,
+      LegacyMouseMoveWireDecodesWithoutPosition )
+{
+    const auto event =
+        make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() );
+    auto wire = grab::transport::to_wire( event );
+    ASSERT_TRUE( wire.has_value() ) << wire.error().message;
+    wire->clear_mouse_move();
+
+    const auto decoded = grab::transport::from_wire( *wire );
+    ASSERT_TRUE( decoded.has_value() ) << decoded.error().message;
+    EXPECT_FALSE( std::get<grab::MouseMove>( decoded->payload ).position.has_value() );
+}
+
+TEST( Codec,
+      JsonlAndProtoPayloadKeysMatchCanonicalVocabulary )
+{
+    expect_jsonl_and_proto_payload_keys_match(
+        make_event( grab::EventKind::KeyDown, inputCategory, input_key() ),
+        inputKeyTempName
+    );
+    expect_jsonl_and_proto_payload_keys_match(
+        make_event( grab::EventKind::MouseClick, inputCategory, mouse_click() ),
+        mouseClickTempName
+    );
+    expect_jsonl_and_proto_payload_keys_match(
+        make_event( grab::EventKind::A11yStateChanged, a11yCategory, a11y_event() ),
+        a11yStateTempName
+    );
+}
