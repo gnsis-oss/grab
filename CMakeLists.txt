@@ -302,6 +302,7 @@ add_executable(grab_cli
     src/frontends/cli/overlay_command.cpp
     src/frontends/cli/session_command.cpp
     src/frontends/cli/watch_daemon.cpp
+    src/frontends/cli/windows_command.cpp
 )
 set_target_properties(grab_cli PROPERTIES OUTPUT_NAME grab)
 target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_service

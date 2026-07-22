@@ -38,6 +38,7 @@ namespace
     constexpr std::uint64_t             secondRevision   = 2U;
     constexpr std::uint64_t             retiredRevision  = 3U;
     constexpr std::uint64_t             reusedRevision   = 4U;
+    constexpr std::string_view          normalWindowType = "normal";
     constexpr std::string_view          firstTitle       = "Editor";
     constexpr std::string_view          firstClass       = "GrabEditor";
     constexpr std::string_view          secondTitle      = "Terminal";
@@ -84,6 +85,7 @@ namespace
             .id       = xid,
             .wm_class = std::string{ window_class },
             .title    = std::string{ title },
+            .type     = std::string{ normalWindowType },
             .pid      = pid,
             .bounds   = bounds,
         };

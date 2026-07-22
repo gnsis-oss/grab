@@ -8,9 +8,11 @@ add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/input_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/overlay_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/watch_daemon.cpp
+    ${CMAKE_SOURCE_DIR}/src/frontends/cli/windows_command.cpp
     cli/input_command_test.cpp
     cli/overlay_command_test.cpp
     cli/watch_daemon_test.cpp
+    cli/windows_command_test.cpp
     cli/command_table_test.cpp
     config/test_batch_manifest.cpp
     config/test_environment.cpp

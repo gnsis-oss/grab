@@ -39,4 +39,5 @@ trace.hpp
 ui.hpp
 version.hpp
 watch.hpp
+window_info.hpp
 workspace.hpp

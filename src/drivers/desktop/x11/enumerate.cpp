@@ -59,12 +59,45 @@ namespace grab::screen
                 ScreenInfo    screen;
         };
 
+        // The EWMH window types, paired with the label this module reports. Order
+        // is irrelevant here: a window's own _NET_WM_WINDOW_TYPE list carries the
+        // client's preference, and that list's order is what decides the answer.
+        struct WindowTypeAtom
+        {
+                std::string_view atom_name;
+                std::string_view label;
+        };
+
+        constexpr auto             windowTypeAtoms = std::to_array<WindowTypeAtom>( {
+            {      "_NET_WM_WINDOW_TYPE_DESKTOP",       "desktop"},
+            {         "_NET_WM_WINDOW_TYPE_DOCK",          "dock"},
+            {      "_NET_WM_WINDOW_TYPE_TOOLBAR",       "toolbar"},
+            {         "_NET_WM_WINDOW_TYPE_MENU",          "menu"},
+            {      "_NET_WM_WINDOW_TYPE_UTILITY",       "utility"},
+            {       "_NET_WM_WINDOW_TYPE_SPLASH",        "splash"},
+            {       "_NET_WM_WINDOW_TYPE_DIALOG",        "dialog"},
+            {"_NET_WM_WINDOW_TYPE_DROPDOWN_MENU", "dropdown_menu"},
+            {   "_NET_WM_WINDOW_TYPE_POPUP_MENU",    "popup_menu"},
+            {      "_NET_WM_WINDOW_TYPE_TOOLTIP",       "tooltip"},
+            { "_NET_WM_WINDOW_TYPE_NOTIFICATION",  "notification"},
+            {        "_NET_WM_WINDOW_TYPE_COMBO",         "combo"},
+            {          "_NET_WM_WINDOW_TYPE_DND",           "dnd"},
+            {       "_NET_WM_WINDOW_TYPE_NORMAL",        "normal"},
+        } );
+
+        // EWMH: a window with no _NET_WM_WINDOW_TYPE and no WM_TRANSIENT_FOR is
+        // to be treated as if it had declared _NET_WM_WINDOW_TYPE_NORMAL.
+        constexpr std::string_view defaultWindowType = "normal";
+
         struct Atoms
         {
-                xcb_atom_t net_client_list = XCB_ATOM_NONE;
-                xcb_atom_t net_wm_name     = XCB_ATOM_NONE;
-                xcb_atom_t net_wm_pid      = XCB_ATOM_NONE;
-                xcb_atom_t utf8_string     = XCB_ATOM_NONE;
+                xcb_atom_t net_client_list    = XCB_ATOM_NONE;
+                xcb_atom_t net_wm_name        = XCB_ATOM_NONE;
+                xcb_atom_t net_wm_pid         = XCB_ATOM_NONE;
+                xcb_atom_t net_wm_window_type = XCB_ATOM_NONE;
+                xcb_atom_t utf8_string        = XCB_ATOM_NONE;
+
+                std::array<xcb_atom_t, windowTypeAtoms.size()> window_types{};
         };
 
         struct PropertyData
@@ -215,12 +248,39 @@ namespace grab::screen
                 return std::unexpected( std::move( utf8_string.error() ) );
             }
 
-            return Atoms{
-                .net_client_list = *net_client_list,
-                .net_wm_name     = *net_wm_name,
-                .net_wm_pid      = *net_wm_pid,
-                .utf8_string     = *utf8_string,
+            auto net_wm_window_type =
+                intern_atom( connection,
+                             grab::platform::x11::atom_name::netWmWindowType,
+                             true );
+            if( !net_wm_window_type.has_value() )
+            {
+                return std::unexpected( std::move( net_wm_window_type.error() ) );
+            }
+
+            Atoms atoms{
+                .net_client_list    = *net_client_list,
+                .net_wm_name        = *net_wm_name,
+                .net_wm_pid         = *net_wm_pid,
+                .net_wm_window_type = *net_wm_window_type,
+                .utf8_string        = *utf8_string,
+                .window_types       = {},
             };
+
+            // Interned with only_if_exists: a type atom no client on this display
+            // has ever named stays XCB_ATOM_NONE and simply never matches, which
+            // costs nothing and keeps the server's atom table clean.
+            for( std::size_t index = 0U; index < windowTypeAtoms.size(); ++index )
+            {
+                auto type_atom = intern_atom( connection,
+                                              windowTypeAtoms.at( index ).atom_name,
+                                              true );
+                if( !type_atom.has_value() )
+                {
+                    return std::unexpected( std::move( type_atom.error() ) );
+                }
+                atoms.window_types.at( index ) = *type_atom;
+            }
+            return atoms;
         }
 
         [[nodiscard]]
@@ -486,6 +546,61 @@ namespace grab::screen
                                        window,
                                        XCB_ATOM_WM_NAME,
                                        XCB_ATOM_STRING );
+        }
+
+        // Reports the first entry of the window's _NET_WM_WINDOW_TYPE list that
+        // this module recognises. The list is in the client's own preference
+        // order, so "first recognised" is the only correct reading: a splash
+        // screen commonly appends _NET_WM_WINDOW_TYPE_NORMAL as a fallback for
+        // window managers that do not implement SPLASH, and a containment test
+        // would call that window normal.
+        [[nodiscard]]
+        grab::Result<std::string>
+        read_window_type( xcb_connection_t* connection,
+                          xcb_window_t      window,
+                          const Atoms&      atoms )
+        {
+            auto property = read_property( connection,
+                                           window,
+                                           atoms.net_wm_window_type,
+                                           XCB_ATOM_ATOM );
+            if( !property.has_value() )
+            {
+                return std::unexpected( std::move( property.error() ) );
+            }
+            if( !property->has_value() ||
+                ( *property )->type !=
+                XCB_ATOM_ATOM ||
+                ( *property )->format != format32Bits )
+            {
+                return std::string{ defaultWindowType };
+            }
+
+            const std::span<const std::byte> bytes{ ( *property )->bytes };
+            const std::size_t declared = bytes.size() / sizeof( xcb_atom_t );
+            for( std::size_t index = 0U; index < declared; ++index )
+            {
+                std::array<std::byte, sizeof( xcb_atom_t )> raw_atom{};
+                std::ranges::copy( bytes.subspan( index * sizeof( xcb_atom_t ),
+                                                  raw_atom.size() ),
+                                   raw_atom.begin() );
+                const auto declared_atom = std::bit_cast<xcb_atom_t>( raw_atom );
+                if( declared_atom == XCB_ATOM_NONE )
+                {
+                    continue;
+                }
+
+                const auto known =
+                    std::ranges::find( atoms.window_types, declared_atom );
+                if( known != atoms.window_types.end() )
+                {
+                    const auto position = static_cast<std::size_t>(
+                        std::ranges::distance( atoms.window_types.begin(), known )
+                    );
+                    return std::string{ windowTypeAtoms.at( position ).label };
+                }
+            }
+            return std::string{ defaultWindowType };
         }
 
         [[nodiscard]]
@@ -905,16 +1020,47 @@ namespace grab::screen
                 return std::unexpected( std::move( pid.error() ) );
             }
 
+            auto type = read_window_type( connection, window, *atoms );
+            if( !type.has_value() )
+            {
+                return std::unexpected( std::move( type.error() ) );
+            }
+
             result.push_back( WindowInfo{
                 .id       = static_cast<std::uint32_t>( window ),
                 .wm_class = std::move( *wm_class ),
                 .title    = std::move( *title ),
+                .type     = std::move( *type ),
                 .pid      = *pid,
                 .bounds   = **geometry,
             } );
         }
 
         return result;
+    }
+
+    grab::Result<grab::geometry::Rectangle>
+    window_bounds( xcb_connection_t* connection,
+                   xcb_window_t      root,
+                   xcb_window_t      window )
+    {
+        if( connection == nullptr || xcb_connection_has_error( connection ) != xcbOk )
+        {
+            return grab::fail( grab::ErrorCode::DeviceInaccessible,
+                               "XCB display connection is unavailable" );
+        }
+
+        auto geometry = read_geometry( connection, root, window );
+        if( !geometry.has_value() )
+        {
+            return std::unexpected( std::move( geometry.error() ) );
+        }
+        if( !geometry->has_value() )
+        {
+            return grab::fail( grab::ErrorCode::StaleWindow,
+                               "window disappeared before its bounds were read" );
+        }
+        return **geometry;
     }
 
     grab::Result<std::vector<OutputInfo>>

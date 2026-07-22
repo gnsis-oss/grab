@@ -12,7 +12,7 @@
 namespace
 {
 
-    constexpr std::array<std::string_view, 14U> expectedVerbs{
+    constexpr std::array<std::string_view, 17U> expectedVerbs{
         "doctor",
         "daemon",
         "type",
@@ -20,6 +20,9 @@ namespace
         "drag",
         "drag-curve",
         "capture",
+        "windows",
+        "focus",
+        "place",
         "batch",
         "compare",
         "watch",

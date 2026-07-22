@@ -1,10 +1,13 @@
 #include "codec/png.hpp"
+#include "grab/geometry/rectangle.hpp"
 #include "grab/image.hpp"
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
+#include "grab/window_info.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -45,14 +48,27 @@ namespace
     constexpr std::uint32_t    sampleX             = windowWidth / 2U;
     constexpr std::uint32_t    sampleY             = windowHeight / 2U;
     constexpr std::size_t      singleWindowCount   = 1U;
-    constexpr auto             paintDelay          = std::chrono::milliseconds{ 50 };
-    constexpr std::string_view knownInstance       = "grab-screen-instance";
-    constexpr std::string_view knownClass          = "GrabScreenKnownClass";
-    constexpr std::string_view knownClassCandidate = "screenknown";
-    constexpr std::string_view otherInstance       = "grab-screen-other-instance";
-    constexpr std::string_view otherClass          = "GrabScreenOtherClass";
-    constexpr std::string_view missingClass        = "class-that-does-not-exist";
-    constexpr std::string_view netClientListAtom   = "_NET_CLIENT_LIST";
+    constexpr std::int32_t     placedX             = 240;
+    constexpr std::int32_t     placedY             = 160;
+    constexpr std::uint32_t    placedWidth         = 320U;
+    constexpr std::uint32_t    placedHeight        = 200U;
+    // An id no client on the fixture display can hold.
+    constexpr std::uint32_t    anyWindowId          = 0X0F'FF'FF'FFU;
+    constexpr auto             placementTestTimeout = std::chrono::milliseconds{ 200 };
+    constexpr auto             paintDelay           = std::chrono::milliseconds{ 50 };
+    constexpr std::string_view knownInstance        = "grab-screen-instance";
+    constexpr std::string_view knownClass           = "GrabScreenKnownClass";
+    constexpr std::string_view knownClassCandidate  = "screenknown";
+    constexpr std::string_view otherInstance        = "grab-screen-other-instance";
+    constexpr std::string_view otherClass           = "GrabScreenOtherClass";
+    constexpr std::string_view missingClass         = "class-that-does-not-exist";
+    constexpr std::string_view netClientListAtom    = "_NET_CLIENT_LIST";
+    constexpr std::string_view netWmWindowTypeAtom  = "_NET_WM_WINDOW_TYPE";
+    constexpr std::string_view splashTypeAtom       = "_NET_WM_WINDOW_TYPE_SPLASH";
+    constexpr std::string_view normalTypeAtom       = "_NET_WM_WINDOW_TYPE_NORMAL";
+    constexpr std::string_view splashTypeName       = "splash";
+    constexpr std::string_view normalTypeName       = "normal";
+    constexpr std::size_t      declaredTypeCount    = 2U;
 
     template<typename T>
     using XcbOwned = std::unique_ptr<T, decltype( &std::free )>;
@@ -226,6 +242,34 @@ namespace
                                          format32Bits,
                                          static_cast<std::uint32_t>( windows.size() ),
                                          windows.data() )
+        ) );
+    }
+
+    // Declares the type list a splash screen really publishes: its own type
+    // first, then NORMAL as a fallback for window managers that do not implement
+    // SPLASH. Only the ordering distinguishes it from a plain window.
+    void
+    set_splash_window_type( xcb_connection_t* connection,
+                            xcb_window_t      window )
+    {
+        xcb_atom_t window_type = XCB_ATOM_NONE;
+        xcb_atom_t splash      = XCB_ATOM_NONE;
+        xcb_atom_t normal      = XCB_ATOM_NONE;
+        ASSERT_TRUE( intern_atom( connection, netWmWindowTypeAtom, window_type ) );
+        ASSERT_TRUE( intern_atom( connection, splashTypeAtom, splash ) );
+        ASSERT_TRUE( intern_atom( connection, normalTypeAtom, normal ) );
+
+        const std::array<xcb_atom_t, declaredTypeCount> declared{ splash, normal };
+        EXPECT_TRUE( request_succeeded(
+            connection,
+            xcb_change_property_checked( connection,
+                                         propertyReplaceMode,
+                                         window,
+                                         window_type,
+                                         XCB_ATOM_ATOM,
+                                         format32Bits,
+                                         static_cast<std::uint32_t>( declared.size() ),
+                                         declared.data() )
         ) );
     }
 
@@ -416,6 +460,234 @@ TEST( Screen,
 
     ASSERT_FALSE( image.has_value() );
     EXPECT_EQ( image.error().code, grab::ErrorCode::WindowNotFound );
+}
+
+TEST( Screen,
+      ListsWindowsWithBoundsAndClass )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    const xcb_window_t window = create_solid_window( connection.get(),
+                                                     *screen_info,
+                                                     knownColor,
+                                                     knownInstance,
+                                                     knownClass );
+
+    auto               screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    auto windows = screen->windows();
+
+    ASSERT_TRUE( windows.has_value() ) << windows.error().message;
+    const auto listed = std::ranges::find( *windows,
+                                           static_cast<std::uint32_t>( window ),
+                                           &grab::WindowSummary::id );
+    ASSERT_NE( listed, windows->end() );
+    EXPECT_EQ( listed->wm_class, knownClass );
+    EXPECT_EQ( listed->bounds.x, windowX );
+    EXPECT_EQ( listed->bounds.y, windowY );
+    EXPECT_EQ( listed->bounds.width, windowWidth );
+    EXPECT_EQ( listed->bounds.height, windowHeight );
+}
+
+TEST( Screen,
+      ActivateWindowByClassRaisesTheMatch )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    const xcb_window_t window = create_solid_window( connection.get(),
+                                                     *screen_info,
+                                                     knownColor,
+                                                     knownInstance,
+                                                     knownClass );
+
+    auto               screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    const std::vector<std::string> candidates{ std::string{ knownClassCandidate } };
+
+    auto focused = screen->activate_window_by_class( candidates );
+
+    ASSERT_TRUE( focused.has_value() ) << focused.error().message;
+    EXPECT_EQ( focused->id, static_cast<std::uint32_t>( window ) );
+    EXPECT_EQ( focused->wm_class, knownClass );
+}
+
+TEST( Screen,
+      ActivateWindowByClassReportsAMiss )
+{
+    auto screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    const std::vector<std::string> candidates{ std::string{ missingClass } };
+
+    auto focused = screen->activate_window_by_class( candidates );
+
+    ASSERT_FALSE( focused.has_value() );
+    EXPECT_EQ( focused.error().code, grab::ErrorCode::WindowNotFound );
+}
+
+TEST( Screen,
+      CapturesWindowById )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    const xcb_window_t window = create_solid_window( connection.get(),
+                                                     *screen_info,
+                                                     knownColor,
+                                                     knownInstance,
+                                                     knownClass );
+
+    auto               screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    auto image = screen->window_by_id( static_cast<std::uint32_t>( window ) );
+
+    ASSERT_TRUE( image.has_value() ) << image.error().message;
+    expect_sample_matches_known_color( *image );
+}
+
+TEST( Screen,
+      PlaceWindowSettlesOnTheRequestedGeometry )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    const xcb_window_t window = create_solid_window( connection.get(),
+                                                     *screen_info,
+                                                     knownColor,
+                                                     knownInstance,
+                                                     knownClass );
+
+    auto               screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    const grab::geometry::Rectangle request{
+        .x      = placedX,
+        .y      = placedY,
+        .width  = placedWidth,
+        .height = placedHeight
+    };
+
+    auto placed = screen->place_window( static_cast<std::uint32_t>( window ), request );
+
+    ASSERT_TRUE( placed.has_value() ) << placed.error().message;
+    EXPECT_EQ( placed->x, request.x );
+    EXPECT_EQ( placed->y, request.y );
+    EXPECT_EQ( placed->width, request.width );
+    EXPECT_EQ( placed->height, request.height );
+
+    // The window really moved, not merely the value this call echoed back.
+    auto windows = screen->windows();
+    ASSERT_TRUE( windows.has_value() ) << windows.error().message;
+    const auto listed = std::ranges::find( *windows,
+                                           static_cast<std::uint32_t>( window ),
+                                           &grab::WindowSummary::id );
+    ASSERT_NE( listed, windows->end() );
+    EXPECT_EQ( listed->bounds.x, request.x );
+    EXPECT_EQ( listed->bounds.width, request.width );
+}
+
+TEST( Screen,
+      PlaceWindowRejectsAZeroSizedRequest )
+{
+    auto screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    const grab::geometry::Rectangle
+         request{ .x = placedX, .y = placedY, .width = 0U, .height = placedHeight };
+
+    auto placed = screen->place_window( anyWindowId, request );
+
+    ASSERT_FALSE( placed.has_value() );
+    EXPECT_EQ( placed.error().code, grab::ErrorCode::InvalidArgument );
+}
+
+// A window that cannot exist can never settle, so the wait has to end in a
+// refusal rather than in a report of whatever was last seen.
+TEST( Screen,
+      PlaceWindowFailsForAnAbsentWindow )
+{
+    auto screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    const grab::geometry::Rectangle request{
+        .x      = placedX,
+        .y      = placedY,
+        .width  = placedWidth,
+        .height = placedHeight
+    };
+
+    auto placed = screen->place_window( anyWindowId, request, placementTestTimeout );
+
+    ASSERT_FALSE( placed.has_value() );
+}
+
+// The splash-screen case: same class and title as the main window, and it also
+// advertises NORMAL, so a containment test would report it as normal.
+TEST( Screen,
+      ReportsTheFirstDeclaredWindowType )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    const xcb_window_t window = create_solid_window( connection.get(),
+                                                     *screen_info,
+                                                     knownColor,
+                                                     knownInstance,
+                                                     knownClass );
+    set_splash_window_type( connection.get(), window );
+    ASSERT_TRUE( flush_succeeded( connection.get() ) );
+
+    auto screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    auto windows = screen->windows();
+
+    ASSERT_TRUE( windows.has_value() ) << windows.error().message;
+    const auto listed = std::ranges::find( *windows,
+                                           static_cast<std::uint32_t>( window ),
+                                           &grab::WindowSummary::id );
+    ASSERT_NE( listed, windows->end() );
+    EXPECT_EQ( listed->type, splashTypeName );
+}
+
+// EWMH prescribes NORMAL for a window that declares no type at all.
+TEST( Screen,
+      ReportsNormalForAnUntypedWindow )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    const xcb_window_t window = create_solid_window( connection.get(),
+                                                     *screen_info,
+                                                     knownColor,
+                                                     knownInstance,
+                                                     knownClass );
+
+    auto               screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    auto windows = screen->windows();
+
+    ASSERT_TRUE( windows.has_value() ) << windows.error().message;
+    const auto listed = std::ranges::find( *windows,
+                                           static_cast<std::uint32_t>( window ),
+                                           &grab::WindowSummary::id );
+    ASSERT_NE( listed, windows->end() );
+    EXPECT_EQ( listed->type, normalTypeName );
 }
 
 TEST( Screen,

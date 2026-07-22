@@ -17,6 +17,9 @@ namespace
     constexpr const char* returnKeysym   = "Return";
     constexpr const char* unknownKeysym  = "NoSuchGrabKeysym";
     constexpr const char* windowFlag     = "--window";
+    constexpr const char* windowIdFlag   = "--window-id";
+    constexpr const char* windowIdValue  = "4194311";
+    constexpr const char* notAWindowId   = "0x400007";
     constexpr const char* windowClass    = "GrabInputCommandTest";
     constexpr const char* sourceFlag     = "--src";
     constexpr const char* sourcePoint    = "0.2,0.3";
@@ -41,13 +44,62 @@ namespace
 
 }    // namespace
 
+// XTest delivers to whatever holds focus, so an absent window selector is a
+// deliberate "leave focus alone" instruction rather than a usage error. The
+// press itself may still fail on a display without XTest, hence NE not EQ.
 TEST( InputCommand,
-      KeyRequiresWindowTarget )
+      KeyWithoutAWindowSelectorIsNotAUsageError )
 {
     std::array storage{ std::string{ keysymFlag }, std::string{ returnKeysym } };
     auto       args = writable_arguments( storage );
 
+    EXPECT_NE( grab::cli::run_key_command( args ), usageExitCode );
+}
+
+TEST( InputCommand,
+      KeyRejectsBothWindowSelectorsAtOnce )
+{
+    std::array storage{
+        std::string{ windowFlag },
+        std::string{ windowClass },
+        std::string{ windowIdFlag },
+        std::string{ windowIdValue },
+        std::string{ keysymFlag },
+        std::string{ returnKeysym },
+    };
+    auto args = writable_arguments( storage );
+
     EXPECT_EQ( grab::cli::run_key_command( args ), usageExitCode );
+}
+
+TEST( InputCommand,
+      KeyRejectsNonDecimalWindowId )
+{
+    std::array storage{
+        std::string{ windowIdFlag },
+        std::string{ notAWindowId },
+        std::string{ keysymFlag },
+        std::string{ returnKeysym },
+    };
+    auto args = writable_arguments( storage );
+
+    EXPECT_EQ( grab::cli::run_key_command( args ), usageExitCode );
+}
+
+// drag-curve needs a resolved accessibility node to anchor its fractions on,
+// which only a WM_CLASS locator produces.
+TEST( InputCommand,
+      DragCurveRejectsAWindowIdSelector )
+{
+    std::array storage{
+        std::string{ windowIdFlag },
+        std::string{ windowIdValue },
+        std::string{ sourceFlag },
+        std::string{ sourcePoint },
+    };
+    auto args = writable_arguments( storage );
+
+    EXPECT_EQ( grab::cli::run_drag_curve_command( args ), usageExitCode );
 }
 
 TEST( InputCommand,

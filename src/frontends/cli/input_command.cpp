@@ -8,6 +8,7 @@
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/role.hpp"
+#include "grab/screen.hpp"
 #include "grab/session.hpp"
 #include "grab/ui.hpp"
 
@@ -40,12 +41,18 @@ namespace grab::cli
         constexpr std::string_view layoutFlag      = "--layout";
         constexpr std::string_view sourceFlag      = "--src";
         constexpr std::string_view windowFlag      = "--window";
+        constexpr std::string_view windowIdFlag    = "--window-id";
 
+        // How a verb names the window it acts on. `--window` resolves a WM_CLASS
+        // through the accessibility tree; `--window-id` names the exact id
+        // `grab windows` reports, which is the only workable selector for an
+        // application owning several windows of one class.
         struct TargetOptions
         {
-                std::string display;
-                std::string window;
-                bool        has_window = false;
+                std::string                  display;
+                std::string                  window;
+                std::optional<std::uint32_t> window_id;
+                bool                         has_window = false;
         };
 
         struct KeyOptions
@@ -117,7 +124,24 @@ namespace grab::cli
         }
 
         [[nodiscard]]
-        bool
+        grab::Result<std::uint32_t>
+        parse_window_id( std::string_view value )
+        {
+            std::uint32_t     window_id = 0U;
+            const char* const first     = value.data();
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            const char* const last   = first + value.size();
+            const auto        parsed = std::from_chars( first, last, window_id );
+            if( parsed.ec != std::errc{} || parsed.ptr != last )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "--window-id must be a decimal window id" );
+            }
+            return window_id;
+        }
+
+        [[nodiscard]]
+        grab::Result<bool>
         apply_target_option( TargetOptions&   target,
                              const FlagValue& option )
         {
@@ -126,19 +150,43 @@ namespace grab::cli
                 target.display = option.value;
                 return true;
             }
-            if( option.flag == windowFlag )
+            if( option.flag == windowFlag || option.flag == windowIdFlag )
             {
-                target.window     = option.value;
-                target.has_window = true;
+                if( target.has_window || target.window_id.has_value() )
+                {
+                    return grab::fail(
+                        grab::ErrorCode::InvalidArgument,
+                        "--window and --window-id are mutually exclusive"
+                    );
+                }
+                if( option.flag == windowFlag )
+                {
+                    target.window     = option.value;
+                    target.has_window = true;
+                    return true;
+                }
+                auto window_id = parse_window_id( option.value );
+                if( !window_id.has_value() )
+                {
+                    return std::unexpected( std::move( window_id.error() ) );
+                }
+                target.window_id = *window_id;
                 return true;
             }
             return false;
         }
 
+        // For verbs that drive the accessibility tree rather than the raw seat:
+        // they need a resolved node, and only a WM_CLASS locator produces one.
         [[nodiscard]]
         grab::Result<void>
-        validate_target( const TargetOptions& target )
+        validate_locator_target( const TargetOptions& target )
         {
+            if( target.window_id.has_value() )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "--window-id is not supported here; use --window" );
+            }
             if( !target.has_window || target.window.empty() )
             {
                 return grab::fail( grab::ErrorCode::InvalidArgument,
@@ -222,7 +270,12 @@ namespace grab::cli
                     return std::unexpected( std::move( option.error() ) );
                 }
 
-                if( apply_target_option( options.target, *option ) )
+                auto applied = apply_target_option( options.target, *option );
+                if( !applied.has_value() )
+                {
+                    return std::unexpected( std::move( applied.error() ) );
+                }
+                if( *applied )
                 {
                     continue;
                 }
@@ -243,11 +296,9 @@ namespace grab::cli
                                        std::string{ option->flag } );
             }
 
-            auto target = validate_target( options.target );
-            if( !target.has_value() )
-            {
-                return std::unexpected( std::move( target.error() ) );
-            }
+            // No window selector at all is legal for key: XTest delivers the
+            // stroke to whatever currently has focus, which is what a caller wants
+            // when no selector can name the window unambiguously.
             if( !options.has_keysym || options.keysym.empty() )
             {
                 return grab::fail( grab::ErrorCode::InvalidArgument,
@@ -279,7 +330,12 @@ namespace grab::cli
                     return std::unexpected( std::move( option.error() ) );
                 }
 
-                if( apply_target_option( options.target, *option ) )
+                auto applied = apply_target_option( options.target, *option );
+                if( !applied.has_value() )
+                {
+                    return std::unexpected( std::move( applied.error() ) );
+                }
+                if( *applied )
                 {
                     continue;
                 }
@@ -310,7 +366,7 @@ namespace grab::cli
                                        std::string{ option->flag } );
             }
 
-            auto target = validate_target( options.target );
+            auto target = validate_locator_target( options.target );
             if( !target.has_value() )
             {
                 return std::unexpected( std::move( target.error() ) );
@@ -373,19 +429,50 @@ namespace grab::cli
             return *match;
         }
 
+        // Brings the requested window forward, if one was requested at all. XTest
+        // delivers to whatever holds focus, so "no selector" is a valid instruction
+        // to leave focus alone rather than an omission to reject.
         [[nodiscard]]
         grab::Result<void>
-        press_key( const KeyOptions& options )
+        focus_key_target( const TargetOptions& target )
         {
-            auto session = open_window_session( options.target );
+            if( target.window_id.has_value() )
+            {
+                auto screen = grab::Screen::open( target.display.empty()
+                                                      ? nullptr
+                                                      : target.display.c_str() );
+                if( !screen.has_value() )
+                {
+                    return std::unexpected( std::move( screen.error() ) );
+                }
+                return screen->activate_window( *target.window_id );
+            }
+            if( !target.has_window || target.window.empty() )
+            {
+                return {};
+            }
+
+            auto session = open_window_session( target );
             if( !session.has_value() )
             {
                 return std::unexpected( std::move( session.error() ) );
             }
-            auto match = resolve_and_activate( **session, options.target );
+            auto match = resolve_and_activate( **session, target );
             if( !match.has_value() )
             {
                 return std::unexpected( std::move( match.error() ) );
+            }
+            return {};
+        }
+
+        [[nodiscard]]
+        grab::Result<void>
+        press_key( const KeyOptions& options )
+        {
+            auto focused = focus_key_target( options.target );
+            if( !focused.has_value() )
+            {
+                return std::unexpected( std::move( focused.error() ) );
             }
 
             // The keypress itself stays on the raw seat so --layout/--display apply.

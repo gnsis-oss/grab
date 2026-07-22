@@ -36,6 +36,7 @@ namespace
     constexpr std::uint32_t           accessibleStates     = 0U;
     constexpr std::size_t             fusedTargetCount     = 1U;
     constexpr std::size_t             separateTargetCount  = 2U;
+    constexpr std::string_view        normalWindowType     = "normal";
     constexpr std::string_view        windowTitle          = "Preferences";
     constexpr std::string_view        windowClass          = "GrabPreferences";
     constexpr std::string_view        accessibleObjectPath = "/org/example/preferences";
@@ -82,6 +83,7 @@ namespace
             .id       = xid,
             .wm_class = std::string{ window_class },
             .title    = std::string{ title },
+            .type     = std::string{ normalWindowType },
             .pid      = pid,
             .bounds   = bounds,
         };

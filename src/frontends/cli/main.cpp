@@ -7,11 +7,13 @@
 #include "drivers/desktop/x11/window_match.hpp"
 #include "drivers/desktop/x11/window_tracker.hpp"
 #include "drivers/desktop/x11/workflow.hpp"
+#include "frontends/cli/capture_command.hpp"
 #include "frontends/cli/common.hpp"
 #include "frontends/cli/input_command.hpp"
 #include "frontends/cli/overlay_command.hpp"
 #include "frontends/cli/session_command.hpp"
 #include "frontends/cli/watch_daemon.hpp"
+#include "frontends/cli/windows_command.hpp"
 #include "frontends/grpc/daemon.hpp"
 #include "grab/capture.hpp"
 #include "grab/command_descriptor.hpp"
@@ -85,6 +87,7 @@ namespace
     {
         None,
         Window,
+        WindowId,
         Output,
         Display,
         Region,
@@ -96,6 +99,7 @@ namespace
     {
             CaptureTarget         target = CaptureTarget::None;
             std::string           wm_class;
+            std::uint32_t         window_id = 0U;
             std::string           output_name;
             std::string           endpoint;
             CaptureRegion         region;
@@ -227,17 +231,25 @@ namespace
                             "       grab click --at X,Y [--button N] [--display D]\n"
                             "       grab click --locator LOCATOR [--endpoint ENDPOINT]\n"
                             "       grab drag --from X,Y --to X,Y [--display D]\n"
-                            "       grab key --window APP --keysym NAME [--display D] "
-                            "[--layout L]\n",
+                            "       grab key [--window APP | --window-id ID] "
+                            "--keysym NAME [--display D] [--layout L]\n",
                             stderr );
         ( void )std::fputs( "       grab drag-curve --window APP --src X,Y --dst X,Y "
                             "[--display D]\n",
                             stderr );
         ( void )std::fputs( "       grab capture --window WMCLASS --out FILE.png\n"
+                            "       grab capture --window-id ID --out FILE.png\n"
                             "       grab capture --output NAME --out FILE.png "
                             "[--endpoint ENDPOINT]\n"
                             "       grab capture --display --out FILE.png\n"
                             "       grab capture --region X,Y,WxH --out FILE.png\n",
+                            stderr );
+        ( void )std::fputs( "       grab windows [--json] [--class WMCLASS] "
+                            "[--type TYPE] [--display D]\n"
+                            "       grab focus (--window WMCLASS | --window-id ID) "
+                            "[--display D]\n"
+                            "       grab place (--window WMCLASS | --window-id ID) "
+                            "--geometry WxH+X+Y [--display D] [--timeout MS]\n",
                             stderr );
         ( void )std::fputs( "       grab batch --config PATH\n"
                             "       grab batch --window WMCLASS --out FILE.png [...]\n"
@@ -943,6 +955,7 @@ namespace
     parse_capture_options( std::span<char*> args )
     {
         constexpr std::string_view windowFlag{ "--window" };
+        constexpr std::string_view windowIdFlag{ "--window-id" };
         constexpr std::string_view outputFlag{ "--output" };
         constexpr std::string_view displayFlag{ "--display" };
         constexpr std::string_view regionFlag{ "--region" };
@@ -970,6 +983,33 @@ namespace
                 }
                 options.target   = CaptureTarget::Window;
                 options.wm_class = *current;
+                ++current;
+                continue;
+            }
+
+            if( arg == windowIdFlag )
+            {
+                auto target = require_no_capture_target( options );
+                if( !target.has_value() )
+                {
+                    return std::unexpected( std::move( target.error() ) );
+                }
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--window-id requires a value" );
+                }
+                auto window_id = grab::cli::detail::parse_unsigned(
+                    *current,
+                    std::numeric_limits<std::uint32_t>::max()
+                );
+                if( !window_id.has_value() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--window-id must be a decimal window id" );
+                }
+                options.target    = CaptureTarget::WindowId;
+                options.window_id = *window_id;
                 ++current;
                 continue;
             }
@@ -1064,8 +1104,8 @@ namespace
         if( options.target == CaptureTarget::None )
         {
             return grab::fail( grab::ErrorCode::InvalidArgument,
-                               "capture requires --window, --output, --display, or "
-                               "--region" );
+                               "capture requires --window, --window-id, --output, "
+                               "--display, or --region" );
         }
         if( !options.has_output || options.output.empty() )
         {
@@ -1357,6 +1397,8 @@ namespace
                     static_cast<std::uint16_t>( options.region.width ),
                     static_cast<std::uint16_t>( options.region.height )
                 );
+            case CaptureTarget::WindowId :
+                return screen.window_by_id( options.window_id );
             case CaptureTarget::Window :
             case CaptureTarget::Output :
             case CaptureTarget::None :
@@ -2413,6 +2455,12 @@ namespace
                 return grab::cli::run_drag_curve_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::Capture :
                 return run_capture_command( cli_args.subspan( 1 ) );
+            case grab::CommandKind::Windows :
+                return grab::cli::run_windows_command( cli_args.subspan( 1 ) );
+            case grab::CommandKind::Focus :
+                return grab::cli::run_focus_command( cli_args.subspan( 1 ) );
+            case grab::CommandKind::Place :
+                return grab::cli::run_place_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::Batch :
                 return run_batch_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::Compare :

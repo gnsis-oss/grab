@@ -17,6 +17,7 @@ namespace grab::screen
             std::uint32_t                id = 0U;
             std::string                  wm_class;
             std::string                  title;
+            std::string                  type;
             std::optional<std::uint32_t> pid;
             grab::geometry::Rectangle    bounds;
     };
@@ -29,6 +30,15 @@ namespace grab::screen
     grab::Result<std::vector<WindowInfo>>
     list_windows( xcb_connection_t* connection,
                   xcb_window_t      root );
+
+    // Bounds of one window in the same screen coordinates list_windows reports,
+    // read directly rather than by scanning the client list. Fails with
+    // StaleWindow once the window is gone.
+    [[nodiscard]]
+    grab::Result<grab::geometry::Rectangle>
+    window_bounds( xcb_connection_t* connection,
+                   xcb_window_t      root,
+                   xcb_window_t      window );
 
     struct OutputInfo
     {
