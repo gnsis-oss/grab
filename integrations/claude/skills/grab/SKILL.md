@@ -21,42 +21,46 @@ and capabilities are present. If `grab` is not on `PATH`, build it from the repo
 
 ## Prefer structured output
 
-Pass `--json` wherever it is offered (`doctor`, `windows`, `compare`, `watch`,
-`batch`) and parse that rather than scraping human text. Every verb supports
+Pass `--json` where it exists — today that is `doctor`, `windows`, and
+`watch status` — and parse that rather than scraping text. Other verbs
+(`capture`, `compare`, `batch`) print human-readable output. Every verb supports
 `grab <verb> --help`; read it before guessing flags.
 
 ## Capture output (read-only, safe)
 
 ```bash
-grab capture --window "Firefox" --out shot.png   # focused/matched window → PNG
-grab capture --window-id 0x1e00007 --out shot.png # capture a specific window id
-grab capture --region 0,0,1280,720 --out crop.png # a screen region
+grab capture --window "Firefox" --out shot.png    # matched window → PNG
+grab capture --window-id 0x1e00007 --out shot.png # a specific window id
+grab capture --region 0,0,1280x720 --out crop.png # a region "X,Y,WxH"
+grab capture --display --out full.png             # the whole display (flag, no value)
 grab windows --json                               # enumerate windows (id, class, title, type, pid, bounds)
-grab compare a.png b.png --json                   # image diff / RMSE
-grab watch start --window "Slack"                 # observe input/window events
+grab compare a.png b.png                           # match_ratio + diff_pixels (text)
+grab watch --window "Slack" --out slack.png        # re-capture the window whenever it changes
 grab doctor --json                                # environment & capability report
 ```
 
 `grab windows --json` is the usual first step: it gives you the window **id**
-and **wm_class** you then pass to capture / focus / place / input.
+and **wm_class** you then pass to capture / focus / place / input. Note `watch`
+is a screenshot-on-change watcher, not an input-event observer — observing
+keyboard/mouse/focus events is the job of `grab daemon`.
 
 ## Control windows (mutating, converges to a fixed state)
 
 ```bash
 grab focus --window "Firefox"          # raise + focus by WM_CLASS substring
 grab focus --window-id 0x1e00007       # raise + focus by native id
-grab place --window-id 0x1e00007 --geometry 100,100,1280,720  # move+size, waits until held
+grab place --window-id 0x1e00007 --geometry 1280x720+100+100  # WxH+X+Y; waits until held
 ```
 
 ## Synthesize input (mutating — acts on the real desktop)
 
 ```bash
-grab click --at 640,360                 # click at screen coordinates
+grab click --at 640,360                 # click at screen coordinates (--button N, numeric)
 grab click --locator "button:Submit"    # click a resolved UI target
 grab type --text "hello world"          # type text into the focused surface
-grab key --window-id 0x1e00007 ctrl+s   # send a keystroke to a window
+grab key --window-id 0x1e00007 --keysym Return  # send one keysym (name, not a chord)
 grab drag --from 100,100 --to 400,400   # straight drag
-grab drag-curve --window "Canvas" ...    # curved/gesture drag
+grab drag-curve --window "Canvas" --src 100,100 --dst 400,400  # curved/gesture drag
 ```
 
 ## Safe-by-default workflow

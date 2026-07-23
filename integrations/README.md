@@ -30,16 +30,27 @@ block — either to the plugin or to your project `.mcp.json`.
 
 ## Codex
 
-Codex has no skills; it reads `AGENTS.md` and speaks MCP. Two steps:
+This repo ships no Codex-native skill (Codex itself does support user/repository
+skills). For now, Codex discovers grab through `AGENTS.md` and calls it through
+MCP. The MCP setup below is **proposed** — it works once `grab-mcp` is built (see
+[`../mcp/README.md`](../mcp/README.md)); until then the `AGENTS.md` snippet alone
+lets Codex drive the CLI directly.
 
-1. Add the MCP server to `~/.codex/config.toml`:
+1. Add the MCP server to `~/.codex/config.toml`. `command` alone selects the
+   stdio transport (no `type` key). Codex does **not** forward
+   `DISPLAY`/`XAUTHORITY` to stdio servers, so a desktop tool must forward them
+   or it starts blind to the screen:
    ```toml
    [mcp_servers.grab]
-   command = "grab-mcp"
-   args = []
+   command = "/absolute/path/to/grab-mcp"
+   args = []                              # or ["--read-only"]
+   env_vars = ["DISPLAY", "XAUTHORITY"]   # forward X11 access
+   tool_timeout_sec = 120                 # optional (default 60)
    ```
-2. Paste the snippet below into your project's `AGENTS.md` so Codex knows grab
-   exists and how it is shaped.
+2. Add the snippet below to an `AGENTS.md` Codex will load. Codex assembles
+   guidance from `~/.codex/AGENTS.md` (machine-wide) → repo-root `AGENTS.md` →
+   nested `AGENTS.md` (subtree, overrides root), with `AGENTS.override.md`
+   winning in a directory. Put it at your repo root so Codex sees it project-wide.
 
 ## AGENTS.md snippet (copy into your project)
 
@@ -51,18 +62,22 @@ enumerate/focus/place windows, and synthesize mouse/keyboard input.
 
 - Check the environment first: `grab doctor --json`.
 - Discover windows: `grab windows --json` (gives id, WM_CLASS, title, bounds).
-- Capture (read-only): `grab capture --window-id <id> --out shot.png`.
-- Control/synthesize (mutating): `grab focus`, `grab place`, `grab click`,
-  `grab type --text`, `grab key`, `grab drag`.
-- Prefer `--json`; run `grab <verb> --help` for flags. Input synthesis acts on
-  the real desktop — capture and inspect before any mutating verb.
+- Capture a window (writes a PNG, no desktop change):
+  `grab capture --window-id <id> --out shot.png`.
+- Mutate the desktop: `grab focus`, `grab place --geometry WxH+X+Y`,
+  `grab click --at X,Y`, `grab type --text ...`, `grab key --keysym NAME`,
+  `grab drag --from X,Y --to X,Y`.
+- `--json` exists only on `doctor`, `windows`, and `watch status`; other verbs
+  print text. Run `grab <verb> --help` for flags. Input synthesis acts on the
+  real desktop — capture and inspect before any mutating verb.
 ```
 
 ## Any agent that shells out
 
 grab needs nothing special to be usable from a plain shell: `grab --help` lists
-verbs, most read verbs support `--json`, and each verb has `grab <verb> --help`.
-The skill/MCP files above just make discovery automatic instead of manual.
+verbs, `doctor`/`windows`/`watch status` support `--json`, and each verb has
+`grab <verb> --help`. The skill/MCP files above just make discovery automatic
+instead of manual.
 
 ## Note on file locations
 
