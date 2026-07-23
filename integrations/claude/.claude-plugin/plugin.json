@@ -1,0 +1,8 @@
+{
+  "name": "grab",
+  "description": "Desktop automation on Linux/X11: capture window screenshots, enumerate/focus/place windows, and synthesize mouse & keyboard input through the grab CLI.",
+  "version": "0.1.0",
+  "homepage": "https://github.com/gnsis-oss/grab",
+  "repository": "https://github.com/gnsis-oss/grab",
+  "keywords": ["desktop", "automation", "screenshot", "x11", "linux", "input", "gui"]
+}

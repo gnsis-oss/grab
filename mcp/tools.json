@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Machine-readable catalog of the tools a grab-mcp server exposes. Each entry maps 1:1 to a grab CLI verb. `safety` distinguishes read-only observation from input synthesis that mutates the live desktop; a server MAY gate the input-synthesis group behind an allowlist or a --read-only flag. Field `cli` is the underlying command a stdio server shells out to.",
+  "version": "0.1.0",
+  "tools": [
+    {
+      "name": "doctor",
+      "title": "Environment & capability report",
+      "safety": "read-only",
+      "cli": "grab doctor --json",
+      "description": "Report the available display, backends, and capabilities as JSON. Call first to confirm the desktop session is reachable before other tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "display": { "type": "string", "description": "X display to probe, e.g. \":0\" or \":99\". Defaults to $DISPLAY." }
+        }
+      }
+    },
+    {
+      "name": "list_windows",
+      "title": "Enumerate top-level windows",
+      "safety": "read-only",
+      "cli": "grab windows --json",
+      "description": "List every mapped top-level window with its native id, WM_CLASS, title, EWMH type, pid, and screen-coordinate bounds. Use this to resolve the id/class needed by capture_screen, focus_window, place_window, and key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wm_class": { "type": "string", "description": "Filter to windows whose WM_CLASS contains this substring (case-insensitive)." },
+          "type": { "type": "string", "description": "Filter by EWMH window type, e.g. \"normal\", \"dialog\", \"utility\"." },
+          "display": { "type": "string", "description": "X display. Defaults to $DISPLAY." }
+        }
+      }
+    },
+    {
+      "name": "capture_screen",
+      "title": "Screenshot a window or region",
+      "safety": "read-only",
+      "cli": "grab capture",
+      "description": "Capture a window (by WM_CLASS match or native id), a screen region, or an output to a PNG file. Focus-safe: capturing does not steal focus. Returns the path written.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "output_file": { "type": "string", "description": "Path to write the PNG." },
+          "window": { "type": "string", "description": "Capture the window whose WM_CLASS matches this substring." },
+          "window_id": { "type": "string", "description": "Capture the window with this native id (e.g. \"0x1e00007\"), as reported by list_windows." },
+          "region": { "type": "string", "description": "Capture a region \"x,y,width,height\" in screen coordinates." },
+          "display": { "type": "string", "description": "X display. Defaults to $DISPLAY." }
+        },
+        "required": ["output_file"]
+      }
+    },
+    {
+      "name": "compare_images",
+      "title": "Compare two images",
+      "safety": "read-only",
+      "cli": "grab compare",
+      "description": "Compare two PNG images and report whether they match plus an RMSE metric. Useful for visual regression checks after a mutating step.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "expected": { "type": "string", "description": "Path to the baseline image." },
+          "actual": { "type": "string", "description": "Path to the image to check." }
+        },
+        "required": ["expected", "actual"]
+      }
+    },
+    {
+      "name": "watch_events",
+      "title": "Observe desktop events",
+      "safety": "read-only",
+      "cli": "grab watch",
+      "description": "Observe keyboard, mouse, focus, and window events, optionally scoped to a window. Long-running; a server should stream or bound the run with a duration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "window": { "type": "string", "description": "Scope events to the window whose WM_CLASS matches this substring." },
+          "duration_ms": { "type": "integer", "description": "Stop after this many milliseconds." },
+          "display": { "type": "string", "description": "X display. Defaults to $DISPLAY." }
+        }
+      }
+    },
+    {
+      "name": "batch",
+      "title": "Run a batch manifest",
+      "safety": "read-only",
+      "cli": "grab batch --config",
+      "description": "Run a JSON/manifest-driven batch of capture/compare operations. Read-only with respect to the desktop.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "config": { "type": "string", "description": "Path to the batch manifest." }
+        },
+        "required": ["config"]
+      }
+    },
+    {
+      "name": "focus_window",
+      "title": "Raise and focus a window",
+      "safety": "input-synthesis",
+      "cli": "grab focus",
+      "description": "Raise and focus a window by WM_CLASS substring or native id. Idempotent: converges on the same end state. Activation is a request to the window manager and may be asynchronous.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "window": { "type": "string", "description": "Focus the window whose WM_CLASS matches this substring." },
+          "window_id": { "type": "string", "description": "Focus the window with this native id." },
+          "display": { "type": "string", "description": "X display. Defaults to $DISPLAY." }
+        }
+      }
+    },
+    {
+      "name": "place_window",
+      "title": "Move and resize a window",
+      "safety": "input-synthesis",
+      "cli": "grab place",
+      "description": "Drive a window to exact position and size and poll until it has held that geometry. Clears maximised/fullscreen state first. Idempotent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "window_id": { "type": "string", "description": "Native id of the window to place." },
+          "window": { "type": "string", "description": "WM_CLASS substring of the window to place." },
+          "geometry": { "type": "string", "description": "Target geometry \"x,y,width,height\" in screen coordinates." }
+        },
+        "required": ["geometry"]
+      }
+    },
+    {
+      "name": "click",
+      "title": "Click the mouse",
+      "safety": "input-synthesis",
+      "cli": "grab click",
+      "description": "Click at screen coordinates or at a resolved UI locator. Moves the real pointer — do not call speculatively; capture_screen first to confirm the target.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "at": { "type": "string", "description": "Screen coordinates \"x,y\"." },
+          "locator": { "type": "string", "description": "A resolved UI target, e.g. \"button:Submit\"." },
+          "button": { "type": "string", "enum": ["left", "middle", "right"], "description": "Mouse button. Defaults to left." }
+        }
+      }
+    },
+    {
+      "name": "type_text",
+      "title": "Type text",
+      "safety": "input-synthesis",
+      "cli": "grab type --text",
+      "description": "Type a string into the currently focused surface as real keystrokes. Focus the intended window first (focus_window).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "The text to type." }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "key",
+      "title": "Send a keystroke",
+      "safety": "input-synthesis",
+      "cli": "grab key",
+      "description": "Send a key chord (e.g. \"ctrl+s\", \"alt+Tab\") to a window by id, or to the focused surface.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keys": { "type": "string", "description": "Key chord, e.g. \"ctrl+shift+t\"." },
+          "window_id": { "type": "string", "description": "Target window native id. Defaults to the focused surface." }
+        },
+        "required": ["keys"]
+      }
+    },
+    {
+      "name": "drag",
+      "title": "Drag the mouse",
+      "safety": "input-synthesis",
+      "cli": "grab drag",
+      "description": "Press, move, and release between two screen points. Use drag_curve for gesture/curved drags.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": { "type": "string", "description": "Start point \"x,y\"." },
+          "to": { "type": "string", "description": "End point \"x,y\"." }
+        },
+        "required": ["from", "to"]
+      }
+    }
+  ]
+}
