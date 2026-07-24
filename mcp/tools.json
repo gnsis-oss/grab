@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Machine-readable catalog of the tools a grab-mcp server exposes. Each entry maps to a grab CLI verb. `annotations` are standard MCP ToolAnnotations (readOnlyHint follows MCP semantics — writing an output file counts as modifying the environment). `x-grab-category` is grab's own classification and is what a server's --read-only mode / allowlist should gate on: observe+capture never touch the desktop; window-control and input-synthesis do. `cli` is the base command; a server MUST use explicit per-tool argv adapters (flag renames, mutual-exclusion, value conversion) rather than generating argv from this string. Only doctor, windows, and watch-status emit JSON today; the rest print text and need parsing or a JSON mode added upstream.",
+  "version": "0.1.0",
+  "tools": [
+    {
+      "name": "doctor",
+      "cli": "grab doctor --json",
+      "x-grab-category": "observe",
+      "annotations": { "title": "Environment & capability report", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true },
+      "description": "Report the available display, backends, and capabilities as JSON. Call first to confirm the desktop session is reachable. Emits JSON.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "display": { "type": "string", "description": "X display to probe, e.g. \":0\". Passed through the environment; not a grab flag." }
+        }
+      }
+    },
+    {
+      "name": "list_windows",
+      "cli": "grab windows --json",
+      "x-grab-category": "observe",
+      "annotations": { "title": "Enumerate top-level windows", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true },
+      "description": "List every mapped top-level window with native id, WM_CLASS, title, EWMH type, pid, and screen-coordinate bounds. Emits JSON. Use it to resolve the id/class other tools need.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "wm_class": { "type": "string", "description": "--class: keep only windows whose WM_CLASS contains this substring (case-insensitive)." },
+          "type": { "type": "string", "description": "--type: filter by EWMH window type, e.g. \"normal\", \"dialog\"." }
+        }
+      }
+    },
+    {
+      "name": "capture_screen",
+      "cli": "grab capture",
+      "x-grab-category": "capture",
+      "annotations": { "title": "Screenshot a window, output, or region", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true },
+      "description": "Capture a PNG to `out`. Focus-safe. Provide EXACTLY ONE target: window (--window), window_id (--window-id), output_name (--output), full_display (--display), or region (--region). Prints text, not JSON. A server should also return the PNG as MCP image content, not only the path.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "out": { "type": "string", "description": "--out: path to write the PNG." },
+          "window": { "type": "string", "description": "--window: capture the window whose WM_CLASS matches this substring." },
+          "window_id": { "type": "string", "description": "--window-id: capture the window with this native id (e.g. \"0x1e00007\")." },
+          "output_name": { "type": "string", "description": "--output: capture a named display output (monitor)." },
+          "full_display": { "type": "boolean", "description": "--display: capture the entire display (boolean flag, takes no value)." },
+          "region": { "type": "string", "description": "--region: capture a region in the form \"X,Y,WxH\" (note: width and height are joined by 'x')." }
+        },
+        "required": ["out"],
+        "oneOf": [
+          { "required": ["window"] },
+          { "required": ["window_id"] },
+          { "required": ["output_name"] },
+          { "required": ["full_display"] },
+          { "required": ["region"] }
+        ]
+      }
+    },
+    {
+      "name": "watch_capture",
+      "cli": "grab watch",
+      "x-grab-category": "capture",
+      "annotations": { "title": "Capture a window on change", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false },
+      "description": "Watch a window and write a fresh PNG when it changes. This is a screenshot watcher, NOT an input-event observer (event observation lives in `grab daemon`). Long-running: a server MUST bound it (duration_ms) and support cancellation. Requires both window and out.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "window": { "type": "string", "description": "--window: WM_CLASS substring of the window to watch." },
+          "out": { "type": "string", "description": "--out: path (or pattern) to write PNGs to." },
+          "interval_ms": { "type": "integer", "minimum": 20, "description": "Poll interval in milliseconds (>= 20)." },
+          "duration_ms": { "type": "integer", "description": "Server-enforced cap: stop after this many milliseconds." }
+        },
+        "required": ["window", "out"]
+      }
+    },
+    {
+      "name": "compare_images",
+      "cli": "grab compare",
+      "x-grab-category": "observe",
+      "annotations": { "title": "Compare two images", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true },
+      "description": "Compare two PNGs (positional A B) and report a match_ratio and diff_pixels count. Prints text, not JSON (there is no --json for compare today). Directory comparison offers an additional RMSE metric.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "a": { "type": "string", "description": "First image path (positional A)." },
+          "b": { "type": "string", "description": "Second image path (positional B)." },
+          "notify": { "type": "boolean", "description": "--notify: raise a desktop notification on mismatch." }
+        },
+        "required": ["a", "b"]
+      }
+    },
+    {
+      "name": "batch",
+      "cli": "grab batch --config",
+      "x-grab-category": "capture",
+      "annotations": { "title": "Run a capture batch manifest", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false },
+      "description": "Run a manifest-driven batch of capture/compare operations. Writes image files. Prints text, not JSON.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "config": { "type": "string", "description": "--config: path to the batch manifest." }
+        },
+        "required": ["config"]
+      }
+    },
+    {
+      "name": "focus_window",
+      "cli": "grab focus",
+      "x-grab-category": "window-control",
+      "annotations": { "title": "Raise and focus a window", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true },
+      "description": "Raise and focus a window by WM_CLASS substring or native id. Idempotent (converges on the same end state). Mutates the desktop but does not synthesize pointer/keyboard input. Provide exactly one selector.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "window": { "type": "string", "description": "--window: WM_CLASS substring of the window to focus." },
+          "window_id": { "type": "string", "description": "--window-id: native id of the window to focus." }
+        },
+        "oneOf": [ { "required": ["window"] }, { "required": ["window_id"] } ]
+      }
+    },
+    {
+      "name": "place_window",
+      "cli": "grab place",
+      "x-grab-category": "window-control",
+      "annotations": { "title": "Move and resize a window", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true },
+      "description": "Drive a window to an exact geometry and poll until it has held it. Clears maximised/fullscreen first. Idempotent. Provide exactly one selector plus geometry.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "window": { "type": "string", "description": "--window: WM_CLASS substring of the window to place." },
+          "window_id": { "type": "string", "description": "--window-id: native id of the window to place." },
+          "geometry": { "type": "string", "description": "--geometry: target as \"WxH+X+Y\" (the X11 spelling: size then offset; offsets may be negative), e.g. \"1280x720+100+100\"." },
+          "timeout_ms": { "type": "integer", "description": "--timeout: budget in ms for the window to reach and hold the geometry." }
+        },
+        "required": ["geometry"],
+        "oneOf": [ { "required": ["window"] }, { "required": ["window_id"] } ]
+      }
+    },
+    {
+      "name": "click",
+      "cli": "grab click",
+      "x-grab-category": "input-synthesis",
+      "annotations": { "title": "Click the mouse", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+      "description": "Click at screen coordinates (--at) or a resolved UI locator (--locator). Moves the real pointer — never call speculatively; capture_screen first to confirm the target. Provide exactly one of at/locator.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "at": { "type": "string", "description": "--at: screen coordinates \"X,Y\"." },
+          "locator": { "type": "string", "description": "--locator: a resolved UI target string." },
+          "button": { "type": "integer", "minimum": 1, "maximum": 255, "description": "--button: numeric X button (1=left, 2=middle, 3=right, ...). Defaults to 1." }
+        },
+        "oneOf": [ { "required": ["at"] }, { "required": ["locator"] } ]
+      }
+    },
+    {
+      "name": "type_text",
+      "cli": "grab type --text",
+      "x-grab-category": "input-synthesis",
+      "annotations": { "title": "Type text", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+      "description": "Type a string into the currently focused surface as real keystrokes. Focus the intended window first (focus_window).",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": { "type": "string", "description": "--text: the text to type." },
+          "layout": { "type": "string", "description": "--layout: keyboard layout to resolve against." }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "key",
+      "cli": "grab key --keysym",
+      "x-grab-category": "input-synthesis",
+      "annotations": { "title": "Send a keystroke", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+      "description": "Send a single key by X keysym NAME (e.g. \"Return\", \"Escape\", \"a\"), resolved via xkbcommon — NOT a chord string like \"ctrl+s\". Optionally target a window by class or id; otherwise it goes to the focused surface.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "keysym": { "type": "string", "description": "--keysym: X keysym name (xkb_keysym_from_name), e.g. \"Return\", \"F5\", \"a\"." },
+          "window": { "type": "string", "description": "--window: WM_CLASS substring to target." },
+          "window_id": { "type": "string", "description": "--window-id: native id to target." }
+        },
+        "required": ["keysym"]
+      }
+    },
+    {
+      "name": "drag",
+      "cli": "grab drag",
+      "x-grab-category": "input-synthesis",
+      "annotations": { "title": "Straight mouse drag", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+      "description": "Press, move in a straight line, and release between two screen points. Use drag_curve for gesture/curved drags.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": { "type": "string", "description": "--from: start point \"X,Y\"." },
+          "to": { "type": "string", "description": "--to: end point \"X,Y\"." }
+        },
+        "required": ["from", "to"]
+      }
+    },
+    {
+      "name": "drag_curve",
+      "cli": "grab drag-curve",
+      "x-grab-category": "input-synthesis",
+      "annotations": { "title": "Curved / gesture drag within a window", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+      "description": "Perform a curved drag gesture from src to dst within a window (window-relative gesture recipe). Moves the real pointer.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "window": { "type": "string", "description": "--window: WM_CLASS substring of the target window." },
+          "src": { "type": "string", "description": "--src: gesture start \"X,Y\"." },
+          "dst": { "type": "string", "description": "--dst: gesture end \"X,Y\"." }
+        },
+        "required": ["window", "src", "dst"]
+      }
+    }
+  ]
+}

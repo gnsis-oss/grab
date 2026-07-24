@@ -1,0 +1,18 @@
+{
+  "name": "grab",
+  "owner": {
+    "name": "grab"
+  },
+  "description": "Desktop automation for AI agents on Linux/X11 — capture windows, enumerate/focus/place windows, and synthesize mouse & keyboard input via the grab CLI.",
+  "plugins": [
+    {
+      "name": "grab",
+      "source": "./integrations/claude",
+      "description": "Teaches Claude to drive the grab CLI: screenshots, window enumeration/focus/placement, and mouse/keyboard synthesis on X11. Pairs with the optional grab-mcp tool server.",
+      "version": "0.1.0",
+      "homepage": "https://github.com/gnsis-oss/grab",
+      "repository": "https://github.com/gnsis-oss/grab",
+      "keywords": ["desktop", "automation", "screenshot", "x11", "linux", "input", "gui"]
+    }
+  ]
+}
