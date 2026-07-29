@@ -361,6 +361,7 @@ namespace grab::kernel::lifecycle
         NodeInfo info{};
         info.role       = record->role;
         info.states     = record->states;
+        info.facets     = record->facets;
         info.provenance = record->provenance();
 
         const auto read = record->property( grab::property::bounds );
@@ -371,6 +372,29 @@ namespace grab::kernel::lifecycle
                 info.bounds = *rect;
             }
         }
+
+        // Surface the text-bearing properties the backend populated. Each is
+        // optional: an Absent read leaves the field empty. The a11y tree is
+        // spider's DOM surrogate, so the anchor label, prose and link target
+        // must reach the caller, not just geometry.
+        const auto read_string =
+            [record]( grab::PropertyId id ) -> std::string
+        {
+            const auto property = record->property( id );
+            if( property.state != PropertyRead::State::Present )
+            {
+                return {};
+            }
+            if( const auto* const value = std::get_if<std::string>( &property.value ) )
+            {
+                return *value;
+            }
+            return {};
+        };
+        info.name  = read_string( grab::property::accessible_name );
+        info.title = read_string( grab::property::title );
+        info.text  = read_string( grab::property::text );
+        info.url   = read_string( grab::property::url );
         return info;
     }
 
