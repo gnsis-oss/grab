@@ -166,6 +166,33 @@ TEST( SessionVerbs,
 }
 
 TEST( SessionVerbs,
+      ResolveAllReturnsEveryMatchAndEmptyIsSuccess )
+{
+    grab::testing::FakeRuntime fake;
+    fake.inject_snapshot( grab::testing::tree::snapshot(
+        1U,
+        { grab::testing::tree::node( 1U, grab::role::window ) }
+    ) );
+
+    auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
+    ASSERT_NE( core, nullptr );
+    const grab::OperationContext context{};
+    ASSERT_TRUE( core->attach( fake, context ).has_value() );
+
+    const auto windows = core->resolve_all( grab::sel::role( grab::role::window ) );
+    ASSERT_TRUE( windows.has_value() ) << windows.error().message;
+    ASSERT_EQ( windows->size(), 1U );
+    EXPECT_EQ( windows->front().ref.node, 1U );
+
+    // A locator that matches nothing is success with an empty vector, NOT
+    // NoMatch — a harvester asking "all links" on a page with none is not an
+    // error.
+    const auto buttons = core->resolve_all( grab::sel::role( grab::role::button ) );
+    ASSERT_TRUE( buttons.has_value() ) << buttons.error().message;
+    EXPECT_TRUE( buttons->empty() );
+}
+
+TEST( SessionVerbs,
       ResolveExactlyOneOnEmptyScopeReturnsNoMatch )
 {
     grab::testing::FakeRuntime fake;

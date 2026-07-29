@@ -104,6 +104,14 @@ namespace grab
             resolve( const Locator& locator,
                      Cardinality    cardinality = Cardinality::ExactlyOne );
 
+            // Resolves every node matching the locator, each returned as a Match
+            // ready for describe(). Use this to enumerate a document's links,
+            // headings or list items in one call; an empty result is success
+            // with an empty vector.
+            [[nodiscard]]
+            Result<std::vector<Match>>
+            resolve_all( const Locator& locator );
+
             [[nodiscard]]
             Result<NodeInfo>
             describe( const Match& match );

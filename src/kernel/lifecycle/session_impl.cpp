@@ -338,6 +338,38 @@ namespace grab::kernel::lifecycle
                                query::QueryScope{ .navigation = navigation } );
     }
 
+    Result<std::vector<Match>>
+    SessionCore::resolve_all( const Locator& locator )
+    {
+        auto snapshot = bindings_.front()->store->snapshot();
+        if( !snapshot.has_value() )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no tree snapshot" );
+        }
+        const query::SnapshotTreeNav navigation{ *snapshot };
+        auto                         nodes = query::resolve_all(
+            locator,
+            query::QueryScope{ .navigation = navigation } );
+        if( !nodes.has_value() )
+        {
+            return std::unexpected( std::move( nodes.error() ) );
+        }
+
+        std::vector<Match> matches;
+        matches.reserve( nodes->size() );
+        for( const auto& ref : *nodes )
+        {
+            // describe() reads only ref (node + generation); the remaining Match
+            // fields keep their live defaults. Constructed field-by-field to
+            // avoid a missing-designated-initializer under -Werror.
+            Match match{};
+            match.ref = ref;
+            matches.push_back( match );
+        }
+        return matches;
+    }
+
     Result<NodeInfo>
     SessionCore::describe( const Match& match )
     {
@@ -919,6 +951,18 @@ namespace grab::kernel::lifecycle
                          "session has no composed display stack" );
         }
         return core->resolve( locator, cardinality );
+    }
+
+    Result<std::vector<Match>>
+    resolve_all_verb( SessionCore*   core,
+                      const Locator& locator )
+    {
+        if( core == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no composed display stack" );
+        }
+        return core->resolve_all( locator );
     }
 
     Result<NodeInfo>

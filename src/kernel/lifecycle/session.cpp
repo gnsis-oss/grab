@@ -728,6 +728,12 @@ namespace grab
         return kernel::lifecycle::resolve_verb( impl_->core(), locator, cardinality );
     }
 
+    grab::Result<std::vector<Match>>
+    Session::resolve_all( const Locator& locator )
+    {
+        return kernel::lifecycle::resolve_all_verb( impl_->core(), locator );
+    }
+
     grab::Result<NodeInfo>
     Session::describe( const Match& match )
     {
