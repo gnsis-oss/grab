@@ -1,5 +1,6 @@
 #include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "drivers/desktop/x11/x11_runtime.hpp"
+#include "drivers/semantic/atspi/atspi_enumerator.hpp"
 #include "drivers/semantic/atspi/atspi_runtime.hpp"
 #include "grab/capture.hpp"
 #include "grab/context.hpp"
@@ -257,7 +258,7 @@ namespace grab::kernel::lifecycle
             *reactor,
             bus_,
             *registry_,
-            grab::drivers::semantic::atspi::AtspiTreeSource::AccessibleEnumerator{},
+            grab::drivers::semantic::atspi::make_dbus_enumerator(),
             std::nullopt,
             atspi_runtime_id
         );

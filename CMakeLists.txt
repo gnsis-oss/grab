@@ -239,6 +239,7 @@ target_include_directories(grab_driver_evdev PUBLIC ${CMAKE_CURRENT_LIST_DIR}/sr
 target_compile_features(grab_driver_evdev PUBLIC cxx_std_23)
 
 add_library(grab_driver_atspi STATIC
+    src/drivers/semantic/atspi/atspi_enumerator.cpp
     src/drivers/semantic/atspi/atspi_monitor.cpp
     src/drivers/semantic/atspi/atspi_runtime.cpp
     src/drivers/semantic/atspi/atspi_tree_source.cpp

@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <variant>
 // clang-format on
 
 namespace
@@ -35,6 +36,7 @@ namespace
             .name         = std::string{ "Save" },
             .title        = std::string{},
             .text_content = std::string{},
+            .url          = std::string{},
             .states       = grab::NodeState::Visible | grab::NodeState::Enabled,
             .pid          = 4'242U,
             .bounds       = std::nullopt,
@@ -102,4 +104,21 @@ TEST( AtspiMapping,
     EXPECT_FALSE( grab::has_facet( plain_record.facets, grab::Facet::Text ) );
     EXPECT_FALSE( grab::has_facet( plain_record.facets, grab::Facet::Value ) );
     EXPECT_FALSE( grab::has_facet( plain_record.facets, grab::Facet::Selection ) );
+}
+
+TEST( AtspiMapping,
+      MapsLinkUrlToProperty )
+{
+    const std::string linkUrl = "https://en.wikipedia.org/wiki/Tiger";
+    auto              link     = accessible( atspi::AtspiRole::Link,
+                                atspi::AtspiInterfaceSet{} );
+    link.url                   = linkUrl;
+
+    const auto record = atspi::map_accessible( link, runtimeId, revision );
+
+    const auto url = record.property( grab::property::url );
+    EXPECT_EQ( url.state, grab::PropertyRead::State::Present );
+    const auto* const value = std::get_if<std::string>( &url.value );
+    ASSERT_NE( value, nullptr );
+    EXPECT_EQ( *value, linkUrl );
 }
