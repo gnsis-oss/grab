@@ -146,8 +146,7 @@ namespace grab::drivers::semantic::atspi
                                                accessible.title ) );
         properties.push_back( string_property( grab::property::text,
                                                accessible.text_content ) );
-        properties.push_back( string_property( grab::property::url,
-                                               accessible.url ) );
+        properties.push_back( string_property( grab::property::url, accessible.url ) );
         properties.push_back( grab::UiProperty{
             .id = grab::property::process_id,
             .read = accessible.pid.has_value()

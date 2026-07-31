@@ -47,9 +47,9 @@ namespace
     constexpr std::string_view describeName  = "Read more";
     constexpr std::string_view describeTitle = "Wikipedia, the free encyclopedia";
     constexpr std::string_view describeText  = "The tiger is a large cat.";
-    constexpr std::string_view describeUrl    = "https://en.wikipedia.org/wiki/Tiger";
-    constexpr std::uint32_t
-        describeFacets = grab::facet_mask( grab::Facet::Text ) | grab::Facet::Invokable;
+    constexpr std::string_view describeUrl   = "https://en.wikipedia.org/wiki/Tiger";
+    constexpr std::uint32_t    describeFacets =
+        grab::facet_mask( grab::Facet::Text ) | grab::Facet::Invokable;
 
     [[nodiscard]]
     grab::UiSnapshot
@@ -85,24 +85,24 @@ namespace
     grab::UiSnapshot
     describe_snapshot( grab::RuntimeId runtime )
     {
-        const auto string_property =
-            []( grab::PropertyId id, std::string_view value )
+        const auto string_property = []( grab::PropertyId id, std::string_view value )
         {
             return grab::UiProperty{
                 .id   = id,
                 .read = grab::PropertyRead{
-                    .state = grab::PropertyRead::State::Present,
-                    .value = std::string{ value },
-                },
+                                           .state = grab::PropertyRead::State::Present,
+                                           .value = std::string{ value },
+                                           },
             };
         };
         std::vector<grab::UiProperty> properties{
             grab::UiProperty{
-                             .id   = grab::property::bounds,
-                             .read = grab::PropertyRead{
-                    .state = grab::PropertyRead::State::Present,
-                    .value = describeBounds,
-                }, },
+                             .id = grab::property::bounds,
+                             .read =
+                    grab::PropertyRead{
+                        .state = grab::PropertyRead::State::Present,
+                        .value = describeBounds,
+                    }, },
             string_property( grab::property::accessible_name, describeName ),
             string_property( grab::property::title, describeTitle ),
             string_property( grab::property::text, describeText ),

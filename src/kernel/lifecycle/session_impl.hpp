@@ -181,6 +181,15 @@ namespace grab::kernel::lifecycle
             void
             stop_observation();
 
+            // Force a fresh full snapshot from every bound tree source into its
+            // store. The AT-SPI source delivers no incremental updates
+            // (next_update is always empty), so after the page it describes
+            // changes — e.g. a browser navigation — the cached snapshot is stale
+            // until this is called. Cheap to call; re-enumerates the tree once.
+            [[nodiscard]]
+            Result<void>
+            resync( const OperationContext& context );
+
         private:
 
             struct RuntimeBinding

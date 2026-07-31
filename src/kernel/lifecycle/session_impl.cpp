@@ -81,10 +81,10 @@ namespace grab::kernel::lifecycle
         node_info_from_record( const UiNodeRecord& record )
         {
             NodeInfo info{};
-            info.role       = record.role;
-            info.states     = record.states;
-            info.facets     = record.facets;
-            info.provenance = record.provenance();
+            info.role         = record.role;
+            info.states       = record.states;
+            info.facets       = record.facets;
+            info.provenance   = record.provenance();
 
             const auto bounds = record.property( grab::property::bounds );
             if( bounds.state == PropertyRead::State::Present )
@@ -95,8 +95,7 @@ namespace grab::kernel::lifecycle
                 }
             }
 
-            const auto read_string =
-                [&record]( grab::PropertyId id ) -> std::string
+            const auto read_string = [&record]( grab::PropertyId id ) -> std::string
             {
                 const auto property = record.property( id );
                 if( property.state != PropertyRead::State::Present )
@@ -385,10 +384,9 @@ namespace grab::kernel::lifecycle
             }
             any_snapshot = true;
             const query::SnapshotTreeNav navigation{ *snapshot };
-            auto                         match = query::resolve(
-                locator,
-                cardinality,
-                query::QueryScope{ .navigation = navigation } );
+            auto match = query::resolve( locator,
+                                         cardinality,
+                                         query::QueryScope{ .navigation = navigation } );
             if( match.has_value() )
             {
                 return match;
@@ -426,9 +424,9 @@ namespace grab::kernel::lifecycle
             }
             any_snapshot = true;
             const query::SnapshotTreeNav navigation{ *snapshot };
-            auto                         nodes = query::resolve_all(
-                locator,
-                query::QueryScope{ .navigation = navigation } );
+            auto                         nodes =
+                query::resolve_all( locator,
+                                    query::QueryScope{ .navigation = navigation } );
             if( !nodes.has_value() )
             {
                 return std::unexpected( std::move( nodes.error() ) );
@@ -462,7 +460,8 @@ namespace grab::kernel::lifecycle
         bool stale_seen   = false;
         for( const auto& binding : bindings_ )
         {
-            if( binding->assigned_runtime != match.ref.runtime &&
+            if( binding->assigned_runtime !=
+                match.ref.runtime &&
                 match.ref.runtime != RuntimeId{} )
             {
                 continue;
@@ -472,7 +471,7 @@ namespace grab::kernel::lifecycle
             {
                 continue;
             }
-            any_snapshot            = true;
+            any_snapshot             = true;
             const auto* const record = snapshot->node( NodeId{ match.ref.node } );
             if( record == nullptr )
             {
@@ -835,6 +834,47 @@ namespace grab::kernel::lifecycle
             pump_.reset();
         }
         bus_.set_demand_callback( {} );
+    }
+
+    Result<void>
+    SessionCore::resync( const OperationContext& context )
+    {
+        const auto checked = context.check();
+        if( !checked.has_value() )
+        {
+            return std::unexpected( checked.error() );
+        }
+        bool any = false;
+        for( const auto& binding : bindings_ )
+        {
+            if( binding->source == nullptr || binding->store == nullptr )
+            {
+                continue;
+            }
+            auto snapshot_result = binding->source->snapshot( primaryTree, context );
+            if( !snapshot_result.has_value() )
+            {
+                // A source that cannot snapshot on demand (e.g. the X11 source,
+                // which is event-driven) is skipped, not fatal: other bindings
+                // still refresh.
+                continue;
+            }
+            auto applied = binding->store->apply( spi::UiUpdate{
+                .source_sequence = 0U,
+                .payload         = std::move( *snapshot_result ),
+            } );
+            if( !applied.has_value() )
+            {
+                return std::unexpected( std::move( applied.error() ) );
+            }
+            any = true;
+        }
+        if( !any )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "no bound source could resync" );
+        }
+        return {};
     }
 
     void

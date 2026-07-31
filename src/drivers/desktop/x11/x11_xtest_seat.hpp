@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/geometry/point.hpp"
 #include "grab/result.hpp"
 
 #include <cstdint>
@@ -40,6 +41,15 @@ namespace grab::input
             grab::Result<void>
             key( std::uint8_t keycode,
                  bool         press );
+
+            // The pointer's current position in root (screen) coordinates.
+            // Queried from the X server, never inferred from previously
+            // injected motion: a caller that has not moved the pointer, or
+            // whose synthetic motion was overridden by the physical mouse,
+            // otherwise has no way to learn where the cursor actually is.
+            [[nodiscard]]
+            grab::Result<grab::geometry::Point>
+            pointer_position();
 
             [[nodiscard]]
             grab::Result<void>

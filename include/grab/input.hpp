@@ -2,6 +2,7 @@
 
 #include "grab/drag.hpp"
 #include "grab/geometry.hpp"
+#include "grab/geometry/point.hpp"
 #include "grab/pointer_button.hpp"
 #include "grab/result.hpp"
 
@@ -36,6 +37,10 @@ namespace grab
             Input( Input&& other ) noexcept;
             Input&
             operator=( Input&& other ) noexcept;
+
+            [[nodiscard]]
+            grab::Result<grab::geometry::Point>
+            position();
 
             [[nodiscard]]
             grab::Result<void>

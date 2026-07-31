@@ -110,13 +110,12 @@ TEST( AtspiMapping,
       MapsLinkUrlToProperty )
 {
     const std::string linkUrl = "https://en.wikipedia.org/wiki/Tiger";
-    auto              link     = accessible( atspi::AtspiRole::Link,
-                                atspi::AtspiInterfaceSet{} );
-    link.url                   = linkUrl;
+    auto link         = accessible( atspi::AtspiRole::Link, atspi::AtspiInterfaceSet{} );
+    link.url          = linkUrl;
 
     const auto record = atspi::map_accessible( link, runtimeId, revision );
 
-    const auto url = record.property( grab::property::url );
+    const auto url    = record.property( grab::property::url );
     EXPECT_EQ( url.state, grab::PropertyRead::State::Present );
     const auto* const value = std::get_if<std::string>( &url.value );
     ASSERT_NE( value, nullptr );

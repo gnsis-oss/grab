@@ -277,6 +277,17 @@ namespace grab
         return &*keymap_;
     }
 
+    grab::Result<grab::geometry::Point>
+    Input::position()
+    {
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+        return ( *state )->seat_.pointer_position();
+    }
+
     grab::Result<void>
     Input::move( std::int16_t x,
                  std::int16_t y )

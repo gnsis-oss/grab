@@ -820,4 +820,16 @@ namespace grab
         }
     }
 
+    grab::Result<void>
+    Session::resync()
+    {
+        auto* const core = impl_->core();
+        if( core == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                               "session has no composed runtime to resync" );
+        }
+        return core->resync( grab::OperationContext{} );
+    }
+
 }    // namespace grab

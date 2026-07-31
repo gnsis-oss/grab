@@ -99,6 +99,17 @@ namespace grab
             void
             stop_observation() noexcept;
 
+            // Re-read a fresh snapshot of every composed tree into the session's
+            // cache. resolve/resolve_all/describe answer from a cached snapshot;
+            // the AT-SPI tree source delivers no incremental updates, so after
+            // the described UI changes underneath a long-lived session — most
+            // commonly a browser navigating to a new page — that cache is stale
+            // until this is called. Returns an error only if no composed source
+            // can produce a snapshot.
+            [[nodiscard]]
+            grab::Result<void>
+            resync();
+
             [[nodiscard]]
             Result<Match>
             resolve( const Locator& locator,

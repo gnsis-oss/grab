@@ -1,5 +1,5 @@
-#include "drivers/semantic/atspi/atspi_enumerator.hpp"
 #include "drivers/semantic/atspi/atspi_dbus.hpp"
+#include "drivers/semantic/atspi/atspi_enumerator.hpp"
 #include "drivers/semantic/atspi/atspi_tree_source.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
@@ -25,48 +25,48 @@ namespace grab::drivers::semantic::atspi
 
         // --- AT-SPI2 addressing -------------------------------------------------
 
-        constexpr const char* registryDest = "org.a11y.atspi.Registry";
-        constexpr const char* rootPath     = "/org/a11y/atspi/accessible/root";
+        constexpr const char*   registryDest        = "org.a11y.atspi.Registry";
+        constexpr const char*   rootPath            = "/org/a11y/atspi/accessible/root";
 
-        constexpr const char* accessibleInterface = "org.a11y.atspi.Accessible";
-        constexpr const char* componentInterface  = "org.a11y.atspi.Component";
-        constexpr const char* textInterface       = "org.a11y.atspi.Text";
-        constexpr const char* hyperlinkInterface  = "org.a11y.atspi.Hyperlink";
-        constexpr const char* propertiesInterface = "org.freedesktop.DBus.Properties";
+        constexpr const char*   accessibleInterface = "org.a11y.atspi.Accessible";
+        constexpr const char*   componentInterface  = "org.a11y.atspi.Component";
+        constexpr const char*   textInterface       = "org.a11y.atspi.Text";
+        constexpr const char*   hyperlinkInterface  = "org.a11y.atspi.Hyperlink";
+        constexpr const char*   propertiesInterface = "org.freedesktop.DBus.Properties";
 
-        constexpr const char* getChildrenMethod   = "GetChildren";
-        constexpr const char* getRoleNameMethod   = "GetRoleName";
-        constexpr const char* getStateMethod      = "GetState";
-        constexpr const char* getInterfacesMethod = "GetInterfaces";
-        constexpr const char* getExtentsMethod    = "GetExtents";
-        constexpr const char* getTextMethod       = "GetText";
-        constexpr const char* getUriMethod        = "GetURI";
-        constexpr const char* propertiesGetMethod = "Get";
+        constexpr const char*   getChildrenMethod   = "GetChildren";
+        constexpr const char*   getRoleNameMethod   = "GetRoleName";
+        constexpr const char*   getStateMethod      = "GetState";
+        constexpr const char*   getInterfacesMethod = "GetInterfaces";
+        constexpr const char*   getExtentsMethod    = "GetExtents";
+        constexpr const char*   getTextMethod       = "GetText";
+        constexpr const char*   getUriMethod        = "GetURI";
+        constexpr const char*   propertiesGetMethod = "Get";
 
-        constexpr const char* nameProperty           = "Name";
-        constexpr const char* characterCountProperty = "CharacterCount";
+        constexpr const char*   nameProperty        = "Name";
+        constexpr const char*   characterCountProperty = "CharacterCount";
 
         // Component.GetExtents coordinate type: 0 = screen, 1 = window. Spider
         // clicks in screen space, so screen extents are the click targets.
-        constexpr std::uint32_t coordScreen = 0U;
+        constexpr std::uint32_t coordScreen            = 0U;
 
-        constexpr const char* actionInterfaceName    = "org.a11y.atspi.Action";
-        constexpr const char* valueInterfaceName     = "org.a11y.atspi.Value";
-        constexpr const char* selectionInterfaceName = "org.a11y.atspi.Selection";
+        constexpr const char*   actionInterfaceName    = "org.a11y.atspi.Action";
+        constexpr const char*   valueInterfaceName     = "org.a11y.atspi.Value";
+        constexpr const char*   selectionInterfaceName = "org.a11y.atspi.Selection";
 
         // AT-SPI StateType bit positions (from the AtspiStateType enum, verified
         // against the live introspection). GetState returns a two-word bitset;
         // bit N lives in word N/32 at offset N%32.
-        constexpr int atspiStateActive   = 1;
-        constexpr int atspiStateEditable = 7;
-        constexpr int atspiStateEnabled  = 8;
-        constexpr int atspiStateExpanded = 10;
-        constexpr int atspiStateFocused  = 12;
-        constexpr int atspiStateShowing  = 25;
-        constexpr int atspiStateSelected = 23;
-        constexpr int atspiStateBusy     = 3;
+        constexpr int           atspiStateActive   = 1;
+        constexpr int           atspiStateEditable = 7;
+        constexpr int           atspiStateEnabled  = 8;
+        constexpr int           atspiStateExpanded = 10;
+        constexpr int           atspiStateFocused  = 12;
+        constexpr int           atspiStateShowing  = 25;
+        constexpr int           atspiStateSelected = 23;
+        constexpr int           atspiStateBusy     = 3;
 
-        constexpr int stateWordBits = 32;
+        constexpr int           stateWordBits      = 32;
 
         // --- role name -> AtspiRole --------------------------------------------
 
@@ -79,43 +79,45 @@ namespace grab::drivers::semantic::atspi
         AtspiRole
         role_from_name( std::string_view name )
         {
-            static constexpr std::array<RoleEntry, 35U> table{ {
-                {    "application",    AtspiRole::Application },
-                {          "frame",          AtspiRole::Frame },
-                {         "window",         AtspiRole::Window },
-                {   "document web",       AtspiRole::Document },
-                { "document frame",       AtspiRole::Document },
-                {       "document",       AtspiRole::Document },
-                {         "dialog",         AtspiRole::Dialog },
-                {          "alert",          AtspiRole::Alert },
-                {          "panel",          AtspiRole::Panel },
-                {        "section",        AtspiRole::Section },
-                {         "filler",        AtspiRole::Section },
-                {    "push button",     AtspiRole::PushButton },
-                {         "button",         AtspiRole::Button },
-                {  "toggle button",   AtspiRole::ToggleButton },
-                {      "check box",       AtspiRole::CheckBox },
-                {   "radio button",    AtspiRole::RadioButton },
-                {          "entry",          AtspiRole::Entry },
-                {  "password text",   AtspiRole::PasswordText },
-                {           "text",           AtspiRole::Text },
-                {      "paragraph",      AtspiRole::Paragraph },
-                {        "heading",        AtspiRole::Heading },
-                {           "link",           AtspiRole::Link },
-                {          "image",          AtspiRole::Image },
-                {           "list",           AtspiRole::List },
-                {      "list item",       AtspiRole::ListItem },
-                {          "table",          AtspiRole::Table },
-                {     "table cell",      AtspiRole::TableCell },
-                {           "menu",           AtspiRole::Menu },
-                {       "menu bar",        AtspiRole::MenuBar },
-                {      "menu item",       AtspiRole::MenuItem },
-                {       "page tab",        AtspiRole::PageTab },
-                {  "page tab list",    AtspiRole::PageTabList },
-                {         "slider",         AtspiRole::Slider },
-                {    "spin button",      AtspiRole::SpinButton },
-                {      "combo box",       AtspiRole::ComboBox },
-            } };
+            static constexpr std::array<RoleEntry, 35U> table{
+                {
+                 { "application", AtspiRole::Application },
+                 { "frame", AtspiRole::Frame },
+                 { "window", AtspiRole::Window },
+                 { "document web", AtspiRole::Document },
+                 { "document frame", AtspiRole::Document },
+                 { "document", AtspiRole::Document },
+                 { "dialog", AtspiRole::Dialog },
+                 { "alert", AtspiRole::Alert },
+                 { "panel", AtspiRole::Panel },
+                 { "section", AtspiRole::Section },
+                 { "filler", AtspiRole::Section },
+                 { "push button", AtspiRole::PushButton },
+                 { "button", AtspiRole::Button },
+                 { "toggle button", AtspiRole::ToggleButton },
+                 { "check box", AtspiRole::CheckBox },
+                 { "radio button", AtspiRole::RadioButton },
+                 { "entry", AtspiRole::Entry },
+                 { "password text", AtspiRole::PasswordText },
+                 { "text", AtspiRole::Text },
+                 { "paragraph", AtspiRole::Paragraph },
+                 { "heading", AtspiRole::Heading },
+                 { "link", AtspiRole::Link },
+                 { "image", AtspiRole::Image },
+                 { "list", AtspiRole::List },
+                 { "list item", AtspiRole::ListItem },
+                 { "table", AtspiRole::Table },
+                 { "table cell", AtspiRole::TableCell },
+                 { "menu", AtspiRole::Menu },
+                 { "menu bar", AtspiRole::MenuBar },
+                 { "menu item", AtspiRole::MenuItem },
+                 { "page tab", AtspiRole::PageTab },
+                 { "page tab list", AtspiRole::PageTabList },
+                 { "slider", AtspiRole::Slider },
+                 { "spin button", AtspiRole::SpinButton },
+                 { "combo box", AtspiRole::ComboBox },
+                 }
+            };
             for( const auto& [role_name, role] : table )
             {
                 if( role_name == name )
@@ -133,7 +135,8 @@ namespace grab::drivers::semantic::atspi
         read_string_reply( const dbus::Message& reply )
         {
             DBusMessageIter iterator{};
-            if( dbus_message_iter_init( reply.get(), &iterator ) == 0 ||
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
                 dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_STRING )
             {
                 return {};
@@ -149,7 +152,8 @@ namespace grab::drivers::semantic::atspi
         read_variant_string( const dbus::Message& reply )
         {
             DBusMessageIter iterator{};
-            if( dbus_message_iter_init( reply.get(), &iterator ) == 0 ||
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
                 dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_VARIANT )
             {
                 return {};
@@ -172,7 +176,8 @@ namespace grab::drivers::semantic::atspi
         read_variant_int( const dbus::Message& reply )
         {
             DBusMessageIter iterator{};
-            if( dbus_message_iter_init( reply.get(), &iterator ) == 0 ||
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
                 dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_VARIANT )
             {
                 return std::nullopt;
@@ -190,12 +195,14 @@ namespace grab::drivers::semantic::atspi
 
         // Reads a(so): array of (bus-name, object-path) references.
         [[nodiscard]]
-        std::vector<std::pair<std::string, std::string>>
+        std::vector<std::pair<std::string,
+                              std::string>>
         read_object_refs( const dbus::Message& reply )
         {
             std::vector<std::pair<std::string, std::string>> refs;
             DBusMessageIter                                  iterator{};
-            if( dbus_message_iter_init( reply.get(), &iterator ) == 0 ||
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
                 dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_ARRAY )
             {
                 return refs;
@@ -236,7 +243,8 @@ namespace grab::drivers::semantic::atspi
         read_extents( const dbus::Message& reply )
         {
             DBusMessageIter iterator{};
-            if( dbus_message_iter_init( reply.get(), &iterator ) == 0 ||
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
                 dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_STRUCT )
             {
                 return std::nullopt;
@@ -271,16 +279,18 @@ namespace grab::drivers::semantic::atspi
         read_states( const dbus::Message& reply )
         {
             DBusMessageIter iterator{};
-            if( dbus_message_iter_init( reply.get(), &iterator ) == 0 ||
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
                 dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_ARRAY )
             {
                 return 0U;
             }
-            DBusMessageIter             array{};
+            DBusMessageIter array{};
             dbus_message_iter_recurse( &iterator, &array );
             std::array<std::uint32_t, 2U> words{ 0U, 0U };
-            std::size_t                 index = 0U;
-            while( dbus_message_iter_get_arg_type( &array ) == DBUS_TYPE_UINT32 &&
+            std::size_t                   index = 0U;
+            while( dbus_message_iter_get_arg_type( &array ) ==
+                   DBUS_TYPE_UINT32 &&
                    index < words.size() )
             {
                 dbus_message_iter_get_basic( &array,
@@ -292,8 +302,7 @@ namespace grab::drivers::semantic::atspi
             const auto has = [&words]( int bit ) -> bool
             {
                 const std::uint32_t word = ( bit < stateWordBits ) ? words[0] : words[1];
-                const int           shift = ( bit < stateWordBits ) ? bit
-                                                                    : bit - stateWordBits;
+                const int shift = ( bit < stateWordBits ) ? bit : bit - stateWordBits;
                 return ( ( word >> static_cast<std::uint32_t>( shift ) ) & 1U ) != 0U;
             };
 
@@ -349,7 +358,8 @@ namespace grab::drivers::semantic::atspi
         {
             InterfacePresence presence;
             DBusMessageIter   iterator{};
-            if( dbus_message_iter_init( reply.get(), &iterator ) == 0 ||
+            if( dbus_message_iter_init( reply.get(), &iterator ) ==
+                0 ||
                 dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_ARRAY )
             {
                 return presence;
@@ -395,15 +405,15 @@ namespace grab::drivers::semantic::atspi
 
         // Sends a method call and blocks for the reply; nullptr reply is an
         // error (caller decides whether that node is fatal or skippable).
-        template <typename Appender>
+        template<typename Appender>
         [[nodiscard]]
         dbus::Message
-        call( DBusConnection*  connection,
-              const char*      destination,
-              const char*      path,
-              const char*      interface,
-              const char*      method,
-              const Appender&  append )
+        call( DBusConnection* connection,
+              const char*     destination,
+              const char*     path,
+              const char*     interface,
+              const char*     method,
+              const Appender& append )
         {
             dbus::Message request{
                 dbus_message_new_method_call( destination, path, interface, method )
@@ -435,10 +445,11 @@ namespace grab::drivers::semantic::atspi
         append_string( DBusMessageIter& iterator,
                        const char*      value )
         {
-            static_cast<void>( dbus_message_iter_append_basic(
-                &iterator,
-                DBUS_TYPE_STRING,
-                static_cast<const void*>( &value ) ) );
+            static_cast<void>(
+                dbus_message_iter_append_basic( &iterator,
+                                                DBUS_TYPE_STRING,
+                                                static_cast<const void*>( &value ) )
+            );
         }
 
         // --- the walk ----------------------------------------------------------
@@ -478,17 +489,17 @@ namespace grab::drivers::semantic::atspi
                    const std::string& destination,
                    const std::string& path )
         {
-            const dbus::Message reply = call(
-                connection,
-                destination.c_str(),
-                path.c_str(),
-                propertiesInterface,
-                propertiesGetMethod,
-                [&]( DBusMessageIter& iterator )
-                {
-                    append_string( iterator, accessibleInterface );
-                    append_string( iterator, nameProperty );
-                } );
+            const dbus::Message reply =
+                call( connection,
+                      destination.c_str(),
+                      path.c_str(),
+                      propertiesInterface,
+                      propertiesGetMethod,
+                      [&]( DBusMessageIter& iterator )
+                      {
+                          append_string( iterator, accessibleInterface );
+                          append_string( iterator, nameProperty );
+                      } );
             return reply == nullptr ? std::string{} : read_variant_string( reply );
         }
 
@@ -498,17 +509,17 @@ namespace grab::drivers::semantic::atspi
                    const std::string& destination,
                    const std::string& path )
         {
-            const dbus::Message count_reply = call(
-                connection,
-                destination.c_str(),
-                path.c_str(),
-                propertiesInterface,
-                propertiesGetMethod,
-                [&]( DBusMessageIter& iterator )
-                {
-                    append_string( iterator, textInterface );
-                    append_string( iterator, characterCountProperty );
-                } );
+            const dbus::Message count_reply =
+                call( connection,
+                      destination.c_str(),
+                      path.c_str(),
+                      propertiesInterface,
+                      propertiesGetMethod,
+                      [&]( DBusMessageIter& iterator )
+                      {
+                          append_string( iterator, textInterface );
+                          append_string( iterator, characterCountProperty );
+                      } );
             if( count_reply == nullptr )
             {
                 return {};
@@ -519,8 +530,8 @@ namespace grab::drivers::semantic::atspi
                 return {};
             }
 
-            const std::int32_t   end = *count;
-            const dbus::Message  reply =
+            const std::int32_t  end = *count;
+            const dbus::Message reply =
                 call( connection,
                       destination.c_str(),
                       path.c_str(),
@@ -532,12 +543,14 @@ namespace grab::drivers::semantic::atspi
                           static_cast<void>( dbus_message_iter_append_basic(
                               &iterator,
                               DBUS_TYPE_INT32,
-                              static_cast<const void*>( &start ) ) );
+                              static_cast<const void*>( &start )
+                          ) );
                           std::int32_t stop = end;
                           static_cast<void>( dbus_message_iter_append_basic(
                               &iterator,
                               DBUS_TYPE_INT32,
-                              static_cast<const void*>( &stop ) ) );
+                              static_cast<const void*>( &stop )
+                          ) );
                       } );
             return reply == nullptr ? std::string{} : read_string_reply( reply );
         }
@@ -560,7 +573,8 @@ namespace grab::drivers::semantic::atspi
                           static_cast<void>( dbus_message_iter_append_basic(
                               &iterator,
                               DBUS_TYPE_INT32,
-                              static_cast<const void*>( &index ) ) );
+                              static_cast<const void*>( &index )
+                          ) );
                       } );
             return reply == nullptr ? std::string{} : read_string_reply( reply );
         }
@@ -607,35 +621,36 @@ namespace grab::drivers::semantic::atspi
                 accessible.states = read_states( state_reply );
             }
 
-            const dbus::Message iface_reply = call( connection,
-                                                    destination.c_str(),
-                                                    path.c_str(),
-                                                    accessibleInterface,
-                                                    getInterfacesMethod,
-                                                    append_none );
-            const InterfacePresence presence = iface_reply == nullptr
+            const dbus::Message     iface_reply = call( connection,
+                                                        destination.c_str(),
+                                                        path.c_str(),
+                                                        accessibleInterface,
+                                                        getInterfacesMethod,
+                                                        append_none );
+            const InterfacePresence presence    = iface_reply == nullptr
                                                     ? InterfacePresence{}
                                                     : read_interfaces( iface_reply );
-            accessible.interfaces = presence.set;
+            accessible.interfaces               = presence.set;
 
             accessible.name = read_name( connection, destination, path );
 
             if( presence.component )
             {
-                const dbus::Message extents = call(
-                    connection,
-                    destination.c_str(),
-                    path.c_str(),
-                    componentInterface,
-                    getExtentsMethod,
-                    []( DBusMessageIter& iterator )
-                    {
-                        std::uint32_t coord = coordScreen;
-                        static_cast<void>( dbus_message_iter_append_basic(
-                            &iterator,
-                            DBUS_TYPE_UINT32,
-                            static_cast<const void*>( &coord ) ) );
-                    } );
+                const dbus::Message extents =
+                    call( connection,
+                          destination.c_str(),
+                          path.c_str(),
+                          componentInterface,
+                          getExtentsMethod,
+                          []( DBusMessageIter& iterator )
+                          {
+                              std::uint32_t coord = coordScreen;
+                              static_cast<void>( dbus_message_iter_append_basic(
+                                  &iterator,
+                                  DBUS_TYPE_UINT32,
+                                  static_cast<const void*>( &coord )
+                              ) );
+                          } );
                 if( extents != nullptr )
                 {
                     accessible.bounds = read_extents( extents );
@@ -668,7 +683,7 @@ namespace grab::drivers::semantic::atspi
             {
                 return std::vector<AtspiAccessible>{};
             }
-            DBusConnection* const connection = state.connection.get();
+            DBusConnection* const        connection = state.connection.get();
 
             std::vector<AtspiAccessible> nodes;
 
@@ -683,6 +698,7 @@ namespace grab::drivers::semantic::atspi
                     std::string                  path;
                     std::optional<std::uint64_t> parent;
             };
+
             std::deque<Pending> frontier;
 
             // Seed with the applications under the registry desktop root.
@@ -700,9 +716,11 @@ namespace grab::drivers::semantic::atspi
             }
             for( auto& [bus_name, path] : read_object_refs( roots ) )
             {
-                frontier.push_back( Pending{ .destination = bus_name,
-                                             .path        = path,
-                                             .parent      = std::nullopt } );
+                frontier.push_back( Pending{
+                    .destination = bus_name,
+                    .path        = path,
+                    .parent      = std::nullopt
+                } );
             }
 
             while( !frontier.empty() )
@@ -738,9 +756,11 @@ namespace grab::drivers::semantic::atspi
                 {
                     for( auto& [child_name, child_path] : read_object_refs( children ) )
                     {
-                        frontier.push_back( Pending{ .destination = child_name,
-                                                     .path        = child_path,
-                                                     .parent      = node_id } );
+                        frontier.push_back( Pending{
+                            .destination = child_name,
+                            .path        = child_path,
+                            .parent      = node_id
+                        } );
                     }
                 }
             }

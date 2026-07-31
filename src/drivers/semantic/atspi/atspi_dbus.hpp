@@ -10,7 +10,6 @@
 #include "grab/result.hpp"
 
 #include <dbus/dbus.h>
-
 #include <memory>
 #include <string>
 #include <string_view>
@@ -20,12 +19,12 @@ namespace grab::drivers::semantic::atspi::dbus
 
     // Blocking call budget for a single a11y-bus round trip. The a11y bus is a
     // local peer, so a second is generous; it bounds a wedged provider.
-    inline constexpr int dbusCallTimeoutMs = 1'000;
+    inline constexpr int         dbusCallTimeoutMs = 1'000;
 
-    inline constexpr const char* a11yBusName      = "org.a11y.Bus";
-    inline constexpr const char* a11yBusPath      = "/org/a11y/bus";
-    inline constexpr const char* a11yBusInterface = "org.a11y.Bus";
-    inline constexpr const char* getAddressMethod = "GetAddress";
+    inline constexpr const char* a11yBusName       = "org.a11y.Bus";
+    inline constexpr const char* a11yBusPath       = "/org/a11y/bus";
+    inline constexpr const char* a11yBusInterface  = "org.a11y.Bus";
+    inline constexpr const char* getAddressMethod  = "GetAddress";
 
     // Owns a DBusError: initialized on construction, freed on destruction. The
     // libdbus contract requires a paired init/free, and callers only ever read
@@ -104,8 +103,9 @@ namespace grab::drivers::semantic::atspi::dbus
     {
         return grab::Error{
             .code       = grab::ErrorCode::DeviceInaccessible,
-            .message    = std::string{ step } + ": " +
-                       error.message_or( "D-Bus operation failed" ),
+            .message    = std::string{ step } +
+                          ": " +
+                          error.message_or( "D-Bus operation failed" ),
             .capability = {},
             .target     = {},
             .attempts   = {},
@@ -119,14 +119,13 @@ namespace grab::drivers::semantic::atspi::dbus
     inline grab::Result<std::string>
     resolve_bus_address()
     {
-        Error                connection_error;
-        const Connection     session{
-            dbus_bus_get_private( DBUS_BUS_SESSION, &connection_error.value )
-        };
+        Error            connection_error;
+        const Connection session{ dbus_bus_get_private( DBUS_BUS_SESSION,
+                                                        &connection_error.value ) };
         if( session == nullptr )
         {
-            return std::unexpected(
-                device_error( "AT-SPI session bus lookup", connection_error ) );
+            return std::unexpected( device_error( "AT-SPI session bus lookup",
+                                                  connection_error ) );
         }
         dbus_connection_set_exit_on_disconnect( session.get(), 0 );
 
@@ -149,12 +148,13 @@ namespace grab::drivers::semantic::atspi::dbus
         };
         if( reply == nullptr )
         {
-            return std::unexpected(
-                device_error( "AT-SPI bus address request", reply_error ) );
+            return std::unexpected( device_error( "AT-SPI bus address request",
+                                                  reply_error ) );
         }
 
         DBusMessageIter iterator{};
-        if( dbus_message_iter_init( reply.get(), &iterator ) == 0 ||
+        if( dbus_message_iter_init( reply.get(), &iterator ) ==
+            0 ||
             dbus_message_iter_get_arg_type( &iterator ) != DBUS_TYPE_STRING )
         {
             return grab::fail( grab::ErrorCode::DeviceInaccessible,
@@ -179,21 +179,20 @@ namespace grab::drivers::semantic::atspi::dbus
     open_connection( const std::string& address )
     {
         Error      open_error;
-        Connection connection{
-            dbus_connection_open_private( address.c_str(), &open_error.value )
-        };
+        Connection connection{ dbus_connection_open_private( address.c_str(),
+                                                             &open_error.value ) };
         if( connection == nullptr )
         {
-            return std::unexpected(
-                device_error( "AT-SPI bus connection", open_error ) );
+            return std::unexpected( device_error( "AT-SPI bus connection",
+                                                  open_error ) );
         }
         dbus_connection_set_exit_on_disconnect( connection.get(), 0 );
 
         Error register_error;
         if( dbus_bus_register( connection.get(), &register_error.value ) == 0 )
         {
-            return std::unexpected(
-                device_error( "AT-SPI bus registration", register_error ) );
+            return std::unexpected( device_error( "AT-SPI bus registration",
+                                                  register_error ) );
         }
         return connection;
     }
