@@ -9,14 +9,21 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
-include(Cache)
-include(Warnings)
-include(Sanitizers)
-include(Coverage)
-include(Format)
-include(Tidy)
-include(IWYU)
-include(Profile)
+# Dev tooling is for grab's OWN top-level builds only. As an add_subdirectory
+# dependency the `format ALL` target collides with the consumer's, so guard the
+# whole group on PROJECT_IS_TOP_LEVEL (mirrors every l0 library).
+if(PROJECT_IS_TOP_LEVEL)
+    include(Cache)
+    include(Warnings)
+    include(Sanitizers)
+    include(Coverage)
+    include(Format)
+    include(Tidy)
+    include(IWYU)
+    include(Profile)
+endif()
+
+# Build-essential modules define find/helper functions grab_core's build calls.
 include(Xcb)
 include(Grpc)
 include(Codec)
@@ -311,12 +318,15 @@ target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_ima
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 
+# grab's own examples and tests build only for grab's top-level builds. As an
+# add_subdirectory dependency (spider's SPIDER_ENABLE_GRAB path) a consumer only
+# wants grab_core, and BUILD_TESTING is the consumer's flag for ITS tests.
 option(GRAB_BUILD_EXAMPLES "Build example programs" ON)
-if(GRAB_BUILD_EXAMPLES)
+if(PROJECT_IS_TOP_LEVEL AND GRAB_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-if(BUILD_TESTING)
+if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
     include(AddGTest)
     enable_testing()
     add_subdirectory(tests)
