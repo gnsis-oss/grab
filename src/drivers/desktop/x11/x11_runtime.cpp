@@ -41,6 +41,14 @@ namespace grab::drivers::desktop::x11
 
     X11Runtime::~X11Runtime() = default;
 
+    const char*
+    X11Runtime::display_or_default() const noexcept
+    {
+        // xcb and the seat/capture APIs spell "use DISPLAY" as nullptr, not as
+        // an empty string.
+        return display_.empty() ? nullptr : display_.c_str();
+    }
+
     std::string_view
     X11Runtime::name() const
     {
@@ -73,9 +81,13 @@ namespace grab::drivers::desktop::x11
             return std::unexpected( opened_connection.error() );
         }
 
-        connection_      = std::move( *opened_connection );
+        connection_ = std::move( *opened_connection );
 
-        auto opened_seat = grab::input::Seat::open();
+        // Everything below connects to the SAME display the runtime just opened.
+        // Each of these used to default to DISPLAY independently, so a runtime
+        // asked for :64 composed a session whose seat, capture and overlay were
+        // all on :1 — silently, because each call succeeded.
+        auto opened_seat = grab::input::Seat::open( display_or_default() );
         if( !opened_seat.has_value() )
         {
             connection_ = grab::platform::x11::XcbConnection{};
@@ -129,11 +141,9 @@ namespace grab::drivers::desktop::x11
                                                                   connection_.root(),
                                                                   *event_source_ );
 
-        // Same display authority the runtime connects to (DISPLAY env for now);
-        // explicit display threading through the runtime is Task 8 scope.
         capture_route_.reset();
         capture_route_error_.reset();
-        auto capture_route = X11CaptureRoute::open();
+        auto capture_route = X11CaptureRoute::open( display_or_default() );
         if( capture_route.has_value() )
         {
             capture_route_.emplace( std::move( *capture_route ) );
@@ -159,7 +169,7 @@ namespace grab::drivers::desktop::x11
                 }
             }
         );
-        auto overlay_probe = X11OverlayDelegate::probe();
+        auto overlay_probe = X11OverlayDelegate::probe( display_ );
         overlay_available_ = overlay_probe.has_value();
         overlay_delegate_error_.reset();
         if( !overlay_probe.has_value() )
@@ -272,7 +282,7 @@ namespace grab::drivers::desktop::x11
         }
         if( overlay_delegate_ == nullptr )
         {
-            auto created = X11OverlayDelegate::create( reactor_ );
+            auto created = X11OverlayDelegate::create( reactor_, display_ );
             if( !created.has_value() )
             {
                 overlay_available_      = false;

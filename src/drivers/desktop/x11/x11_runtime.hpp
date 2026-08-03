@@ -132,6 +132,10 @@ namespace grab::drivers::desktop::x11
 
         private:
 
+            [[nodiscard]]
+            const char*
+                                                 display_or_default() const noexcept;
+
             static constexpr std::uint32_t       initialGeneration = 1U;
 
             grab::platform::x11::XcbConnection   connection_;
