@@ -331,6 +331,107 @@ namespace grab
     }
 
     grab::Result<void>
+    Input::press( std::uint8_t button )
+    {
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        auto press_result = ( *state )->seat_.button( button, true );
+        if( !press_result.has_value() )
+        {
+            return error_from( press_result );
+        }
+        return ( *state )->seat_.flush();
+    }
+
+    grab::Result<void>
+    Input::release( std::uint8_t button )
+    {
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        auto release_result = ( *state )->seat_.button( button, false );
+        if( !release_result.has_value() )
+        {
+            return error_from( release_result );
+        }
+        return ( *state )->seat_.flush();
+    }
+
+    grab::Result<void>
+    Input::scroll( std::int32_t dx,
+                   std::int32_t dy )
+    {
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+
+        // A wheel notch is a press and a release of the direction's button.
+        const auto notches = [&]( std::int32_t count,
+                                  std::uint8_t button ) -> grab::Result<void>
+        {
+            for( std::int32_t emitted = 0; emitted < count; ++emitted )
+            {
+                auto pressed = ( *state )->seat_.button( button, true );
+                if( !pressed.has_value() )
+                {
+                    return error_from( pressed );
+                }
+                auto released = ( *state )->seat_.button( button, false );
+                if( !released.has_value() )
+                {
+                    return error_from( released );
+                }
+            }
+            return grab::Result<void>{};
+        };
+
+        // std::abs on the most negative value is undefined, so negate in a wider
+        // type: a caller passing INT32_MIN gets a large scroll, not a trap.
+        const auto magnitude = []( std::int32_t value ) -> std::int32_t
+        {
+            const std::int64_t widened  = value;
+            const std::int64_t absolute = widened < 0 ? -widened : widened;
+            return static_cast<std::int32_t>(
+                std::min<std::int64_t>( absolute,
+                                        std::numeric_limits<std::int32_t>::max() )
+            );
+        };
+
+        if( dy != 0 )
+        {
+            const auto result =
+                notches( magnitude( dy ),
+                         button_code( dy > 0 ? grab::input::PointerButton::WheelDown
+                                             : grab::input::PointerButton::WheelUp ) );
+            if( !result.has_value() )
+            {
+                return result;
+            }
+        }
+        if( dx != 0 )
+        {
+            const auto result =
+                notches( magnitude( dx ),
+                         button_code( dx > 0 ? grab::input::PointerButton::WheelRight
+                                             : grab::input::PointerButton::WheelLeft ) );
+            if( !result.has_value() )
+            {
+                return result;
+            }
+        }
+        return ( *state )->seat_.flush();
+    }
+
+    grab::Result<void>
     Input::click_at( std::int16_t x,
                      std::int16_t y,
                      std::uint8_t button )
@@ -442,6 +543,87 @@ namespace grab
             }
         }
 
+        return ( *state )->seat_.flush();
+    }
+
+    namespace
+    {
+
+        // Shared by key_down and key_up: resolve a name to its keycode without
+        // applying the layout's shift/altgr levels. Holding a key is about the
+        // physical key, not about which character that key would produce.
+        [[nodiscard]]
+        grab::Result<std::uint8_t>
+        modifier_keycode_for( grab::Keymap&    keymap,
+                              std::string_view name )
+        {
+            const auto keystroke = keymap.keystroke_for_key( name );
+            if( !keystroke.has_value() )
+            {
+                return grab::fail( grab::ErrorCode::UnsupportedCharacter,
+                                   "named key is not available in keymap: " +
+                                       std::string{ name } );
+            }
+            if( keystroke->keycode == 0U )
+            {
+                return grab::fail( grab::ErrorCode::UnsupportedCharacter,
+                                   "named key has no keycode in this layout: " +
+                                       std::string{ name } );
+            }
+            return static_cast<std::uint8_t>( keystroke->keycode );
+        }
+
+    }    // namespace
+
+    grab::Result<void>
+    Input::key_down( std::string_view name )
+    {
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+        auto keymap = ( *state )->ensure_keymap();
+        if( !keymap.has_value() )
+        {
+            return std::unexpected( std::move( keymap.error() ) );
+        }
+        auto keycode = modifier_keycode_for( **keymap, name );
+        if( !keycode.has_value() )
+        {
+            return std::unexpected( std::move( keycode.error() ) );
+        }
+        auto pressed = ( *state )->seat_.key( *keycode, true );
+        if( !pressed.has_value() )
+        {
+            return error_from( pressed );
+        }
+        return ( *state )->seat_.flush();
+    }
+
+    grab::Result<void>
+    Input::key_up( std::string_view name )
+    {
+        auto state = require_impl();
+        if( !state.has_value() )
+        {
+            return std::unexpected( std::move( state.error() ) );
+        }
+        auto keymap = ( *state )->ensure_keymap();
+        if( !keymap.has_value() )
+        {
+            return std::unexpected( std::move( keymap.error() ) );
+        }
+        auto keycode = modifier_keycode_for( **keymap, name );
+        if( !keycode.has_value() )
+        {
+            return std::unexpected( std::move( keycode.error() ) );
+        }
+        auto released = ( *state )->seat_.key( *keycode, false );
+        if( !released.has_value() )
+        {
+            return error_from( released );
+        }
         return ( *state )->seat_.flush();
     }
 

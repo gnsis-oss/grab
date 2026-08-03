@@ -195,9 +195,11 @@ namespace grab::kernel::lifecycle
     SessionCore::open( const SessionOptions& options,
                        grab::core::Reactor*  reactor )
     {
-        // X11 currently connects through DISPLAY (XcbConnection::open( "" )).
-        // options.display is an availability signal until the runtime accepts an
-        // explicit display string (Wave-1 Task 6/8).
+        // options.display is now HONOURED rather than merely inspected. It used
+        // to be an availability signal only, so a caller asking for :64 from a
+        // shell sitting on :1 got a session on :1 — and drew its overlay there.
+        // Screen and Input already took a display, so the two disagreed
+        // silently, which is the worst shape for this particular mistake.
         // NOLINTNEXTLINE(concurrency-mt-unsafe)
         if( !options.display.has_value() && std::getenv( "DISPLAY" ) == nullptr )
         {
@@ -205,8 +207,10 @@ namespace grab::kernel::lifecycle
                          "no display available for session composition" );
         }
 
-        auto runtime =
-            std::make_unique<grab::drivers::desktop::x11::X11Runtime>( reactor );
+        auto runtime = std::make_unique<grab::drivers::desktop::x11::X11Runtime>(
+            reactor,
+            options.display.value_or( std::string{} )
+        );
         auto* const            x11 = runtime.get();
         const OperationContext context{};
         auto                   started = runtime->start( context );

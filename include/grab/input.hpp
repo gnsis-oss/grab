@@ -51,6 +51,34 @@ namespace grab
             grab::Result<void>
             click( std::uint8_t button = grab::input::primaryButton );
 
+            // Press and release, separately.
+            //
+            // click() holds the button for however long two XTEST requests take,
+            // which is both constant and far shorter than a human's 50-150 ms.
+            // A caller that wants a realistic hold, or a drag, needs the two
+            // halves; the seat has always had them and only the facade did not.
+            //
+            // The caller owns what it presses: a button left down survives the
+            // Input object and is still down for the next application to receive
+            // it. Pair every press with a release on every exit path.
+            [[nodiscard]]
+            grab::Result<void>
+            press( std::uint8_t button = grab::input::primaryButton );
+
+            [[nodiscard]]
+            grab::Result<void>
+            release( std::uint8_t button = grab::input::primaryButton );
+
+            // Wheel motion, in notches. Positive dy scrolls DOWN and positive dx
+            // scrolls RIGHT, matching how a wheel is described rather than how
+            // the content moves. X11 has no sub-notch wheel event, so this is
+            // deliberately integral: a caller asking for smooth pixel scrolling
+            // is asking for something the protocol cannot express.
+            [[nodiscard]]
+            grab::Result<void>
+            scroll( std::int32_t dx,
+                    std::int32_t dy );
+
             [[nodiscard]]
             grab::Result<void>
             click_at( std::int16_t x,
@@ -70,6 +98,28 @@ namespace grab
             [[nodiscard]]
             grab::Result<void>
             press_key( std::string_view name );
+
+            // Hold and release a named key, so callers can build chords the
+            // keymap cannot express on its own.
+            //
+            // Keystroke carries only shift and altgr, because those are the
+            // levels a LAYOUT uses to produce a character. Ctrl, Alt and Super
+            // change what an application does with a character rather than which
+            // character it is, so they are not layout state and cannot be
+            // reached through type_text or press_key. Ctrl+C is therefore:
+            //
+            //     key_down( "Control_L" ); press_key( "c" ); key_up( "Control_L" );
+            //
+            // Any name xkb_keysym_from_name accepts works, modifiers included.
+            // As with press(), a key left down stays down — release on every
+            // exit path, including the error ones.
+            [[nodiscard]]
+            grab::Result<void>
+            key_down( std::string_view name );
+
+            [[nodiscard]]
+            grab::Result<void>
+            key_up( std::string_view name );
 
         private:
 

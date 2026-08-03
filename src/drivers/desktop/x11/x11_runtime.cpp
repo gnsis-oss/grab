@@ -32,7 +32,9 @@
 namespace grab::drivers::desktop::x11
 {
 
-    X11Runtime::X11Runtime( grab::core::Reactor* reactor ) noexcept :
+    X11Runtime::X11Runtime( grab::core::Reactor* reactor,
+                            std::string          display ) noexcept :
+        display_{ std::move( display ) },
         reactor_{ reactor }
     {
     }
@@ -65,7 +67,7 @@ namespace grab::drivers::desktop::x11
             return {};
         }
 
-        auto opened_connection = grab::platform::x11::XcbConnection::open( "" );
+        auto opened_connection = grab::platform::x11::XcbConnection::open( display_ );
         if( !opened_connection.has_value() )
         {
             return std::unexpected( opened_connection.error() );

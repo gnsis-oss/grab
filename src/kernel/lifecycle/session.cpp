@@ -24,9 +24,11 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <span>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace grab
 {
@@ -242,6 +244,18 @@ namespace grab
             ) mutable
             {
                 return service.add( std::move( shape ) );
+            }
+        );
+    }
+
+    Result<std::vector<overlay::ShapeId>>
+    Overlay::add_many( std::span<overlay::Shape> shapes )
+    {
+        // ONE round trip for the whole batch — the point of the call.
+        return impl_->invoke<std::vector<overlay::ShapeId>>(
+            [shapes]( kernel::presentation::OverlayService& service )
+            {
+                return service.add_many( shapes );
             }
         );
     }
