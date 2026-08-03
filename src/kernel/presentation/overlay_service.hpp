@@ -7,6 +7,8 @@
 
 #include <memory>
 #include <mutex>
+#include <span>
+#include <vector>
 
 namespace grab::detail
 {
@@ -49,6 +51,10 @@ namespace grab::kernel::presentation
             [[nodiscard]]
             Result<overlay::ShapeId>
             add( overlay::Shape shape );
+
+            [[nodiscard]]
+            Result<std::vector<overlay::ShapeId>>
+            add_many( std::span<overlay::Shape> shapes );
 
             [[nodiscard]]
             Result<void>

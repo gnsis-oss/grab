@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <variant>
 #include <vector>
 
@@ -194,6 +195,22 @@ namespace grab
             [[nodiscard]]
             Result<overlay::ShapeId>
             add( overlay::Shape shape );
+
+            // Adds many shapes for the price of one call.
+            //
+            // Every mutating call here is a synchronous round trip to the
+            // session's reactor thread, serviced on its frame clock — measured
+            // at ~32 ms, and paid by the CALLER, who is blocked for all of it.
+            // The cost is per call and nearly independent of what the call
+            // carries, so anything animated (a cursor trail, a path being drawn,
+            // a sweep of highlights) adding one shape at a time is capped near
+            // thirty shapes per second AND stalls its own producer each time.
+            //
+            // Prefer this wherever more than one shape is known at once. It is
+            // all-or-nothing: if any shape fails preflight, none are added.
+            [[nodiscard]]
+            Result<std::vector<overlay::ShapeId>>
+            add_many( std::span<overlay::Shape> shapes );
 
             [[nodiscard]]
             Result<void>

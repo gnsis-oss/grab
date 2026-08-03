@@ -1,5 +1,6 @@
 #include "drivers/desktop/x11/x11_capture_route.hpp"
 #include "drivers/desktop/x11/x11_runtime.hpp"
+#include "drivers/semantic/atspi/atspi_enumerator.hpp"
 #include "drivers/semantic/atspi/atspi_runtime.hpp"
 #include "grab/capture.hpp"
 #include "grab/context.hpp"
@@ -69,6 +70,50 @@ namespace grab::kernel::lifecycle
                     return EventKind::RelationRemoved;
             }
             return EventKind::Unspecified;
+        }
+
+        // Builds the public NodeInfo from a snapshot record: geometry, state,
+        // facets, and the text-bearing properties (name/title/text/url) the
+        // backend populated. Each property is optional; an Absent read leaves
+        // its field empty. Shared by describe() across every binding.
+        [[nodiscard]]
+        NodeInfo
+        node_info_from_record( const UiNodeRecord& record )
+        {
+            NodeInfo info{};
+            info.role         = record.role;
+            info.states       = record.states;
+            info.facets       = record.facets;
+            info.provenance   = record.provenance();
+
+            const auto bounds = record.property( grab::property::bounds );
+            if( bounds.state == PropertyRead::State::Present )
+            {
+                if( const auto* const rect = std::get_if<SpaceRect>( &bounds.value ) )
+                {
+                    info.bounds = *rect;
+                }
+            }
+
+            const auto read_string = [&record]( grab::PropertyId id ) -> std::string
+            {
+                const auto property = record.property( id );
+                if( property.state != PropertyRead::State::Present )
+                {
+                    return {};
+                }
+                if( const auto* const value =
+                        std::get_if<std::string>( &property.value ) )
+                {
+                    return *value;
+                }
+                return {};
+            };
+            info.name  = read_string( grab::property::accessible_name );
+            info.title = read_string( grab::property::title );
+            info.text  = read_string( grab::property::text );
+            info.url   = read_string( grab::property::url );
+            return info;
         }
 
     }    // namespace
@@ -150,9 +195,11 @@ namespace grab::kernel::lifecycle
     SessionCore::open( const SessionOptions& options,
                        grab::core::Reactor*  reactor )
     {
-        // X11 currently connects through DISPLAY (XcbConnection::open( "" )).
-        // options.display is an availability signal until the runtime accepts an
-        // explicit display string (Wave-1 Task 6/8).
+        // options.display is now HONOURED rather than merely inspected. It used
+        // to be an availability signal only, so a caller asking for :64 from a
+        // shell sitting on :1 got a session on :1 — and drew its overlay there.
+        // Screen and Input already took a display, so the two disagreed
+        // silently, which is the worst shape for this particular mistake.
         // NOLINTNEXTLINE(concurrency-mt-unsafe)
         if( !options.display.has_value() && std::getenv( "DISPLAY" ) == nullptr )
         {
@@ -160,8 +207,10 @@ namespace grab::kernel::lifecycle
                          "no display available for session composition" );
         }
 
-        auto runtime =
-            std::make_unique<grab::drivers::desktop::x11::X11Runtime>( reactor );
+        auto runtime = std::make_unique<grab::drivers::desktop::x11::X11Runtime>(
+            reactor,
+            options.display.value_or( std::string{} )
+        );
         auto* const            x11 = runtime.get();
         const OperationContext context{};
         auto                   started = runtime->start( context );
@@ -257,7 +306,7 @@ namespace grab::kernel::lifecycle
             *reactor,
             bus_,
             *registry_,
-            grab::drivers::semantic::atspi::AtspiTreeSource::AccessibleEnumerator{},
+            grab::drivers::semantic::atspi::make_dbus_enumerator(),
             std::nullopt,
             atspi_runtime_id
         );
@@ -325,53 +374,131 @@ namespace grab::kernel::lifecycle
     SessionCore::resolve( const Locator& locator,
                           Cardinality    cardinality )
     {
-        auto snapshot = bindings_.front()->store->snapshot();
-        if( !snapshot.has_value() )
+        // A session composes more than one tree (X11 windows in one binding, the
+        // AT-SPI document in another). Try each in order and return the first
+        // binding that yields a match, so a document-scoped locator finds the
+        // a11y tree even though X11 is the front binding.
+        bool any_snapshot = false;
+        for( const auto& binding : bindings_ )
+        {
+            auto snapshot = binding->store->snapshot();
+            if( !snapshot.has_value() )
+            {
+                continue;
+            }
+            any_snapshot = true;
+            const query::SnapshotTreeNav navigation{ *snapshot };
+            auto match = query::resolve( locator,
+                                         cardinality,
+                                         query::QueryScope{ .navigation = navigation } );
+            if( match.has_value() )
+            {
+                return match;
+            }
+            // Only "not here" is worth trying the next tree for; a real error
+            // (e.g. ExactlyOne matched several) is the caller's answer.
+            if( match.error().code != ErrorCode::NoMatch )
+            {
+                return match;
+            }
+        }
+        if( !any_snapshot )
         {
             return fail( ErrorCode::CapabilityUnavailable,
                          "session has no tree snapshot" );
         }
-        const query::SnapshotTreeNav navigation{ *snapshot };
-        return query::resolve( locator,
-                               cardinality,
-                               query::QueryScope{ .navigation = navigation } );
+        return fail( ErrorCode::NoMatch, "locator matched no node in any tree" );
+    }
+
+    Result<std::vector<Match>>
+    SessionCore::resolve_all( const Locator& locator )
+    {
+        // Aggregate matches across every composed tree: a page's links live in
+        // the AT-SPI binding while windows live in the X11 binding, and a
+        // harvester wants all of them. Each match's ref carries its binding's
+        // runtime, so describe() later routes back to the right tree.
+        bool               any_snapshot = false;
+        std::vector<Match> matches;
+        for( const auto& binding : bindings_ )
+        {
+            auto snapshot = binding->store->snapshot();
+            if( !snapshot.has_value() )
+            {
+                continue;
+            }
+            any_snapshot = true;
+            const query::SnapshotTreeNav navigation{ *snapshot };
+            auto                         nodes =
+                query::resolve_all( locator,
+                                    query::QueryScope{ .navigation = navigation } );
+            if( !nodes.has_value() )
+            {
+                return std::unexpected( std::move( nodes.error() ) );
+            }
+            for( const auto& ref : *nodes )
+            {
+                // describe() reads only ref (node + generation); the remaining
+                // Match fields keep their live defaults. Constructed
+                // field-by-field to avoid a missing-designated-initializer
+                // under -Werror.
+                Match match{};
+                match.ref = ref;
+                matches.push_back( match );
+            }
+        }
+        if( !any_snapshot )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no tree snapshot" );
+        }
+        return matches;
     }
 
     Result<NodeInfo>
     SessionCore::describe( const Match& match )
     {
-        auto snapshot = bindings_.front()->store->snapshot();
-        if( !snapshot.has_value() )
+        // Find the node in whichever binding owns it. Prefer the binding whose
+        // runtime matches the ref (set by resolve/resolve_all), then fall back to
+        // scanning, since node ids are only unique within a tree.
+        bool any_snapshot = false;
+        bool stale_seen   = false;
+        for( const auto& binding : bindings_ )
+        {
+            if( binding->assigned_runtime !=
+                match.ref.runtime &&
+                match.ref.runtime != RuntimeId{} )
+            {
+                continue;
+            }
+            auto snapshot = binding->store->snapshot();
+            if( !snapshot.has_value() )
+            {
+                continue;
+            }
+            any_snapshot             = true;
+            const auto* const record = snapshot->node( NodeId{ match.ref.node } );
+            if( record == nullptr )
+            {
+                continue;
+            }
+            if( record->generation != match.ref.generation )
+            {
+                stale_seen = true;
+                continue;
+            }
+            return node_info_from_record( *record );
+        }
+        if( stale_seen )
+        {
+            return fail( ErrorCode::StaleNode, "resolved node generation is stale" );
+        }
+        if( !any_snapshot )
         {
             return fail( ErrorCode::CapabilityUnavailable,
                          "session has no tree snapshot" );
         }
-
-        const auto* const record = snapshot->node( NodeId{ match.ref.node } );
-        if( record == nullptr )
-        {
-            return fail( ErrorCode::NoMatch,
-                         "resolved node is not present in the current snapshot" );
-        }
-        if( record->generation != match.ref.generation )
-        {
-            return fail( ErrorCode::StaleNode, "resolved node generation is stale" );
-        }
-
-        NodeInfo info{};
-        info.role       = record->role;
-        info.states     = record->states;
-        info.provenance = record->provenance();
-
-        const auto read = record->property( grab::property::bounds );
-        if( read.state == PropertyRead::State::Present )
-        {
-            if( const auto* const rect = std::get_if<SpaceRect>( &read.value ) )
-            {
-                info.bounds = *rect;
-            }
-        }
-        return info;
+        return fail( ErrorCode::NoMatch,
+                     "resolved node is not present in the current snapshot" );
     }
 
     Result<Subscription>
@@ -713,6 +840,47 @@ namespace grab::kernel::lifecycle
         bus_.set_demand_callback( {} );
     }
 
+    Result<void>
+    SessionCore::resync( const OperationContext& context )
+    {
+        const auto checked = context.check();
+        if( !checked.has_value() )
+        {
+            return std::unexpected( checked.error() );
+        }
+        bool any = false;
+        for( const auto& binding : bindings_ )
+        {
+            if( binding->source == nullptr || binding->store == nullptr )
+            {
+                continue;
+            }
+            auto snapshot_result = binding->source->snapshot( primaryTree, context );
+            if( !snapshot_result.has_value() )
+            {
+                // A source that cannot snapshot on demand (e.g. the X11 source,
+                // which is event-driven) is skipped, not fatal: other bindings
+                // still refresh.
+                continue;
+            }
+            auto applied = binding->store->apply( spi::UiUpdate{
+                .source_sequence = 0U,
+                .payload         = std::move( *snapshot_result ),
+            } );
+            if( !applied.has_value() )
+            {
+                return std::unexpected( std::move( applied.error() ) );
+            }
+            any = true;
+        }
+        if( !any )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "no bound source could resync" );
+        }
+        return {};
+    }
+
     void
     SessionCore::publish_tree_event( RuntimeBinding&          binding,
                                      const kernel::TreeEvent& event )
@@ -894,6 +1062,18 @@ namespace grab::kernel::lifecycle
                          "session has no composed display stack" );
         }
         return core->resolve( locator, cardinality );
+    }
+
+    Result<std::vector<Match>>
+    resolve_all_verb( SessionCore*   core,
+                      const Locator& locator )
+    {
+        if( core == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "session has no composed display stack" );
+        }
+        return core->resolve_all( locator );
     }
 
     Result<NodeInfo>

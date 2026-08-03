@@ -519,6 +519,38 @@ namespace grab::kernel::presentation
         return scene_.add( std::move( shape ) );
     }
 
+    Result<std::vector<overlay::ShapeId>>
+    OverlayService::add_many( std::span<overlay::Shape> shapes )
+    {
+        const std::scoped_lock lock{ mutex_ };
+        recover_best_effort();
+
+        // Preflight EVERY shape before adding ANY. A batch that fails halfway
+        // would leave the scene holding a prefix the caller never asked to
+        // stand alone, and it has no ids for what did land.
+        for( overlay::Shape& shape : shapes )
+        {
+            auto preflight = transform_shape( *graph_, delegate_space_, shape );
+            if( !preflight.has_value() )
+            {
+                return std::unexpected( std::move( preflight.error() ) );
+            }
+        }
+
+        std::vector<overlay::ShapeId> ids;
+        ids.reserve( shapes.size() );
+        for( overlay::Shape& shape : shapes )
+        {
+            auto added = scene_.add( std::move( shape ) );
+            if( !added.has_value() )
+            {
+                return std::unexpected( std::move( added.error() ) );
+            }
+            ids.push_back( *added );
+        }
+        return ids;
+    }
+
     Result<void>
     OverlayService::update( overlay::ShapeId id,
                             overlay::Shape   shape )

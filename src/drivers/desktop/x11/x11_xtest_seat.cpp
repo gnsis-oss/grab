@@ -248,6 +248,37 @@ namespace grab::input
                            "XTEST pointer move" );
     }
 
+    grab::Result<grab::geometry::Point>
+    Seat::pointer_position()
+    {
+        if( connection_ == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::DisplayUnavailable,
+                               "XTEST seat has no X connection" );
+        }
+
+        const xcb_query_pointer_cookie_t cookie =
+            xcb_query_pointer( connection_, root_ );
+        xcb_generic_error_t* error = nullptr;
+        std::unique_ptr<xcb_query_pointer_reply_t, decltype( &std::free )> reply{
+            xcb_query_pointer_reply( connection_, cookie, &error ),
+            &std::free
+        };
+        const std::unique_ptr<xcb_generic_error_t, decltype( &std::free )> owned_error{
+            error,
+            &std::free
+        };
+        if( reply == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::DisplayUnavailable,
+                               "XQueryPointer failed" );
+        }
+        return grab::geometry::Point{
+            .x = static_cast<std::int32_t>( reply->root_x ),
+            .y = static_cast<std::int32_t>( reply->root_y )
+        };
+    }
+
     grab::Result<void>
     Seat::button( std::uint8_t button_detail,
                   bool         press )

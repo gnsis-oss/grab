@@ -299,8 +299,17 @@ TEST( SessionCore,
     ASSERT_TRUE( primary_match.has_value() );
     EXPECT_EQ( primary_match->ref.node, firstNode.value );
 
+    // resolve() searches every attached binding, not just the front one, so a
+    // role only the second runtime publishes still resolves — and comes back
+    // attributed to that runtime. Independent stores mean separate trees, not
+    // an unreachable one.
     const auto secondary_match = core->resolve( grab::sel::role( grab::role::button ) );
-    EXPECT_FALSE( secondary_match.has_value() );
+    ASSERT_TRUE( secondary_match.has_value() );
+    EXPECT_EQ( secondary_match->ref.node, secondNode.value );
+    // A ref carries the SOURCE ids its snapshot was stamped with, not the
+    // session-assigned authority id that events' subject.runtime reports.
+    EXPECT_EQ( secondary_match->ref.runtime, secondRuntime );
+    EXPECT_EQ( secondary_match->ref.tree, secondTree );
 
     fake_b.inject_delta( grab::spi::UiDelta{
         .runtime       = secondRuntime,

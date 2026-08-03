@@ -44,6 +44,12 @@ namespace
     constexpr std::uint64_t        captureWindowNodeId     = 1U;
     constexpr grab::SpaceRect
         describeBounds{ .x = 40.0, .y = 60.0, .w = 320.0, .h = 220.0 };
+    constexpr std::string_view describeName  = "Read more";
+    constexpr std::string_view describeTitle = "Wikipedia, the free encyclopedia";
+    constexpr std::string_view describeText  = "The tiger is a large cat.";
+    constexpr std::string_view describeUrl   = "https://en.wikipedia.org/wiki/Tiger";
+    constexpr std::uint32_t    describeFacets =
+        grab::facet_mask( grab::Facet::Text ) | grab::Facet::Invokable;
 
     [[nodiscard]]
     grab::UiSnapshot
@@ -79,19 +85,35 @@ namespace
     grab::UiSnapshot
     describe_snapshot( grab::RuntimeId runtime )
     {
+        const auto string_property = []( grab::PropertyId id, std::string_view value )
+        {
+            return grab::UiProperty{
+                .id   = id,
+                .read = grab::PropertyRead{
+                                           .state = grab::PropertyRead::State::Present,
+                                           .value = std::string{ value },
+                                           },
+            };
+        };
         std::vector<grab::UiProperty> properties{
             grab::UiProperty{
-                             .id   = grab::property::bounds,
-                             .read = grab::PropertyRead{
-                    .state = grab::PropertyRead::State::Present,
-                    .value = describeBounds,
-                }, },
+                             .id = grab::property::bounds,
+                             .read =
+                    grab::PropertyRead{
+                        .state = grab::PropertyRead::State::Present,
+                        .value = describeBounds,
+                    }, },
+            string_property( grab::property::accessible_name, describeName ),
+            string_property( grab::property::title, describeTitle ),
+            string_property( grab::property::text, describeText ),
+            string_property( grab::property::url, describeUrl ),
         };
         const auto node = grab::UiNodeRecord{
             performNode,
             performGeneration,
             grab::role::window,
             grab::state_mask( grab::NodeState::Visible ) | grab::NodeState::Enabled,
+            describeFacets,
             std::move( properties ),
             grab::UiProvenance{
                                .runtime  = runtime,
@@ -141,6 +163,33 @@ TEST( SessionVerbs,
     } );
     ASSERT_TRUE( sub.has_value() );
     EXPECT_NE( sub->id(), grab::SubscriptionId{} );
+}
+
+TEST( SessionVerbs,
+      ResolveAllReturnsEveryMatchAndEmptyIsSuccess )
+{
+    grab::testing::FakeRuntime fake;
+    fake.inject_snapshot( grab::testing::tree::snapshot(
+        1U,
+        { grab::testing::tree::node( 1U, grab::role::window ) }
+    ) );
+
+    auto core = grab::kernel::lifecycle::SessionCore::open_for_test();
+    ASSERT_NE( core, nullptr );
+    const grab::OperationContext context{};
+    ASSERT_TRUE( core->attach( fake, context ).has_value() );
+
+    const auto windows = core->resolve_all( grab::sel::role( grab::role::window ) );
+    ASSERT_TRUE( windows.has_value() ) << windows.error().message;
+    ASSERT_EQ( windows->size(), 1U );
+    EXPECT_EQ( windows->front().ref.node, 1U );
+
+    // A locator that matches nothing is success with an empty vector, NOT
+    // NoMatch — a harvester asking "all links" on a page with none is not an
+    // error.
+    const auto buttons = core->resolve_all( grab::sel::role( grab::role::button ) );
+    ASSERT_TRUE( buttons.has_value() ) << buttons.error().message;
+    EXPECT_TRUE( buttons->empty() );
 }
 
 TEST( SessionVerbs,
@@ -251,7 +300,7 @@ TEST( SessionVerbs,
 }
 
 TEST( SessionVerbs,
-      DescribeReturnsResolvedNodeBoundsAndStates )
+      DescribeReturnsResolvedNodeGeometryStateAndText )
 {
     grab::testing::FakeRuntime fake;
     fake.inject_snapshot( describe_snapshot( fake.runtime_id() ) );
@@ -274,6 +323,12 @@ TEST( SessionVerbs,
     EXPECT_EQ( info->role, grab::role::window );
     EXPECT_TRUE( grab::has_state( info->states, grab::NodeState::Visible ) );
     EXPECT_TRUE( grab::has_state( info->states, grab::NodeState::Enabled ) );
+    EXPECT_EQ( info->name, describeName );
+    EXPECT_EQ( info->title, describeTitle );
+    EXPECT_EQ( info->text, describeText );
+    EXPECT_EQ( info->url, describeUrl );
+    EXPECT_TRUE( grab::has_facet( info->facets, grab::Facet::Text ) );
+    EXPECT_TRUE( grab::has_facet( info->facets, grab::Facet::Invokable ) );
 }
 
 TEST( SessionVerbs,

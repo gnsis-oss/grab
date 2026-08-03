@@ -75,6 +75,7 @@ namespace grab::drivers::semantic::atspi
             std::string                    name;
             std::string                    title;
             std::string                    text_content;
+            std::string                    url;
             std::uint32_t                  states{};
             std::optional<std::uint32_t>   pid;
             std::optional<grab::SpaceRect> bounds;

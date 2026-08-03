@@ -45,6 +45,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <variant>
@@ -289,12 +290,35 @@ namespace
         {
             return XCB_WINDOW_NONE;
         }
+
         const auto reply = take_xcb_owned( xcb_get_selection_owner_reply(
             display.get(),
             xcb_get_selection_owner( display.get(), selection ),
             nullptr
         ) );
         return reply == nullptr ? XCB_WINDOW_NONE : reply->owner;
+    }
+
+    // The fixture starts the compositor in the background and cannot wait for
+    // it, because owning a selection is not observable from shell. Poll here
+    // instead of asserting on the first read, which is a race the fast tests
+    // lose.
+    [[nodiscard]]
+    bool
+    wait_for_compositor_owner( DisplayConnection& display )
+    {
+        constexpr auto compositorDeadline = std::chrono::seconds{ 10 };
+        constexpr auto pollInterval       = std::chrono::milliseconds{ 50 };
+        const auto     deadline = std::chrono::steady_clock::now() + compositorDeadline;
+        while( std::chrono::steady_clock::now() < deadline )
+        {
+            if( compositor_owner( display ) != XCB_WINDOW_NONE )
+            {
+                return true;
+            }
+            std::this_thread::sleep_for( pollInterval );
+        }
+        return false;
     }
 
     [[nodiscard]]
@@ -1118,7 +1142,7 @@ namespace
         DisplayConnection display{ compositedDisplay };
         ASSERT_TRUE( display.valid() )
             << "requires the Xvfb fixture on " << compositedDisplay;
-        ASSERT_NE( compositor_owner( display ), XCB_WINDOW_NONE )
+        ASSERT_TRUE( wait_for_compositor_owner( display ) )
             << "compositor fixture did not own " << compositorSelection;
         SentinelWindow sentinel;
         ASSERT_TRUE( create_sentinel( display, sentinel ) );
@@ -1230,7 +1254,7 @@ namespace
         DisplayConnection display{ randrDisplay };
         ASSERT_TRUE( display.valid() )
             << "requires the Xvfb fixture on " << randrDisplay;
-        ASSERT_NE( compositor_owner( display ), XCB_WINDOW_NONE )
+        ASSERT_TRUE( wait_for_compositor_owner( display ) )
             << "compositor fixture did not own " << compositorSelection;
 
         ScopedDisplay environment{ randrDisplay };

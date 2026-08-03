@@ -24,9 +24,11 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <span>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace grab
 {
@@ -242,6 +244,18 @@ namespace grab
             ) mutable
             {
                 return service.add( std::move( shape ) );
+            }
+        );
+    }
+
+    Result<std::vector<overlay::ShapeId>>
+    Overlay::add_many( std::span<overlay::Shape> shapes )
+    {
+        // ONE round trip for the whole batch — the point of the call.
+        return impl_->invoke<std::vector<overlay::ShapeId>>(
+            [shapes]( kernel::presentation::OverlayService& service )
+            {
+                return service.add_many( shapes );
             }
         );
     }
@@ -728,6 +742,12 @@ namespace grab
         return kernel::lifecycle::resolve_verb( impl_->core(), locator, cardinality );
     }
 
+    grab::Result<std::vector<Match>>
+    Session::resolve_all( const Locator& locator )
+    {
+        return kernel::lifecycle::resolve_all_verb( impl_->core(), locator );
+    }
+
     grab::Result<NodeInfo>
     Session::describe( const Match& match )
     {
@@ -812,6 +832,18 @@ namespace grab
         {
             core->stop_observation();
         }
+    }
+
+    grab::Result<void>
+    Session::resync()
+    {
+        auto* const core = impl_->core();
+        if( core == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                               "session has no composed runtime to resync" );
+        }
+        return core->resync( grab::OperationContext{} );
     }
 
 }    // namespace grab

@@ -97,6 +97,15 @@ namespace grab::kernel::lifecycle
             resolve( const Locator& locator,
                      Cardinality    cardinality = Cardinality::ExactlyOne );
 
+            // Resolves every node matching the locator (Cardinality::All), each
+            // returned as a Match usable with describe(). This is what a
+            // document harvester needs: one resolve to enumerate all links,
+            // headings or list items, then describe() per node. An empty match
+            // set is success with an empty vector, not NoMatch.
+            [[nodiscard]]
+            Result<std::vector<Match>>
+            resolve_all( const Locator& locator );
+
             [[nodiscard]]
             Result<NodeInfo>
             describe( const Match& match );
@@ -172,6 +181,15 @@ namespace grab::kernel::lifecycle
             void
             stop_observation();
 
+            // Force a fresh full snapshot from every bound tree source into its
+            // store. The AT-SPI source delivers no incremental updates
+            // (next_update is always empty), so after the page it describes
+            // changes — e.g. a browser navigation — the cached snapshot is stale
+            // until this is called. Cheap to call; re-enumerates the tree once.
+            [[nodiscard]]
+            Result<void>
+            resync( const OperationContext& context );
+
         private:
 
             struct RuntimeBinding
@@ -232,6 +250,10 @@ namespace grab::kernel::lifecycle
     };
 
     [[nodiscard]]
+    Result<std::vector<Match>>
+    resolve_all_verb( SessionCore*   core,
+                      const Locator& locator );
+
     Result<Match>
     resolve_verb( SessionCore*   core,
                   const Locator& locator,

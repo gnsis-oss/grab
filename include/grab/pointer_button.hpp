@@ -5,11 +5,19 @@
 namespace grab::input
 {
 
+    // X11 delivers wheel motion as button events, so the wheel directions are
+    // buttons here too rather than a separate axis type. Naming them keeps
+    // callers from writing the bare codes 4-7, which is what scrolling looked
+    // like before Input::scroll existed.
     enum class PointerButton : std::uint8_t
     {
-        Primary   = 1U,
-        Middle    = 2U,
-        Secondary = 3U,
+        Primary    = 1U,
+        Middle     = 2U,
+        Secondary  = 3U,
+        WheelUp    = 4U,
+        WheelDown  = 5U,
+        WheelLeft  = 6U,
+        WheelRight = 7U,
     };
 
     [[nodiscard]]

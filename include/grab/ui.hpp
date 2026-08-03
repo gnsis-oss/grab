@@ -34,6 +34,7 @@ namespace grab
         inline constexpr PropertyId window_class{ 4U };
         inline constexpr PropertyId process_id{ 5U };
         inline constexpr PropertyId bounds{ 6U };
+        inline constexpr PropertyId url{ 7U };
 
     }    // namespace property
 

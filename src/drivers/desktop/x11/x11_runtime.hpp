@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace grab::core
@@ -41,7 +42,13 @@ namespace grab::drivers::desktop::x11
     {
         public:
 
-            explicit X11Runtime( grab::core::Reactor* reactor = nullptr ) noexcept;
+            // `display` is the X display to connect to. Empty means DISPLAY, as
+            // xcb_connect already defines it. Honouring it is not cosmetic: a
+            // session that silently connects somewhere other than where the
+            // caller asked draws its overlay on a display the caller never
+            // named, which on a shared machine is somebody else's screen.
+            explicit X11Runtime( grab::core::Reactor* reactor = nullptr,
+                                 std::string          display = {} ) noexcept;
             ~X11Runtime() override;
 
             [[nodiscard]]
@@ -125,6 +132,10 @@ namespace grab::drivers::desktop::x11
 
         private:
 
+            [[nodiscard]]
+            const char*
+                                                 display_or_default() const noexcept;
+
             static constexpr std::uint32_t       initialGeneration = 1U;
 
             grab::platform::x11::XcbConnection   connection_;
@@ -142,6 +153,7 @@ namespace grab::drivers::desktop::x11
             std::unique_ptr<X11OverlayDelegate>  overlay_delegate_;
             std::optional<grab::Error>           overlay_delegate_error_;
             std::function<void( grab::Event&& )> pending_sink_;
+            std::string                          display_{};
             grab::core::Reactor*                 reactor_{};
             std::uint32_t                        generation_{ initialGeneration };
             bool                                 overlay_available_{};

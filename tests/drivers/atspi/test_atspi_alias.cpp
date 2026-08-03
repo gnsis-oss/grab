@@ -64,6 +64,7 @@ namespace
             .name         = std::string{ windowTitle },
             .title        = std::string{ windowTitle },
             .text_content = std::string{},
+            .url          = std::string{},
             .states       = accessibleStates,
             .pid          = processId,
             .bounds       = std::nullopt,
