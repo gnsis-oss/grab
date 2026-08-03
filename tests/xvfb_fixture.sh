@@ -72,6 +72,17 @@ case "${1:-}" in
         for d in $COMPOSITOR_DISPLAYS; do
             start_compositor "$d"
         done
+        # A compositor's readiness is selection ownership, which no shell tool can
+        # observe, so this cannot be a true wait_ready. Give it a moment to claim
+        # the selection and confirm it did not die immediately; the authoritative
+        # wait is wait_for_compositor_owner() in test_overlay_ring3.cpp.
+        sleep 0.5
+        if [ -s "$COMPOSITOR_PIDFILE" ]; then
+            while IFS= read -r pid; do
+                [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || \
+                    echo "warning: compositor $pid exited early" >&2
+            done <"$COMPOSITOR_PIDFILE"
+        fi
         ;;
     stop)
         stop_compositor

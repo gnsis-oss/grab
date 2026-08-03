@@ -57,6 +57,12 @@ namespace
     constexpr auto             streamDeadline      = std::chrono::seconds{ 5 };
     constexpr auto             streamReadyTimeout  = std::chrono::seconds{ 2 };
     constexpr auto             streamResultTimeout = std::chrono::seconds{ 2 };
+    // CaptureFrame is the only unary RPC that does real pixel work: a
+    // full-display grab plus a PNG encode. Under the always-on ASan/UBSan
+    // and coverage instrumentation that costs tens of times what the other
+    // unary calls do, so it gets its own deadline rather than inflating
+    // theirs.
+    constexpr auto             captureDeadline     = std::chrono::seconds{ 30 };
     constexpr auto             noEventWindow       = std::chrono::milliseconds{ 200 };
     constexpr double           eventTimestamp      = 1729.25;
     constexpr std::uint64_t    noSequence          = 0U;
@@ -905,7 +911,7 @@ TEST( EventServiceCommands,
     ASSERT_FALSE( outputs->empty() );
 
     grpc::ClientContext context;
-    context.set_deadline( std::chrono::system_clock::now() + unaryDeadline );
+    context.set_deadline( std::chrono::system_clock::now() + captureDeadline );
     eventgrab::v1::CaptureFrameRequest  request;
     eventgrab::v1::CaptureFrameResponse response;
     request.set_output( outputs->front().name );
