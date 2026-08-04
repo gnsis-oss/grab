@@ -130,6 +130,9 @@ namespace grab::drivers::desktop::x11
             grab::spi::InputSeat*
             input_seat() override;
 
+            void
+            bind_reactor( grab::core::Reactor* reactor ) override;
+
         private:
 
             [[nodiscard]]

@@ -498,6 +498,7 @@ namespace grab
         // Without either, the session stays reactor-only.
         if( injected_runtime_ != nullptr )
         {
+            injected_runtime_->bind_reactor( &reactor_ );
             if( auto core = kernel::lifecycle::SessionCore::open_owning(
                     std::move( injected_runtime_ ),
                     grab::OperationContext{}

@@ -10,6 +10,13 @@
 #include <string>
 #include <string_view>
 
+namespace grab::core
+{
+
+    class Reactor;
+
+}
+
 namespace grab::spi
 {
 
@@ -99,6 +106,11 @@ namespace grab::spi
             input_seat()
             {
                 return nullptr;
+            }
+
+            virtual void
+            bind_reactor( [[maybe_unused]] grab::core::Reactor* reactor )
+            {
             }
     };
 
