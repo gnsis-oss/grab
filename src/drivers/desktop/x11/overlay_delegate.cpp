@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <expected>
 #include <functional>
@@ -71,8 +72,14 @@ namespace grab::drivers::desktop::x11
         constexpr int              noPollEvents          = 0;
         constexpr std::int16_t     xcbPollEvents         = POLLIN;
         constexpr int              shmPermissions        = 0600;
-        constexpr auto             noTimerDelay      = std::chrono::nanoseconds::zero();
-        constexpr auto             flushFenceTimeout = std::chrono::seconds{ 2 };
+        constexpr auto             noTimerDelay       = std::chrono::nanoseconds::zero();
+        constexpr auto             flushFenceTimeout  = std::chrono::seconds{ 2 };
+
+        constexpr std::uint8_t     bgraBlueByteIndex  = 0U;
+        constexpr std::uint8_t     bgraGreenByteIndex = 1U;
+        constexpr std::uint8_t     bgraRedByteIndex   = 2U;
+        constexpr std::uint8_t     bgraAlphaByteIndex = 3U;
+        constexpr std::uint8_t     bgraBitsPerPixel   = bgraBytesPerPixel * bitsPerByte;
         constexpr std::string_view argbUnavailableReason{
             "X11 overlay requires an XRender ARGB32 visual"
         };
@@ -87,6 +94,35 @@ namespace grab::drivers::desktop::x11
             "and fade/TTL frame clock)"
         };
         constexpr std::string_view compositorSelectionPrefix{ "_NET_WM_CM_S" };
+        constexpr bool             hostByteOrderKnown{
+            std::endian::native ==
+            std::endian::little ||
+            std::endian::native == std::endian::big
+        };
+        constexpr std::uint8_t hostImageByteOrder =
+            std::endian::native == std::endian::little ? XCB_IMAGE_ORDER_LSB_FIRST
+                                                       : XCB_IMAGE_ORDER_MSB_FIRST;
+
+        [[nodiscard]]
+        constexpr std::uint32_t
+        native_bgra_channel_mask( std::uint8_t byte_index ) noexcept
+        {
+            const auto native_byte_index =
+                std::endian::native == std::endian::little
+                    ? byte_index
+                    : static_cast<std::uint8_t>( bgraAlphaByteIndex - byte_index );
+            return static_cast<std::uint32_t>( fullChannel )
+                << ( static_cast<std::uint32_t>( native_byte_index ) * bitsPerByte );
+        }
+
+        constexpr std::uint32_t nativeBgraBlueMask =
+            native_bgra_channel_mask( bgraBlueByteIndex );
+        constexpr std::uint32_t nativeBgraGreenMask =
+            native_bgra_channel_mask( bgraGreenByteIndex );
+        constexpr std::uint32_t nativeBgraRedMask =
+            native_bgra_channel_mask( bgraRedByteIndex );
+        constexpr std::uint32_t nativeBgraAlphaMask =
+            native_bgra_channel_mask( bgraAlphaByteIndex );
 
         template<typename Type>
         using XcbOwned = std::unique_ptr<Type, decltype( &std::free )>;
@@ -145,6 +181,41 @@ namespace grab::drivers::desktop::x11
                 std::uint32_t  blue_mask{};
                 std::uint32_t  alpha_mask{};
         };
+
+        [[nodiscard]]
+        constexpr bool
+        bgra_row_strides_compatible( std::uint16_t width,
+                                     std::size_t   source_stride,
+                                     std::size_t   destination_stride ) noexcept
+        {
+            const auto row_bytes = static_cast<std::size_t>( width ) * bgraBytesPerPixel;
+            return source_stride >= row_bytes && destination_stride >= row_bytes;
+        }
+
+        [[nodiscard]]
+        constexpr bool
+        native_bgra_memcpy_compatible( const NativeLayout& layout,
+                                       std::uint16_t       width,
+                                       std::size_t         source_stride,
+                                       std::size_t         destination_stride ) noexcept
+        {
+            const bool masks_match = layout.red_mask ==
+                                     nativeBgraRedMask &&
+                                     layout.green_mask ==
+                                     nativeBgraGreenMask &&
+                                     layout.blue_mask ==
+                                     nativeBgraBlueMask &&
+                                     layout.alpha_mask == nativeBgraAlphaMask;
+            return hostByteOrderKnown &&
+                   layout.bits_per_pixel ==
+                   bgraBitsPerPixel &&
+                   masks_match &&
+                   layout.image_byte_order ==
+                   hostImageByteOrder &&
+                   bgra_row_strides_compatible( width,
+                                                source_stride,
+                                                destination_stride );
+        }
 
         struct ExtensionSpec
         {
@@ -807,6 +878,12 @@ namespace grab::drivers::desktop::x11
         }
 
         [[nodiscard]]
+        std::optional<geometry::Rectangle>
+        clipped_damage( const geometry::Rectangle& damage,
+                        std::uint16_t              width,
+                        std::uint16_t              height ) noexcept;
+
+        [[nodiscard]]
         std::uint32_t
         channel_bits( std::uint8_t  channel,
                       std::uint32_t mask ) noexcept
@@ -856,13 +933,21 @@ namespace grab::drivers::desktop::x11
 
         [[nodiscard]]
         Result<void>
-        convert_image( const Image&         source,
-                       const NativeLayout&  layout,
-                       std::size_t          destination_stride,
-                       std::span<std::byte> destination )
+        convert_image( const Image&                         source,
+                       const NativeLayout&                  layout,
+                       std::uint16_t                        surface_width,
+                       std::uint16_t                        surface_height,
+                       std::size_t                          destination_stride,
+                       std::span<std::byte>                 destination,
+                       std::span<const geometry::Rectangle> damage,
+                       bool                                 memcpy_eligible )
         {
             if( source.format !=
                 PixelFormat::Bgra ||
+                source.width !=
+                surface_width ||
+                source.height !=
+                surface_height ||
                 layout.bits_per_pixel %
                 bitsPerByte != 0U )
             {
@@ -876,51 +961,92 @@ namespace grab::drivers::desktop::x11
                 return fail( ErrorCode::ProtocolError,
                              "X11 overlay visual pixel width is unsupported" );
             }
+            const auto source_row_bytes =
+                static_cast<std::size_t>( surface_width ) * bgraBytesPerPixel;
+            const auto destination_row_bytes =
+                static_cast<std::size_t>( surface_width ) * bytes_per_pixel;
+            if( static_cast<std::size_t>( source.stride ) <
+                source_row_bytes ||
+                destination_stride < destination_row_bytes )
+            {
+                return fail( ErrorCode::ProtocolError,
+                             "X11 overlay image stride is too short" );
+            }
             const auto required =
-                destination_stride * static_cast<std::size_t>( source.height );
+                destination_stride * static_cast<std::size_t>( surface_height );
             if( destination.size() < required )
             {
                 return fail( ErrorCode::ProtocolError,
                              "X11 overlay native pixel storage is too short" );
             }
 
-            std::ranges::fill( destination.first( required ), std::byte{} );
-            for( std::uint32_t y{}; y < source.height; ++y )
+            const bool use_memcpy =
+                memcpy_eligible && bgra_row_strides_compatible( surface_width,
+                                                                source.stride,
+                                                                destination_stride );
+            for( const auto& rectangle : damage )
             {
-                const auto source_row = source.row( y );
-                if( source_row.size() <
-                    static_cast<std::size_t>( source.width ) *
-                    bgraBytesPerPixel )
+                const auto clipped =
+                    clipped_damage( rectangle, surface_width, surface_height );
+                if( !clipped.has_value() )
                 {
-                    return fail( ErrorCode::ProtocolError,
-                                 "X11 overlay raster row is too short" );
+                    continue;
                 }
-                auto* const destination_row =
-                    destination.data() +
-                    ( static_cast<std::size_t>( y ) * destination_stride );
-                for( std::uint32_t x{}; x < source.width; ++x )
+                const auto first_x = static_cast<std::uint32_t>( clipped->x );
+                const auto first_y = static_cast<std::uint32_t>( clipped->y );
+                const auto last_x  = first_x + clipped->width;
+                const auto last_y  = first_y + clipped->height;
+                for( auto y = first_y; y < last_y; ++y )
                 {
+                    const auto source_row = source.row( y );
+                    if( source_row.size() < source_row_bytes )
+                    {
+                        return fail( ErrorCode::ProtocolError,
+                                     "X11 overlay raster row is too short" );
+                    }
+                    auto* const destination_row =
+                        destination.data() +
+                        ( static_cast<std::size_t>( y ) * destination_stride );
                     const auto source_offset =
-                        static_cast<std::size_t>( x ) * bgraBytesPerPixel;
-                    const auto blue =
-                        std::to_integer<std::uint8_t>( source_row[source_offset] );
-                    const auto green =
-                        std::to_integer<std::uint8_t>( source_row[source_offset + 1U] );
-                    const auto red =
-                        std::to_integer<std::uint8_t>( source_row[source_offset + 2U] );
-                    const auto alpha =
-                        std::to_integer<std::uint8_t>( source_row[source_offset + 3U] );
-                    const std::uint32_t pixel =
-                        channel_bits( red, layout.red_mask ) |
-                        channel_bits( green, layout.green_mask ) |
-                        channel_bits( blue, layout.blue_mask ) |
-                        channel_bits( alpha, layout.alpha_mask );
-                    write_native_pixel( destination_row +
-                                            ( static_cast<std::size_t>( x ) *
-                                              bytes_per_pixel ),
-                                        bytes_per_pixel,
-                                        layout.image_byte_order,
-                                        pixel );
+                        static_cast<std::size_t>( first_x ) * bgraBytesPerPixel;
+                    if( use_memcpy )
+                    {
+                        const auto copy_bytes =
+                            static_cast<std::size_t>( clipped->width ) *
+                            bgraBytesPerPixel;
+                        std::memcpy( destination_row + source_offset,
+                                     source_row.data() + source_offset,
+                                     copy_bytes );
+                        continue;
+                    }
+                    for( auto x = first_x; x < last_x; ++x )
+                    {
+                        const auto pixel_source_offset =
+                            static_cast<std::size_t>( x ) * bgraBytesPerPixel;
+                        const auto blue = std::to_integer<std::uint8_t>(
+                            source_row[pixel_source_offset + bgraBlueByteIndex]
+                        );
+                        const auto green = std::to_integer<std::uint8_t>(
+                            source_row[pixel_source_offset + bgraGreenByteIndex]
+                        );
+                        const auto red = std::to_integer<std::uint8_t>(
+                            source_row[pixel_source_offset + bgraRedByteIndex]
+                        );
+                        const auto alpha = std::to_integer<std::uint8_t>(
+                            source_row[pixel_source_offset + bgraAlphaByteIndex]
+                        );
+                        const std::uint32_t pixel =
+                            channel_bits( red, layout.red_mask ) |
+                            channel_bits( green, layout.green_mask ) |
+                            channel_bits( blue, layout.blue_mask ) |
+                            channel_bits( alpha, layout.alpha_mask );
+                        write_native_pixel( destination_row +
+                                                ( static_cast<std::size_t>( x ) *
+                                                  bytes_per_pixel ),
+                                            bytes_per_pixel,
+                                            layout.image_byte_order,
+                                            pixel );
+                    }
                 }
             }
             return {};
@@ -1334,6 +1460,18 @@ namespace grab::drivers::desktop::x11
                     bool          attached{};
             };
 
+            void
+            refresh_memcpy_eligibility() noexcept
+            {
+                const auto source_stride =
+                    static_cast<std::size_t>( probe_.screen.width ) * bgraBytesPerPixel;
+                native_memcpy_eligible_ =
+                    native_bgra_memcpy_compatible( probe_.layout,
+                                                   probe_.screen.width,
+                                                   source_stride,
+                                                   native_stride_ );
+            }
+
             [[nodiscard]]
             Result<void>
             create_surface()
@@ -1450,10 +1588,12 @@ namespace grab::drivers::desktop::x11
             Result<void>
             allocate_pixel_storage( std::size_t size )
             {
+                native_memcpy_eligible_ = false;
                 release_shm();
                 native_pixels_.clear();
                 if( probe_.extensions.shm_available && try_allocate_shm( size ) )
                 {
+                    refresh_memcpy_eligibility();
                     return {};
                 }
                 try
@@ -1470,6 +1610,7 @@ namespace grab::drivers::desktop::x11
                     return fail( ErrorCode::Overflowed,
                                  "X11 overlay pixel allocation exceeds limits" );
                 }
+                refresh_memcpy_eligibility();
                 return {};
             }
 
@@ -1559,9 +1700,10 @@ namespace grab::drivers::desktop::x11
                     xcb_free_colormap( connection_.get(), colormap_ );
                     colormap_ = XCB_COLORMAP_NONE;
                 }
-                mapped_            = false;
-                native_stride_     = 0U;
-                surface_presented_ = false;
+                mapped_                 = false;
+                native_stride_          = 0U;
+                native_memcpy_eligible_ = false;
+                surface_presented_      = false;
                 if( connection_ != nullptr )
                 {
                     xcb_flush( connection_.get() );
@@ -1925,8 +2067,12 @@ namespace grab::drivers::desktop::x11
                 {
                     auto converted = convert_image( frame->pixels,
                                                     probe_.layout,
+                                                    probe_.screen.width,
+                                                    probe_.screen.height,
                                                     native_stride_,
-                                                    native_storage() );
+                                                    native_storage(),
+                                                    frame->damage,
+                                                    native_memcpy_eligible_ );
                     if( !converted.has_value() )
                     {
                         return converted;
@@ -2496,6 +2642,7 @@ namespace grab::drivers::desktop::x11
             bool                                                 surface_presented_{};
             bool                                                 has_frame_deadline_{};
             bool                                                 compositor_lost_{};
+            bool native_memcpy_eligible_{};
     };
 
     X11OverlayDelegate::X11OverlayDelegate( std::shared_ptr<Impl> impl ) noexcept :
