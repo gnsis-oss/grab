@@ -41,7 +41,7 @@ namespace grab::drivers::desktop::x11
         constexpr int           flushFailed               = 0;
         constexpr std::uint8_t  responseTypeMask          = 0X7FU;
         constexpr std::uint16_t requiredXiMajorVersion    = 2U;
-        constexpr std::uint16_t requiredXiMinorVersion    = 0U;
+        constexpr std::uint16_t requiredXiMinorVersion    = 1U;
         constexpr std::uint16_t rawMaskCount              = 1U;
         constexpr std::uint16_t rawMaskWords              = 1U;
         constexpr int           xAxisValuator             = 0;
@@ -77,7 +77,7 @@ namespace grab::drivers::desktop::x11
         constexpr std::string_view xi2QueryFailedMessage{
             "XInput2 version query failed"
         };
-        constexpr std::string_view xi2UnavailableMessage{ "XInput2 2.0 is unavailable" };
+        constexpr std::string_view xi2UnavailableMessage{ "XInput2 2.1 is unavailable" };
         constexpr std::string_view deviceQueryFailedMessage{
             "XInput2 device query failed"
         };
@@ -152,7 +152,11 @@ namespace grab::drivers::desktop::x11
                                    std::string{ xi2QueryFailedMessage } );
             }
 
-            if( reply->major_version < requiredXiMajorVersion )
+            if( reply->major_version <
+                requiredXiMajorVersion ||
+                ( reply->major_version ==
+                  requiredXiMajorVersion &&
+                  reply->minor_version < requiredXiMinorVersion ) )
             {
                 return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    std::string{ xi2UnavailableMessage } );
