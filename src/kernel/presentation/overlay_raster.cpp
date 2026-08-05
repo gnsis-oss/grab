@@ -791,6 +791,192 @@ namespace grab::kernel::presentation
         }
 
         [[nodiscard]]
+        std::int64_t
+        rectangle_right( geometry::Rectangle rectangle ) noexcept
+        {
+            return static_cast<std::int64_t>( rectangle.x ) +
+                   static_cast<std::int64_t>( rectangle.width );
+        }
+
+        [[nodiscard]]
+        std::int64_t
+        rectangle_bottom( geometry::Rectangle rectangle ) noexcept
+        {
+            return static_cast<std::int64_t>( rectangle.y ) +
+                   static_cast<std::int64_t>( rectangle.height );
+        }
+
+        [[nodiscard]]
+        std::optional<geometry::Rectangle>
+        intersection( geometry::Rectangle left,
+                      geometry::Rectangle right ) noexcept
+        {
+            const auto left_edge = std::max( static_cast<std::int64_t>( left.x ),
+                                             static_cast<std::int64_t>( right.x ) );
+            const auto top_edge  = std::max( static_cast<std::int64_t>( left.y ),
+                                             static_cast<std::int64_t>( right.y ) );
+            const auto right_edge =
+                std::min( rectangle_right( left ), rectangle_right( right ) );
+            const auto bottom_edge =
+                std::min( rectangle_bottom( left ), rectangle_bottom( right ) );
+            if( right_edge <= left_edge || bottom_edge <= top_edge )
+            {
+                return std::nullopt;
+            }
+            return geometry::Rectangle{
+                .x      = static_cast<std::int32_t>( left_edge ),
+                .y      = static_cast<std::int32_t>( top_edge ),
+                .width  = static_cast<std::uint32_t>( right_edge - left_edge ),
+                .height = static_cast<std::uint32_t>( bottom_edge - top_edge ),
+            };
+        }
+
+        [[nodiscard]]
+        bool
+        intersects( geometry::Rectangle left,
+                    geometry::Rectangle right ) noexcept
+        {
+            const auto left_edge = std::max( static_cast<std::int64_t>( left.x ),
+                                             static_cast<std::int64_t>( right.x ) );
+            const auto top_edge  = std::max( static_cast<std::int64_t>( left.y ),
+                                             static_cast<std::int64_t>( right.y ) );
+            return left_edge <
+                   std::min( rectangle_right( left ), rectangle_right( right ) ) &&
+                   top_edge <
+                   std::min( rectangle_bottom( left ), rectangle_bottom( right ) );
+        }
+
+        void
+        append_rectangle( std::vector<geometry::Rectangle>& rectangles,
+                          std::int64_t                      left,
+                          std::int64_t                      top,
+                          std::int64_t                      right,
+                          std::int64_t                      bottom )
+        {
+            if( right <= left || bottom <= top )
+            {
+                return;
+            }
+            rectangles.push_back( geometry::Rectangle{
+                .x      = static_cast<std::int32_t>( left ),
+                .y      = static_cast<std::int32_t>( top ),
+                .width  = static_cast<std::uint32_t>( right - left ),
+                .height = static_cast<std::uint32_t>( bottom - top ),
+            } );
+        }
+
+        void
+        subtract_rectangle( geometry::Rectangle               rectangle,
+                            geometry::Rectangle               covered,
+                            std::vector<geometry::Rectangle>& remainder )
+        {
+            const auto overlap = intersection( rectangle, covered );
+            if( !overlap.has_value() )
+            {
+                remainder.push_back( rectangle );
+                return;
+            }
+
+            const auto left           = static_cast<std::int64_t>( rectangle.x );
+            const auto top            = static_cast<std::int64_t>( rectangle.y );
+            const auto right          = rectangle_right( rectangle );
+            const auto bottom         = rectangle_bottom( rectangle );
+            const auto overlap_left   = static_cast<std::int64_t>( overlap->x );
+            const auto overlap_top    = static_cast<std::int64_t>( overlap->y );
+            const auto overlap_right  = rectangle_right( *overlap );
+            const auto overlap_bottom = rectangle_bottom( *overlap );
+
+            append_rectangle( remainder, left, top, right, overlap_top );
+            append_rectangle( remainder, left, overlap_bottom, right, bottom );
+            append_rectangle( remainder,
+                              left,
+                              overlap_top,
+                              overlap_left,
+                              overlap_bottom );
+            append_rectangle( remainder,
+                              overlap_right,
+                              overlap_top,
+                              right,
+                              overlap_bottom );
+        }
+
+        [[nodiscard]]
+        std::vector<geometry::Rectangle>
+        normalize_damage( std::span<const geometry::Rectangle> damage )
+        {
+            std::vector<geometry::Rectangle> normalized;
+            std::vector<geometry::Rectangle> pending;
+            std::vector<geometry::Rectangle> remainder;
+            normalized.reserve( damage.size() );
+            for( const auto rectangle : damage )
+            {
+                pending.clear();
+                pending.push_back( rectangle );
+                for( const auto covered : normalized )
+                {
+                    remainder.clear();
+                    for( const auto piece : pending )
+                    {
+                        subtract_rectangle( piece, covered, remainder );
+                    }
+                    pending.swap( remainder );
+                    if( pending.empty() )
+                    {
+                        break;
+                    }
+                }
+                normalized.insert( normalized.end(),
+                                   std::make_move_iterator( pending.begin() ),
+                                   std::make_move_iterator( pending.end() ) );
+            }
+            return normalized;
+        }
+
+        [[nodiscard]]
+        bool
+        intersects_damage( geometry::Rectangle                  bounds,
+                           std::span<const geometry::Rectangle> damage ) noexcept
+        {
+            return std::ranges::any_of( damage,
+                                        [bounds]( geometry::Rectangle rectangle )
+                                        {
+                                            return intersects( bounds, rectangle );
+                                        } );
+        }
+
+        void
+        clear_damage( Image&                               image,
+                      std::span<const geometry::Rectangle> damage )
+        {
+            auto pixels = std::span<std::byte>{ image.pixels };
+            for( const auto rectangle : damage )
+            {
+                if( rectangle.width == 0U || rectangle.height == 0U )
+                {
+                    continue;
+                }
+                assert( rectangle.x >= 0 );
+                assert( rectangle.y >= 0 );
+                assert( rectangle_right( rectangle ) <=
+                        static_cast<std::int64_t>( image.width ) );
+                assert( rectangle_bottom( rectangle ) <=
+                        static_cast<std::int64_t>( image.height ) );
+                const auto first_x = static_cast<std::size_t>( rectangle.x );
+                const auto first_y = static_cast<std::size_t>( rectangle.y );
+                const auto row_bytes =
+                    static_cast<std::size_t>( rectangle.width ) * bgraBytesPerPixel;
+                for( std::size_t row{}; row < rectangle.height; ++row )
+                {
+                    const auto offset = ( ( first_y + row ) *
+                                          static_cast<std::size_t>( image.stride ) ) +
+                                        ( first_x * bgraBytesPerPixel );
+                    std::ranges::fill( pixels.subspan( offset, row_bytes ),
+                                       std::byte{} );
+                }
+            }
+        }
+
+        [[nodiscard]]
         std::uint8_t
         channel_byte( double value )
         {
@@ -956,12 +1142,13 @@ namespace grab::kernel::presentation
         }
 
         void
-        rasterize_contours( const FlatContours&    contours,
-                            const overlay::Color&  color,
-                            double                 opacity,
-                            Image&                 image,
-                            std::vector<double>&   row_coverage,
-                            std::vector<Crossing>& crossings )
+        rasterize_contours( const FlatContours&                  contours,
+                            const overlay::Color&                color,
+                            double                               opacity,
+                            std::span<const geometry::Rectangle> damage,
+                            Image&                               image,
+                            std::vector<double>&                 row_coverage,
+                            std::vector<Crossing>&               crossings )
         {
             const auto bounds = point_bounds( contours );
             if( !bounds.has_value() || color.a == 0U || opacity <= fullyTransparent )
@@ -976,37 +1163,108 @@ namespace grab::kernel::presentation
             {
                 return;
             }
-            for( auto y = first_y; y < last_y; ++y )
+            for( const auto clip : damage )
             {
-                std::ranges::fill(
-                    row_coverage.begin() + static_cast<std::ptrdiff_t>( first_x ),
-                    row_coverage.begin() + static_cast<std::ptrdiff_t>( last_x ),
-                    fullyTransparent
-                );
-                for( std::size_t sample{}; sample < antiAliasSubscanlines; ++sample )
+                assert( clip.x >= 0 );
+                assert( clip.y >= 0 );
+                const auto clipped_first_x =
+                    std::max( first_x, static_cast<std::size_t>( clip.x ) );
+                const auto clipped_last_x =
+                    std::min( last_x,
+                              static_cast<std::size_t>( rectangle_right( clip ) ) );
+                const auto clipped_first_y =
+                    std::max( first_y, static_cast<std::size_t>( clip.y ) );
+                const auto clipped_last_y =
+                    std::min( last_y,
+                              static_cast<std::size_t>( rectangle_bottom( clip ) ) );
+                if( clipped_first_x >=
+                    clipped_last_x ||
+                    clipped_first_y >= clipped_last_y )
                 {
-                    const auto sample_y =
-                        static_cast<double>( y ) +
-                        ( ( static_cast<double>( sample ) +
-                            ( fullyOpaque / static_cast<double>( circleHalves ) ) ) /
-                          static_cast<double>( antiAliasSubscanlines ) );
-                    accumulate_scanline( contours,
-                                         sample_y,
-                                         row_coverage,
-                                         first_x,
-                                         last_x,
-                                         crossings );
+                    continue;
                 }
-                for( auto x = first_x; x < last_x; ++x )
+                for( auto y = clipped_first_y; y < clipped_last_y; ++y )
                 {
-                    blend_pixel(
-                        image,
-                        x,
-                        y,
-                        color,
-                        opacity,
-                        std::clamp( row_coverage.at( x ), fullyTransparent, fullyOpaque )
+                    std::ranges::fill(
+                        row_coverage.begin() +
+                            static_cast<std::ptrdiff_t>( clipped_first_x ),
+                        row_coverage.begin() +
+                            static_cast<std::ptrdiff_t>( clipped_last_x ),
+                        fullyTransparent
                     );
+                    for( std::size_t sample{}; sample < antiAliasSubscanlines; ++sample )
+                    {
+                        const auto sample_y =
+                            static_cast<double>( y ) +
+                            ( ( static_cast<double>( sample ) +
+                                ( fullyOpaque / static_cast<double>( circleHalves ) ) ) /
+                              static_cast<double>( antiAliasSubscanlines ) );
+                        accumulate_scanline( contours,
+                                             sample_y,
+                                             row_coverage,
+                                             clipped_first_x,
+                                             clipped_last_x,
+                                             crossings );
+                    }
+                    for( auto x = clipped_first_x; x < clipped_last_x; ++x )
+                    {
+                        blend_pixel( image,
+                                     x,
+                                     y,
+                                     color,
+                                     opacity,
+                                     std::clamp( row_coverage.at( x ),
+                                                 fullyTransparent,
+                                                 fullyOpaque ) );
+                    }
+                }
+            }
+        }
+
+        void
+        paint_shapes( std::span<const TrackedShape>        shapes,
+                      std::span<const FlatContours>        geometries,
+                      std::span<const geometry::Rectangle> damage,
+                      Image&                               image,
+                      std::vector<double>&                 row_coverage,
+                      std::vector<Crossing>&               crossings )
+        {
+            assert( shapes.size() == geometries.size() );
+            auto geometry_iterator = geometries.begin();
+            for( const auto& tracked : shapes )
+            {
+                const auto& geometry = *geometry_iterator;
+                ++geometry_iterator;
+                if( !tracked.bounds.has_value() ||
+                    !intersects_damage( *tracked.bounds, damage ) )
+                {
+                    continue;
+                }
+                if( tracked.record.shape.fill.has_value() )
+                {
+                    rasterize_contours( geometry,
+                                        tracked.record.shape.fill->color,
+                                        tracked.opacity,
+                                        damage,
+                                        image,
+                                        row_coverage,
+                                        crossings );
+                }
+                if( tracked.record.shape.stroke.has_value() &&
+                    std::isfinite( tracked.record.shape.stroke->width_px ) &&
+                    tracked.record.shape.stroke->width_px > fullyTransparent )
+                {
+                    const auto outline = stroke_outline(
+                        geometry,
+                        static_cast<double>( tracked.record.shape.stroke->width_px )
+                    );
+                    rasterize_contours( outline,
+                                        tracked.record.shape.stroke->color,
+                                        tracked.opacity,
+                                        damage,
+                                        image,
+                                        row_coverage,
+                                        crossings );
                 }
             }
         }
@@ -1043,7 +1301,7 @@ namespace grab::kernel::presentation
             std::vector<double>       row_coverage;
             std::vector<Crossing>     crossings;
             std::vector<TrackedShape> previous_shapes;
-            bool                      first_render{ true };
+            bool                      full_redraw_required{ true };
     };
 
     OverlayRaster::OverlayRaster( std::unique_ptr<Impl> impl ) noexcept :
@@ -1104,16 +1362,17 @@ namespace grab::kernel::presentation
         assert( std::ranges::is_sorted( shapes, record_order_less ) );
         try
         {
-            std::ranges::fill( impl_->image.pixels, std::byte{} );
             std::vector<TrackedShape>        current_shapes;
+            std::vector<FlatContours>        flattened_shapes;
             std::vector<geometry::Rectangle> damage;
             current_shapes.reserve( shapes.size() );
+            flattened_shapes.reserve( shapes.size() );
             damage.reserve( shapes.size() + impl_->previous_shapes.size() );
 
             for( const auto& record : shapes )
             {
                 const auto opacity  = lifetime_opacity( record, now );
-                const auto geometry = flatten_geometry( record.shape.geometry );
+                auto       geometry = flatten_geometry( record.shape.geometry );
                 const auto bounds   = rendered_bounds( record.shape,
                                                        geometry,
                                                        opacity,
@@ -1147,31 +1406,7 @@ namespace grab::kernel::presentation
                     .bounds  = bounds,
                     .opacity = opacity,
                 } );
-
-                if( record.shape.fill.has_value() )
-                {
-                    rasterize_contours( geometry,
-                                        record.shape.fill->color,
-                                        opacity,
-                                        impl_->image,
-                                        impl_->row_coverage,
-                                        impl_->crossings );
-                }
-                if( record.shape.stroke.has_value() &&
-                    std::isfinite( record.shape.stroke->width_px ) &&
-                    record.shape.stroke->width_px > fullyTransparent )
-                {
-                    const auto outline = stroke_outline(
-                        geometry,
-                        static_cast<double>( record.shape.stroke->width_px )
-                    );
-                    rasterize_contours( outline,
-                                        record.shape.stroke->color,
-                                        opacity,
-                                        impl_->image,
-                                        impl_->row_coverage,
-                                        impl_->crossings );
-                }
+                flattened_shapes.push_back( std::move( geometry ) );
             }
 
             for( const auto& previous : impl_->previous_shapes )
@@ -1189,7 +1424,7 @@ namespace grab::kernel::presentation
                 }
             }
 
-            if( impl_->first_render )
+            if( impl_->full_redraw_required )
             {
                 damage = {
                     geometry::Rectangle{
@@ -1197,21 +1432,34 @@ namespace grab::kernel::presentation
                                         .height = impl_->image.height,
                                         },
                 };
-                impl_->first_render = false;
             }
-            impl_->previous_shapes = std::move( current_shapes );
+
+            auto normalized_damage      = normalize_damage( damage );
+            impl_->full_redraw_required = true;
+            clear_damage( impl_->image, normalized_damage );
+            paint_shapes( current_shapes,
+                          flattened_shapes,
+                          normalized_damage,
+                          impl_->image,
+                          impl_->row_coverage,
+                          impl_->crossings );
+
+            impl_->previous_shapes      = std::move( current_shapes );
+            impl_->full_redraw_required = false;
             return RasterFrame{
                 .pixels = impl_->image,
-                .damage = std::move( damage ),
+                .damage = std::move( normalized_damage ),
             };
         }
         catch( const std::bad_alloc& )
         {
+            impl_->full_redraw_required = true;
             return fail( ErrorCode::Overflowed,
                          "overlay raster working memory allocation failed" );
         }
         catch( const std::length_error& )
         {
+            impl_->full_redraw_required = true;
             return fail( ErrorCode::Overflowed,
                          "overlay raster working memory exceeds container limits" );
         }
