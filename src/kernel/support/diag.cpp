@@ -107,7 +107,11 @@ namespace grab::diag
             };
         }
 
-        [[nodiscard]]
+        // maybe_unused because at a compile ceiling of Off every emitter lambda
+        // in log_report is discarded, leaving this with no caller — which is
+        // the intended outcome, not a mistake.
+        [[nodiscard,
+          maybe_unused]]
         double
         to_ms( std::chrono::nanoseconds value ) noexcept
         {

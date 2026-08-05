@@ -236,6 +236,11 @@ TEST( Log,
 TEST( Log,
       RecordCarriesLevelTagSourceLocationAndFields )
 {
+    if constexpr( !grab::log::enabled( grab::log::Level::Nominal ) )
+    {
+        GTEST_SKIP() << "build's compile ceiling excludes nominal";
+    }
+
     const auto output = captured( grab::log::Level::Nominal,
                                   []
                                   {
@@ -265,6 +270,11 @@ TEST( Log,
 TEST( Log,
       ControlCharactersInValuesDoNotSplitARecord )
 {
+    if constexpr( !grab::log::enabled( grab::log::Level::Nominal ) )
+    {
+        GTEST_SKIP() << "build's compile ceiling excludes nominal";
+    }
+
     const auto output =
         captured( grab::log::Level::Nominal,
                   []
@@ -283,6 +293,11 @@ TEST( Log,
 TEST( Log,
       TagFilterAdmitsOnlyListedTags )
 {
+    if constexpr( !grab::log::enabled( grab::log::Level::Nominal ) )
+    {
+        GTEST_SKIP() << "build's compile ceiling excludes nominal";
+    }
+
     const std::array<std::string_view, 1> allow{ smokeTag };
     grab::log::set_tag_filter( allow );
 
