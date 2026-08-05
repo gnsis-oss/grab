@@ -787,6 +787,12 @@ namespace
                 );
             }
 
+            ~TrailHarness()
+            {
+                // Ensure cleanup even if test exits early (ASSERT_*)
+                ( void )stop();
+            }
+
             void
             install()
             {
@@ -818,8 +824,19 @@ namespace
             bool
             stop()
             {
+                // Atomically mark as stopped to prevent double-stop or
+                // concurrent teardown. Only one caller proceeds past this point.
+                bool expected{};
+                if( !stopped_.compare_exchange_strong( expected, true ) )
+                {
+                    return true;    // Already stopped
+                }
+
+                // Clear both callbacks to prevent further invocations
                 subscription_.set_notify( {} );
+                scene_.set_delta_sink( {} );
                 session_->stop_observation();
+
                 return reactor_barrier( *session_ );
             }
 
@@ -945,6 +962,7 @@ namespace
             grab::Overlay*                            overlay_{};
             grab::Subscription                        subscription_;
             std::atomic_bool                          scheduled_;
+            std::atomic_bool                          stopped_{};
             mutable std::mutex                        mutex_;
             std::condition_variable                   changed_;
             std::optional<grab::Error>                error_;
