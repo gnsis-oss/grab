@@ -98,6 +98,7 @@ add_library(grab_kernel STATIC
     src/kernel/graph/target_registry.cpp
     src/kernel/graph/state_manager.cpp
     src/kernel/graph/state_snapshot_provider.cpp
+    src/kernel/input/gesture_classifier.cpp
     src/kernel/presentation/overlay_raster.cpp
     src/kernel/presentation/overlay_scene.cpp
     src/kernel/presentation/overlay_service.cpp

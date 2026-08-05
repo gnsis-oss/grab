@@ -104,6 +104,7 @@ add_executable(grab_kernel_tests
     kernel/lifecycle/test_session_verbs.cpp
     kernel/graph/test_state_manager.cpp
     kernel/graph/test_state_snapshot_provider.cpp
+    kernel/test_gesture_classifier.cpp
     kernel/test_ui.cpp
     kernel/test_overlay_animation.cpp
     kernel/test_overlay_delegate_contract.cpp
