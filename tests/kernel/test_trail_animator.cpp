@@ -27,26 +27,76 @@ namespace
     constexpr grab::SpacePoint          fourthPoint{ 40.0, 50.0, firstSpace };
     constexpr std::chrono::milliseconds sceneTime{ 100 };
     constexpr std::chrono::milliseconds clockStep{ 1 };
-    constexpr std::size_t               noShapes           = 0U;
-    constexpr std::size_t               oneShape           = 1U;
-    constexpr std::size_t               twoShapes          = 2U;
-    constexpr std::size_t               twoPathCommands    = 2U;
-    constexpr std::size_t               firstShapeIndex    = 0U;
-    constexpr std::size_t               secondShapeIndex   = 1U;
-    constexpr std::size_t               firstCommandIndex  = 0U;
-    constexpr std::size_t               secondCommandIndex = 1U;
-    constexpr std::uint64_t             oneFailure         = 1U;
-    constexpr double                    zeroDelta{};
+    constexpr std::chrono::milliseconds breakBoundaryOffset{ 1 };
+    constexpr auto                      justUnderTrailBreakInterval =
+        grab::kernel::presentation::trailBreakInterval - breakBoundaryOffset;
+    constexpr auto justOverTrailBreakInterval =
+        grab::kernel::presentation::trailBreakInterval + breakBoundaryOffset;
+    constexpr std::size_t   noShapes           = 0U;
+    constexpr std::size_t   oneShape           = 1U;
+    constexpr std::size_t   twoShapes          = 2U;
+    constexpr std::size_t   twoPathCommands    = 2U;
+    constexpr std::size_t   firstShapeIndex    = 0U;
+    constexpr std::size_t   secondShapeIndex   = 1U;
+    constexpr std::size_t   firstCommandIndex  = 0U;
+    constexpr std::size_t   secondCommandIndex = 1U;
+    constexpr std::uint64_t oneFailure         = 1U;
+    constexpr double        zeroDelta{};
+    constexpr double        defaultEventTimestampS{};
+    constexpr double        firstEventTimestampS{ 100.0 };
+    constexpr double        breakDistanceBoundaryOffsetPx{ 1.0 };
+    constexpr double        justUnderTrailBreakDistancePx =
+        grab::kernel::presentation::trailBreakDistancePx - breakDistanceBoundaryOffsetPx;
+    constexpr double justOverTrailBreakDistancePx =
+        grab::kernel::presentation::trailBreakDistancePx + breakDistanceBoundaryOffsetPx;
+    constexpr grab::SpacePoint distanceFirstPoint{
+        .x     = zeroDelta,
+        .y     = zeroDelta,
+        .space = firstSpace,
+    };
+    constexpr grab::SpacePoint distanceSecondPoint{
+        .x     = justUnderTrailBreakDistancePx,
+        .y     = zeroDelta,
+        .space = firstSpace,
+    };
+    constexpr grab::SpacePoint distanceThirdPoint{
+        .x     = justUnderTrailBreakDistancePx + justOverTrailBreakDistancePx,
+        .y     = zeroDelta,
+        .space = firstSpace,
+    };
+    constexpr grab::SpacePoint distanceFourthPoint{
+        .x     = justUnderTrailBreakDistancePx +
+                 justOverTrailBreakDistancePx +
+                 justUnderTrailBreakDistancePx,
+        .y     = zeroDelta,
+        .space = firstSpace,
+    };
     constexpr double notANumber = std::numeric_limits<double>::quiet_NaN();
+
+    [[nodiscard]]
+    constexpr double
+    seconds( std::chrono::milliseconds duration ) noexcept
+    {
+        return std::chrono::duration<double>{ duration }.count();
+    }
+
+    constexpr double secondEventTimestampS =
+        firstEventTimestampS + seconds( justUnderTrailBreakInterval );
+    constexpr double thirdEventTimestampS =
+        secondEventTimestampS + seconds( justOverTrailBreakInterval );
+    constexpr double fourthEventTimestampS =
+        thirdEventTimestampS + seconds( justUnderTrailBreakInterval );
 
     [[nodiscard]]
     grab::SubscriptionEvent
     motion( grab::EventOrigin       origin,
-            const grab::SpacePoint& position )
+            const grab::SpacePoint& position,
+            double                  timestamp = defaultEventTimestampS )
     {
         return grab::Event{
-            .kind     = grab::EventKind::MouseMove,
-            .category = grab::EventCategory::Input,
+            .timestamp = timestamp,
+            .kind      = grab::EventKind::MouseMove,
+            .category  = grab::EventCategory::Input,
             .payload =
                 grab::MouseMove{
                                 .axis     = "x",
@@ -202,6 +252,163 @@ TEST( TrailAnimator,
                     thirdPoint,
                     fourthPoint,
                     grab::kernel::presentation::defaultInjectedTrailColor );
+}
+
+TEST( TrailAnimator,
+      InjectedOtherMotionsAppendInjectedSegment )
+{
+    grab::kernel::presentation::OverlayScene  scene{ []
+                                                     {
+                                                        return sceneTime;
+                                                     } };
+    grab::kernel::presentation::TrailAnimator animator{
+        scene,
+        grab::kernel::presentation::TrailStyle{},
+    };
+
+    animator.consume( motion( grab::EventOrigin::InjectedOther, firstPoint ) );
+    animator.consume( motion( grab::EventOrigin::InjectedOther, secondPoint ) );
+
+    const auto snapshot = scene.snapshot();
+    ASSERT_EQ( snapshot.shapes.size(), oneShape );
+    expect_segment( snapshot.shapes.front(),
+                    firstPoint,
+                    secondPoint,
+                    grab::kernel::presentation::defaultInjectedTrailColor );
+}
+
+TEST( TrailAnimator,
+      UnknownOriginProducesNoSegmentAndBreaksPath )
+{
+    grab::kernel::presentation::OverlayScene  scene{ []
+                                                     {
+                                                        return sceneTime;
+                                                     } };
+    grab::kernel::presentation::TrailAnimator animator{
+        scene,
+        grab::kernel::presentation::TrailStyle{},
+    };
+
+    animator.consume( motion( grab::EventOrigin::Physical, firstPoint ) );
+    animator.consume( motion( grab::EventOrigin::Unknown, secondPoint ) );
+    animator.consume( motion( grab::EventOrigin::Physical, thirdPoint ) );
+    animator.consume( motion( grab::EventOrigin::Physical, fourthPoint ) );
+
+    const auto snapshot = scene.snapshot();
+    ASSERT_EQ( snapshot.shapes.size(), oneShape );
+    expect_segment( snapshot.shapes.front(),
+                    thirdPoint,
+                    fourthPoint,
+                    grab::kernel::presentation::defaultPhysicalTrailColor );
+}
+
+TEST( TrailAnimator,
+      InjectedOriginsShareClassButPhysicalToInjectedOtherBreaks )
+{
+    grab::kernel::presentation::OverlayScene  scene{ []
+                                                     {
+                                                        return sceneTime;
+                                                     } };
+    grab::kernel::presentation::TrailAnimator animator{
+        scene,
+        grab::kernel::presentation::TrailStyle{},
+    };
+
+    animator.consume( motion( grab::EventOrigin::InjectedSelf, firstPoint ) );
+    animator.consume( motion( grab::EventOrigin::InjectedOther, secondPoint ) );
+    animator.consume( motion( grab::EventOrigin::Physical, thirdPoint ) );
+    animator.consume( motion( grab::EventOrigin::InjectedOther, fourthPoint ) );
+
+    const auto snapshot = scene.snapshot();
+    ASSERT_EQ( snapshot.shapes.size(), oneShape );
+    expect_segment( snapshot.shapes.front(),
+                    firstPoint,
+                    secondPoint,
+                    grab::kernel::presentation::defaultInjectedTrailColor );
+}
+
+TEST( TrailAnimator,
+      TimeGapAboveBreakIntervalBreaksAndGapBelowDoesNot )
+{
+    grab::kernel::presentation::OverlayScene  scene{ []
+                                                     {
+                                                        return sceneTime;
+                                                     } };
+    grab::kernel::presentation::TrailAnimator animator{
+        scene,
+        grab::kernel::presentation::TrailStyle{},
+    };
+
+    animator.consume(
+        motion( grab::EventOrigin::Physical, firstPoint, firstEventTimestampS )
+    );
+    animator.consume(
+        motion( grab::EventOrigin::Physical, secondPoint, secondEventTimestampS )
+    );
+    animator.consume(
+        motion( grab::EventOrigin::Physical, thirdPoint, thirdEventTimestampS )
+    );
+    animator.consume(
+        motion( grab::EventOrigin::Physical, fourthPoint, fourthEventTimestampS )
+    );
+
+    const auto snapshot = scene.snapshot();
+    ASSERT_EQ( snapshot.shapes.size(), twoShapes );
+    expect_segment( snapshot.shapes.at( firstShapeIndex ),
+                    firstPoint,
+                    secondPoint,
+                    grab::kernel::presentation::defaultPhysicalTrailColor );
+    expect_segment( snapshot.shapes.at( secondShapeIndex ),
+                    thirdPoint,
+                    fourthPoint,
+                    grab::kernel::presentation::defaultPhysicalTrailColor );
+}
+
+TEST( TrailAnimator,
+      DistanceAboveBreakThresholdBreaksAndDistanceBelowDoesNot )
+{
+    grab::kernel::presentation::OverlayScene  scene{ []
+                                                     {
+                                                        return sceneTime;
+                                                     } };
+    grab::kernel::presentation::TrailAnimator animator{
+        scene,
+        grab::kernel::presentation::TrailStyle{},
+    };
+
+    animator.consume( motion( grab::EventOrigin::Physical, distanceFirstPoint ) );
+    animator.consume( motion( grab::EventOrigin::Physical, distanceSecondPoint ) );
+    animator.consume( motion( grab::EventOrigin::Physical, distanceThirdPoint ) );
+    animator.consume( motion( grab::EventOrigin::Physical, distanceFourthPoint ) );
+
+    const auto snapshot = scene.snapshot();
+    ASSERT_EQ( snapshot.shapes.size(), twoShapes );
+    expect_segment( snapshot.shapes.at( firstShapeIndex ),
+                    distanceFirstPoint,
+                    distanceSecondPoint,
+                    grab::kernel::presentation::defaultPhysicalTrailColor );
+    expect_segment( snapshot.shapes.at( secondShapeIndex ),
+                    distanceThirdPoint,
+                    distanceFourthPoint,
+                    grab::kernel::presentation::defaultPhysicalTrailColor );
+}
+
+TEST( TrailAnimator,
+      ConsecutiveSamplesAtSamePositionEmitNoSegment )
+{
+    grab::kernel::presentation::OverlayScene  scene{ []
+                                                     {
+                                                        return sceneTime;
+                                                     } };
+    grab::kernel::presentation::TrailAnimator animator{
+        scene,
+        grab::kernel::presentation::TrailStyle{},
+    };
+
+    animator.consume( motion( grab::EventOrigin::Physical, firstPoint ) );
+    animator.consume( motion( grab::EventOrigin::Physical, firstPoint ) );
+
+    EXPECT_EQ( scene.snapshot().shapes.size(), noShapes );
 }
 
 TEST( TrailAnimator,

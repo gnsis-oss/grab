@@ -832,12 +832,18 @@ namespace
                     return true;    // Already stopped
                 }
 
-                // Clear both callbacks to prevent further invocations
+                // Stop new input callbacks, then let an already-posted drain
+                // submit its pending batch before clearing the scene sink.
                 subscription_.set_notify( {} );
-                scene_.set_delta_sink( {} );
                 session_->stop_observation();
 
-                return reactor_barrier( *session_ );
+                const bool drained = reactor_barrier( *session_ );
+                if( drained )
+                {
+                    flush_pending();
+                }
+                scene_.set_delta_sink( {} );
+                return drained;
             }
 
             [[nodiscard]]
@@ -884,6 +890,7 @@ namespace
                     animator_.consume( *raced );
                     schedule();
                 }
+                flush_pending();
             }
 
             void
@@ -893,14 +900,10 @@ namespace
                     std::get_if<grab::overlay::Upsert>( &delta.change );
                 if( upsert == nullptr )
                 {
+                    flush_pending();
                     return;
                 }
-                auto added = overlay_->add( upsert->record.shape );
-                if( !added.has_value() )
-                {
-                    remember_error( std::move( added.error() ) );
-                    return;
-                }
+                pending_shapes_.push_back( upsert->record.shape );
                 const auto* const path =
                     std::get_if<grab::overlay::Path>( &upsert->record.shape.geometry );
                 if( path == nullptr )
@@ -935,6 +938,29 @@ namespace
                     trailProbeX -
                     trailProbeTolerance )
                 {
+                    pending_midpoint_covered_ = true;
+                }
+            }
+
+            void
+            flush_pending()
+            {
+                if( pending_shapes_.empty() )
+                {
+                    return;
+                }
+
+                const bool midpoint_covered = pending_midpoint_covered_;
+                pending_midpoint_covered_   = false;
+                auto added                  = overlay_->add_many( pending_shapes_ );
+                pending_shapes_.clear();
+                if( !added.has_value() )
+                {
+                    remember_error( std::move( added.error() ) );
+                    return;
+                }
+                if( midpoint_covered )
+                {
                     {
                         const std::scoped_lock lock{ mutex_ };
                         midpoint_covered_ = true;
@@ -961,11 +987,13 @@ namespace
             grab::Session*                            session_{};
             grab::Overlay*                            overlay_{};
             grab::Subscription                        subscription_;
+            std::vector<grab::overlay::Shape>         pending_shapes_;
             std::atomic_bool                          scheduled_;
             std::atomic_bool                          stopped_{};
             mutable std::mutex                        mutex_;
             std::condition_variable                   changed_;
             std::optional<grab::Error>                error_;
+            bool                                      pending_midpoint_covered_{};
             bool                                      midpoint_covered_{};
     };
 

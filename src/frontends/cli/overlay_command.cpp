@@ -775,21 +775,7 @@ namespace grab::cli
                     scene_.set_delta_sink(
                         [this]( const overlay::SceneDelta& delta )
                         {
-                            const auto* const upsert =
-                                std::get_if<overlay::Upsert>( &delta.change );
-                            if( upsert == nullptr )
-                            {
-                                return;
-                            }
-                            auto added = overlay_->add( upsert->record.shape );
-                            if( !added.has_value() )
-                            {
-                                const std::scoped_lock lock{ error_mutex_ };
-                                if( !error_.has_value() )
-                                {
-                                    error_ = std::move( added.error() );
-                                }
-                            }
+                            forward( delta );
                         }
                     );
                 }
@@ -798,6 +784,12 @@ namespace grab::cli
                 consume( const SubscriptionEvent& item )
                 {
                     animator_.consume( item );
+                }
+
+                void
+                flush()
+                {
+                    flush_pending();
                 }
 
                 [[nodiscard]]
@@ -810,9 +802,44 @@ namespace grab::cli
 
             private:
 
+                void
+                forward( const overlay::SceneDelta& delta )
+                {
+                    const auto* const upsert =
+                        std::get_if<overlay::Upsert>( &delta.change );
+                    if( upsert != nullptr )
+                    {
+                        pending_shapes_.push_back( upsert->record.shape );
+                        return;
+                    }
+
+                    flush_pending();
+                }
+
+                void
+                flush_pending()
+                {
+                    if( pending_shapes_.empty() )
+                    {
+                        return;
+                    }
+
+                    auto added = overlay_->add_many( pending_shapes_ );
+                    pending_shapes_.clear();
+                    if( !added.has_value() )
+                    {
+                        const std::scoped_lock lock{ error_mutex_ };
+                        if( !error_.has_value() )
+                        {
+                            error_ = std::move( added.error() );
+                        }
+                    }
+                }
+
                 kernel::presentation::OverlayScene  scene_;
                 kernel::presentation::TrailAnimator animator_;
                 Overlay*                            overlay_{};
+                std::vector<overlay::Shape>         pending_shapes_;
                 mutable std::mutex                  error_mutex_;
                 std::optional<Error>                error_;
         };
@@ -901,6 +928,7 @@ namespace grab::cli
                         auto raced = subscription_.try_pop_item();
                         if( !raced.has_value() )
                         {
+                            bridge_->flush();
                             return;
                         }
 
@@ -911,6 +939,7 @@ namespace grab::cli
                             continue;
                         }
                         bridge_->consume( *raced );
+                        bridge_->flush();
                         return;
                     }
                 }

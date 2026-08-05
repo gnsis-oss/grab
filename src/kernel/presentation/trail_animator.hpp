@@ -27,6 +27,8 @@ namespace grab::kernel::presentation
     };
     inline constexpr std::chrono::milliseconds defaultTrailFade{ 1'200 };
     inline constexpr float                     defaultTrailWidthPx = 3.0F;
+    inline constexpr std::chrono::milliseconds trailBreakInterval{ 250 };
+    inline constexpr double                    trailBreakDistancePx = 160.0;
 
     struct TrailStyle
     {
@@ -58,6 +60,7 @@ namespace grab::kernel::presentation
             {
                     SpacePoint  position;
                     EventOrigin origin{ EventOrigin::Unknown };
+                    double      timestamp{};
             };
 
             void
