@@ -2,10 +2,10 @@
 
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/graph/adjacency_graph.hpp"
 
 #include <cstdint>
 #include <map>
-#include <web/web.hpp>
 
 namespace grab::detail
 {
@@ -53,11 +53,11 @@ namespace grab::detail
             find_route( CoordinateSpaceId source,
                         CoordinateSpaceId destination ) const;
 
-            web::Web<web::OneWay, TransformRecord>     graph_{};
-            std::map<CoordinateSpaceId, web::Knot>     knots_{};
-            std::map<web::Knot, CoordinateSpaceId>     spaces_{};
-            std::map<CoordinateSpaceId, std::uint32_t> generations_{};
-            std::uint32_t                              next_space_{ 1U };
+            // The graph is keyed by CoordinateSpaceId itself, so there is no
+            // vertex-handle-to-space side table to keep in step.
+            kernel::AdjacencyGraph<CoordinateSpaceId, TransformRecord> graph_{};
+            std::map<CoordinateSpaceId, std::uint32_t>                 generations_{};
+            std::uint32_t                                              next_space_{ 1U };
     };
 
 }    // namespace grab::detail

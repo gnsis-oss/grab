@@ -6,6 +6,7 @@
 #include "grab/role.hpp"
 #include "grab/space.hpp"
 #include "grab/ui.hpp"
+#include "kernel/graph/graph_traversal.hpp"
 #include "kernel/query/evaluator.hpp"
 #include "kernel/query/locator_plan.hpp"
 #include "kernel/query/tree_nav.hpp"
@@ -23,8 +24,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-#include <walk/delve.hpp>
-#include <walk/sweep.hpp>
 
 namespace grab::kernel::query
 {
@@ -41,8 +40,7 @@ namespace grab::kernel::query
         {
             public:
 
-                using knot_type = NodeId;
-                using edge_type = void;
+                using key_type = NodeId;
 
                 NavGraph( const TreeNav& navigation,
                           Direction      direction ) :
@@ -59,7 +57,7 @@ namespace grab::kernel::query
 
                 [[nodiscard]]
                 std::span<const NodeId>
-                out( NodeId node ) const noexcept
+                out_edges( NodeId node ) const noexcept
                 {
                     if( direction_ == Direction::Forward )
                     {
@@ -70,35 +68,21 @@ namespace grab::kernel::query
 
                 [[nodiscard]]
                 bool
-                has( NodeId node ) const
+                contains_node( NodeId node ) const
                 {
                     return indexes_.contains( node ) && navigation_->contains( node );
                 }
 
                 [[nodiscard]]
                 std::size_t
-                size() const noexcept
-                {
-                    return indexes_.size();
-                }
-
-                [[nodiscard]]
-                std::span<const NodeId>
-                knots() const noexcept
-                {
-                    return navigation_->nodes();
-                }
-
-                [[nodiscard]]
-                std::size_t
-                dense_id( NodeId node ) const
+                node_index( NodeId node ) const
                 {
                     return indexes_.at( node );
                 }
 
                 [[nodiscard]]
                 std::size_t
-                dense_size() const noexcept
+                index_space_size() const noexcept
                 {
                     return navigation_->nodes().size();
                 }
@@ -351,7 +335,7 @@ namespace grab::kernel::query
                 }
 
                 void
-                on( NodeId node );
+                visit_node( NodeId node );
 
                 [[nodiscard]]
                 Evaluation
@@ -567,7 +551,7 @@ namespace grab::kernel::query
                         return {};
                     }
                     RelationVisitor visitor{ *this, *plan.children.front(), origin };
-                    walk::delve( graph, origin, visitor );
+                    depth_first_search( graph, origin, visitor );
                     auto result = visitor.result();
                     if( result.matched )
                     {
@@ -582,7 +566,7 @@ namespace grab::kernel::query
         };
 
         void
-        RelationVisitor::on( NodeId node )
+        RelationVisitor::visit_node( NodeId node )
         {
             if( node == origin_ || result_.matched )
             {
@@ -603,7 +587,7 @@ namespace grab::kernel::query
                 }
 
                 void
-                on( NodeId node )
+                visit_node( NodeId node )
                 {
                     if( seen_->insert( node ).second )
                     {
@@ -628,27 +612,27 @@ namespace grab::kernel::query
 
             if( scope.root.has_value() )
             {
-                if( !graph.has( *scope.root ) )
+                if( !graph.contains_node( *scope.root ) )
                 {
                     return fail( ErrorCode::NoMatch,
                                  "query scope root is not present in the tree" );
                 }
-                walk::sweep( graph, *scope.root, visitor );
+                breadth_first_search( graph, *scope.root, visitor );
                 return order;
             }
 
             for( const auto root : scope.navigation.roots() )
             {
-                if( graph.has( root ) )
+                if( graph.contains_node( root ) )
                 {
-                    walk::sweep( graph, root, visitor );
+                    breadth_first_search( graph, root, visitor );
                 }
             }
             for( const auto node : scope.navigation.nodes() )
             {
-                if( !seen.contains( node ) && graph.has( node ) )
+                if( !seen.contains( node ) && graph.contains_node( node ) )
                 {
-                    walk::sweep( graph, node, visitor );
+                    breadth_first_search( graph, node, visitor );
                 }
             }
             return order;

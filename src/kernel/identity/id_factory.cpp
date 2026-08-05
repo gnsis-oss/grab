@@ -1,7 +1,7 @@
 #include "grab/ids.hpp"
 #include "kernel/identity/id_factory.hpp"
+#include "kernel/identity/random_source.hpp"
 
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -9,8 +9,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <tag/gen.hpp>
-#include <tag/rng.hpp>
 
 namespace grab::detail
 {
@@ -28,6 +26,14 @@ namespace grab::detail
         constexpr std::size_t   counterHighShift    = 8U;
         constexpr std::uint16_t counterHighMask     = 0X0FU;
         constexpr std::uint8_t  versionSevenBits    = 0X70U;
+
+        // Bytes 0..7 are written from the clock and the counter; the rest of an
+        // RFC 9562 v7 identifier is random, with the two variant bits stamped
+        // over the top of the first random byte.
+        constexpr std::size_t   firstRandomByteIndex = 8U;
+        constexpr std::size_t   randomByteCount      = 8U;
+        constexpr std::uint8_t  variantClearMask     = 0X3FU;
+        constexpr std::uint8_t  variantBits          = 0X80U;
 
         [[nodiscard]]
         std::uint64_t
@@ -61,14 +67,11 @@ namespace grab::detail
                 const std::scoped_lock lock{ mutex_ };
 
                 advance_state( clock_() );
-                const auto generated = tag::timed( rng_ );
 
-                Uuid       result;
-                std::copy_n( generated.bytes(),
-                             result.bytes.size(),
-                             result.bytes.begin() );
+                Uuid result;
                 write_timestamp( result );
                 write_counter( result );
+                write_random( result );
                 return result;
             }
 
@@ -142,8 +145,22 @@ namespace grab::detail
                     static_cast<std::uint8_t>( counter_ & byteMask );
             }
 
+            void
+            write_random( Uuid& value )
+            {
+                const auto random = random_.next_bytes<randomByteCount>();
+                for( std::size_t index = 0U; index < randomByteCount; ++index )
+                {
+                    value.bytes.at( firstRandomByteIndex + index ) = random.at( index );
+                }
+                value.bytes.at( firstRandomByteIndex ) = static_cast<std::uint8_t>(
+                    ( value.bytes.at( firstRandomByteIndex ) & variantClearMask ) |
+                    variantBits
+                );
+            }
+
             Clock*        clock_;
-            tag::FastRng  rng_;
+            RandomSource  random_;
             std::mutex    mutex_;
             std::uint64_t lastMilliseconds_ = 0U;
             std::uint16_t counter_          = 0U;
