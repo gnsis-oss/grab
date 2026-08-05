@@ -2,26 +2,44 @@
 # Drive the overlay features on an OWNED headless X display and capture frames.
 #
 #   scripts/overlay-demo.sh [DISPLAY_NUM] [OUT_DIR]
+#   scripts/overlay-demo.sh --asan [DISPLAY_NUM] [OUT_DIR]
 #
 # Never touches the live session: it starts its own Xvfb plus a compositing
 # manager (the overlay needs ARGB compositing and refuses to map without it),
 # runs the demo, captures PNGs, and tears everything down.
+#
+# Defaults to build/dev — optimized, no sanitizer, no coverage. `--asan`
+# selects build/asan instead and leaves leak detection ON, which is the point
+# of running it. Override the directory outright with BUILD=<path>.
 set -uo pipefail
+
+ASAN=0
+if [ "${1:-}" = "--asan" ]; then ASAN=1; shift; fi
 
 DISPLAY_NUM="${1:-95}"
 OUT_DIR="${2:-$PWD/overlay-demo-out}"
-BUILD="${BUILD:-build}"
+if [ "$ASAN" -eq 1 ]; then
+  BUILD="${BUILD:-build/asan}"
+else
+  BUILD="${BUILD:-build/dev}"
+fi
 GRAB="$BUILD/grab"
 SCREEN="1280x1024x24"
 
-[ -x "$GRAB" ] || { echo "no $GRAB -- run: ninja -C $BUILD" >&2; exit 1; }
+[ -x "$GRAB" ] || { echo "no $GRAB -- run: cmake --preset ${BUILD##*/} && ninja -C $BUILD" >&2; exit 1; }
 command -v Xvfb >/dev/null || { echo "Xvfb not installed" >&2; exit 1; }
 COMPOSITOR="$(command -v xcompmgr || command -v picom || true)"
 [ -n "$COMPOSITOR" ] || { echo "need xcompmgr or picom" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
-export ASAN_OPTIONS=detect_leaks=0
-export GCOV_PREFIX=/tmp/grab-demo-gcov     # keep coverage spew out of the tree
+# Leak detection stays ON under --asan; suppressing it was hiding exactly the
+# class of defect this script exists to surface. The dev build has no
+# sanitizer and no coverage, so neither ASAN_OPTIONS nor GCOV_PREFIX applies
+# to the default path.
+if [ "$ASAN" -eq 1 ]; then
+  export ASAN_OPTIONS="detect_leaks=1:abort_on_error=0:print_stacktrace=1"
+  export UBSAN_OPTIONS="print_stacktrace=1"
+fi
 D=":$DISPLAY_NUM"
 
 xvfb_pid=""; comp_pid=""; trail_pid=""
@@ -38,7 +56,7 @@ xdpyinfo -display "$D" >/dev/null 2>&1 || { echo "Xvfb $D failed to start" >&2; 
 
 DISPLAY="$D" "$COMPOSITOR" >/dev/null 2>&1 & comp_pid=$!
 sleep 2
-echo "display $D  xvfb=$xvfb_pid compositor=$comp_pid  -> $OUT_DIR"
+echo "display $D  build=$BUILD  xvfb=$xvfb_pid compositor=$comp_pid  -> $OUT_DIR"
 
 shot() { DISPLAY="$D" "$GRAB" capture --display --out "$OUT_DIR/$1" 2>/dev/null \
          | grep -v '^profiling:' || true; }
@@ -58,13 +76,15 @@ shot "01-trail.png"
 kill -TERM "$trail_pid" 2>/dev/null; trail_pid=""; sleep 1
 
 # --- features 2 & 4: click ripple and hold bar -------------------------------
-# Driven through the library, not the CLI: cursor feedback has no verb yet.
-echo "[2/2] ripple + hold  (needs examples/overlay_showcase -- not built yet)"
+echo "[2/2] ripple + hold"
 if [ -x "$BUILD/examples/overlay_showcase" ]; then
   DISPLAY="$D" "$BUILD/examples/overlay_showcase" >/dev/null 2>&1 &
   sleep 2; click "500,400"; sleep 1; shot "02-ripple.png"
 else
-  echo "     SKIPPED: build it, or drive grab::Session::cursor_feedback() yourself"
+  DISPLAY="$D" "$GRAB" feedback >/dev/null 2>&1 &
+  fb_pid=$!
+  sleep 2; click "500,400"; sleep 1; shot "02-ripple.png"
+  kill -TERM "$fb_pid" 2>/dev/null
 fi
 
 echo

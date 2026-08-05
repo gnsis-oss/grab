@@ -24,35 +24,55 @@ namespace
 }    // namespace
 
 TEST( Log,
-      LevelConstantsMatchCompileDefinitions )
+      LevelConstantsAreOrdered )
 {
-    static_assert( grab::log::offLevel == GRAB_LOG_LEVEL_OFF );
-    static_assert( grab::log::nominalLevel == GRAB_LOG_LEVEL_NOMINAL );
-    static_assert( grab::log::verboseLevel == GRAB_LOG_LEVEL_VERBOSE );
-    static_assert( grab::log::debugLevel == GRAB_LOG_LEVEL_DEBUG );
-    static_assert( grab::log::compileLevel == LOG_COMPILE_LEVEL );
+    static_assert( grab::log::offLevel < grab::log::nominalLevel );
+    static_assert( grab::log::nominalLevel < grab::log::verboseLevel );
+    static_assert( grab::log::verboseLevel < grab::log::debugLevel );
 
-    static_assert( grab::log::enabled( grab::log::Level::Nominal ) ==
-                   ( LOG_COMPILE_LEVEL >= GRAB_LOG_LEVEL_NOMINAL ) );
-    static_assert( grab::log::enabled( grab::log::Level::Verbose ) ==
-                   ( LOG_COMPILE_LEVEL >= GRAB_LOG_LEVEL_VERBOSE ) );
-    static_assert( grab::log::enabled( grab::log::Level::Debug ) ==
-                   ( LOG_COMPILE_LEVEL >= GRAB_LOG_LEVEL_DEBUG ) );
+    static_assert( static_cast<int>( grab::log::Level::Off ) == grab::log::offLevel );
+    static_assert( static_cast<int>( grab::log::Level::Nominal ) ==
+                   grab::log::nominalLevel );
+    static_assert( static_cast<int>( grab::log::Level::Verbose ) ==
+                   grab::log::verboseLevel );
+    static_assert( static_cast<int>( grab::log::Level::Debug ) ==
+                   grab::log::debugLevel );
 }
 
-#if LOG_COMPILE_LEVEL < GRAB_LOG_LEVEL_DEBUG
+// `compileLevel` comes from the generated header the build directory
+// configured (cmake/Logging.cmake), not from a preprocessor define. Whatever
+// it is, `enabled()` must agree with it — and must be usable in a constant
+// expression, which is what makes the emitter lambdas disappear.
+TEST( Log,
+      EnabledAgreesWithGeneratedCompileLevel )
+{
+    static_assert( grab::log::enabled( grab::log::Level::Off ) );
+    static_assert( grab::log::enabled( grab::log::Level::Nominal ) ==
+                   ( grab::log::compileLevel >= grab::log::nominalLevel ) );
+    static_assert( grab::log::enabled( grab::log::Level::Verbose ) ==
+                   ( grab::log::compileLevel >= grab::log::verboseLevel ) );
+    static_assert( grab::log::enabled( grab::log::Level::Debug ) ==
+                   ( grab::log::compileLevel >= grab::log::debugLevel ) );
+}
+
+// A disabled emitter's lambda must never be instantiated, not merely never
+// called: the body here would fail to compile if it were. `if constexpr` on a
+// `consteval` predicate is what guarantees that, with no preprocessor
+// conditional around the test.
 TEST( Log,
       DisabledDebugEmitterIsNotInstantiated )
 {
-    grab::log::debug(
-        []<typename Event>( Event& )
-        {
-            static_assert( sizeof( Event ) == impossibleEventSize );
-        }
-    );
+    if constexpr( !grab::log::enabled( grab::log::Level::Debug ) )
+    {
+        grab::log::debug(
+            []<typename Event>( Event& )
+            {
+                static_assert( sizeof( Event ) == impossibleEventSize );
+            }
+        );
+    }
     SUCCEED();
 }
-#endif
 
 TEST( Log,
       DisabledDebugEmitterDoesNotRun )

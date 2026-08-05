@@ -1,5 +1,10 @@
 #pragma once
 
+// `compileLevel` arrives as an inline constexpr from a generated header, one
+// per build directory, rather than as a preprocessor define. See
+// cmake/Logging.cmake.
+#include "kernel/support/log_config.hpp"
+
 #include <concepts>
 #include <cstdio>
 #include <string>
@@ -7,25 +12,15 @@
 #include <type_traits>
 #include <utility>
 
-#define GRAB_LOG_LEVEL_OFF     0
-#define GRAB_LOG_LEVEL_NOMINAL 1
-#define GRAB_LOG_LEVEL_VERBOSE 2
-#define GRAB_LOG_LEVEL_DEBUG   3
-
-#ifndef LOG_COMPILE_LEVEL
-    #define LOG_COMPILE_LEVEL GRAB_LOG_LEVEL_NOMINAL
-#endif
-
 namespace grab::log
 {
 
     // Compile levels: 0 disables all log calls; 1 enables nominal lifecycle
     // events; 2 adds verbose branch/candidate detail; 3 adds debug detail.
-    inline constexpr int offLevel     = GRAB_LOG_LEVEL_OFF;
-    inline constexpr int nominalLevel = GRAB_LOG_LEVEL_NOMINAL;
-    inline constexpr int verboseLevel = GRAB_LOG_LEVEL_VERBOSE;
-    inline constexpr int debugLevel   = GRAB_LOG_LEVEL_DEBUG;
-    inline constexpr int compileLevel = LOG_COMPILE_LEVEL;
+    inline constexpr int offLevel     = 0;
+    inline constexpr int nominalLevel = 1;
+    inline constexpr int verboseLevel = 2;
+    inline constexpr int debugLevel   = 3;
 
     enum class Level : int
     {

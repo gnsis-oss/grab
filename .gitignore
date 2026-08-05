@@ -1,6 +1,6 @@
 build/
-build-release/
 .worktrees/
+compile_commands.json
 __pycache__/
 *.pyc
 

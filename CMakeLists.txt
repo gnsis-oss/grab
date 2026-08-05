@@ -9,9 +9,25 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
+# An unset CMAKE_BUILD_TYPE on a single-config generator means no optimization
+# flags AND no -g: every binary is -O0 and stripped of line information, with
+# no diagnostic. That was grab's effective default for its whole life. Presets
+# all set one explicitly; this catches a bare `cmake -B ...` that does not.
+get_property(_grab_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(PROJECT_IS_TOP_LEVEL AND NOT _grab_multi_config AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
+        "Build type: Debug | Release | RelWithDebInfo | MinSizeRel" FORCE)
+    message(STATUS "Build type: RelWithDebInfo (defaulted — none was requested)")
+elseif(PROJECT_IS_TOP_LEVEL AND NOT _grab_multi_config)
+    message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+endif()
+
 # Dev tooling is for grab's OWN top-level builds only. As an add_subdirectory
 # dependency the `format ALL` target collides with the consumer's, so guard the
 # whole group on PROJECT_IS_TOP_LEVEL (mirrors every l0 library).
+#
+# Order matters: Coverage reads GRAB_SANITIZER, Logging is read by every
+# target below.
 if(PROJECT_IS_TOP_LEVEL)
     include(Cache)
     include(Warnings)
@@ -21,6 +37,19 @@ if(PROJECT_IS_TOP_LEVEL)
     include(Tidy)
     include(IWYU)
     include(Profile)
+endif()
+include(Logging)
+
+# Build directories moved under build/<config>, where clangd does not look.
+# The `dev` preset — and only it, so several configurations never fight over
+# the link — points the editor at its compile database.
+option(GRAB_COMPILE_COMMANDS_LINK
+       "Symlink compile_commands.json into the source root for clangd" OFF)
+if(PROJECT_IS_TOP_LEVEL AND GRAB_COMPILE_COMMANDS_LINK)
+    file(CREATE_LINK
+        ${CMAKE_BINARY_DIR}/compile_commands.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
+        SYMBOLIC)
 endif()
 
 # Build-essential modules define find/helper functions grab_core's build calls.
@@ -69,6 +98,10 @@ add_library(grab_core STATIC
     src/kernel/lifecycle/observation_pump.cpp
 )
 target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
+# The generated log ceiling must reach every TU that includes
+# kernel/support/log.hpp, which is any of them. PUBLIC on grab_core carries it
+# to every other grab target and to the tests.
+target_link_libraries(grab_core PUBLIC grab_log_config)
 target_link_libraries(grab_core PRIVATE grab_vendor_l0)
 # Composition root: SessionCore (grab_core) composes the X11 and AT-SPI driver stacks.
 # The static-library cycles through grab_kernel and both drivers are intentional; CMake supports cycles among STATIC libraries.
