@@ -252,8 +252,11 @@ namespace grab
     Overlay::add_many( std::span<overlay::Shape> shapes )
     {
         // ONE round trip for the whole batch — the point of the call.
+        auto owned_shapes = std::vector<overlay::Shape>( shapes.begin(), shapes.end() );
         return impl_->invoke<std::vector<overlay::ShapeId>>(
-            [shapes]( kernel::presentation::OverlayService& service )
+            [shapes = std::move( owned_shapes )](
+                kernel::presentation::OverlayService& service
+            ) mutable
             {
                 return service.add_many( shapes );
             }
