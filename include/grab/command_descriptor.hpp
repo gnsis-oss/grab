@@ -32,6 +32,7 @@ namespace grab
         Session,
         OverlayTrail,
         OverlayShape,
+        OverlayFeedback,
         Count,
     };
 
@@ -177,6 +178,12 @@ namespace grab
                                 false ),
             command_descriptor( "overlay.shape",
                                 CommandKind::OverlayShape,
+                                RetryClass::ResolveOnly,
+                                Mutability::Mutating,
+                                false,
+                                false ),
+            command_descriptor( "overlay.feedback",
+                                CommandKind::OverlayFeedback,
                                 RetryClass::ResolveOnly,
                                 Mutability::Mutating,
                                 false,

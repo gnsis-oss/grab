@@ -8,10 +8,12 @@ target_sources(grab_kernel PRIVATE
     ${CMAKE_SOURCE_DIR}/src/kernel/presentation/overlay_animation.cpp)
 
 add_executable(grab_core_tests
+    ${CMAKE_SOURCE_DIR}/src/frontends/cli/feedback_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/input_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/overlay_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/watch_daemon.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/windows_command.cpp
+    cli/feedback_command_test.cpp
     cli/input_command_test.cpp
     cli/overlay_command_test.cpp
     cli/watch_daemon_test.cpp

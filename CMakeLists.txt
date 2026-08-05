@@ -310,6 +310,7 @@ target_compile_features(grab_service PUBLIC cxx_std_23)
 
 add_executable(grab_cli
     src/frontends/cli/main.cpp
+    src/frontends/cli/feedback_command.cpp
     src/frontends/cli/input_command.cpp
     src/frontends/cli/overlay_command.cpp
     src/frontends/cli/session_command.cpp

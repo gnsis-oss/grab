@@ -9,6 +9,7 @@
 #include "drivers/desktop/x11/workflow.hpp"
 #include "frontends/cli/capture_command.hpp"
 #include "frontends/cli/common.hpp"
+#include "frontends/cli/feedback_command.hpp"
 #include "frontends/cli/input_command.hpp"
 #include "frontends/cli/overlay_command.hpp"
 #include "frontends/cli/session_command.hpp"
@@ -262,6 +263,11 @@ namespace
                             "       grab overlay trail [--color RRGGBB] "
                             "[--injected-color RRGGBB] [--fade-ms N] [--width F]\n"
                             "       grab trail [trail options]\n"
+                            "       grab feedback [--no-click] [--no-hold] "
+                            "[--hold-ms N] [--double-click-ms N] [--pause-ms N] "
+                            "[--slop-px F]\n"
+                            "                     [--ripple-radius PX] "
+                            "[--ripple-ms N] [--bar-width PX] [--bar-height PX]\n"
                             "       grab overlay rect|ellipse|path --at VALUES "
                             "[--ttl MS | --fade MS | --hold]\n",
                             stderr );
@@ -2483,6 +2489,8 @@ namespace
                 return grab::cli::run_trail_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::OverlayShape :
                 return grab::cli::run_overlay_command( cli_args.subspan( 1 ) );
+            case grab::CommandKind::OverlayFeedback :
+                return grab::cli::run_feedback_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::Count :
                 break;
         }
