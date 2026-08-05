@@ -51,6 +51,69 @@ namespace grab::overlay
 
     using LifetimePolicy = std::variant<Persistent, Ttl, Fade>;
 
+    enum class Easing : std::uint8_t
+    {
+        Linear,
+        InQuad,
+        OutQuad,
+        InOutQuad,
+        InCubic,
+        OutCubic,
+        InOutCubic,
+    };
+
+    enum class Axis : std::uint8_t
+    {
+        X,
+        Y,
+    };
+
+    enum class Edge : std::uint8_t
+    {
+        Min,
+        Max,
+    };
+
+    struct Channel
+    {
+            Easing                    easing = Easing::Linear;
+            std::chrono::milliseconds duration{};
+    };
+
+    struct ScaleChannel : Channel
+    {
+            double from = 1.0;
+            double to   = 1.0;
+    };
+
+    struct OpacityChannel : Channel
+    {
+            double from = 1.0;
+            double to   = 1.0;
+    };
+
+    struct TranslateChannel : Channel
+    {
+            double dx = 0.0;
+            double dy = 0.0;
+    };
+
+    struct RevealChannel : Channel
+    {
+            Axis   axis      = Axis::X;
+            Edge   from_edge = Edge::Min;
+            double from      = 0.0;
+            double to        = 1.0;
+    };
+
+    struct AnimationSpec
+    {
+            std::optional<ScaleChannel>     scale     = std::nullopt;
+            std::optional<OpacityChannel>   opacity   = std::nullopt;
+            std::optional<TranslateChannel> translate = std::nullopt;
+            std::optional<RevealChannel>    reveal    = std::nullopt;
+    };
+
     enum class Band : std::uint8_t
     {
         Annotation,
@@ -105,12 +168,13 @@ namespace grab::overlay
 
     struct Shape
     {
-            Geometry                   geometry;
-            std::optional<StrokeStyle> stroke;
-            std::optional<FillStyle>   fill;
-            LifetimePolicy             lifetime{ Persistent{} };
-            Band                       band = Band::Annotation;
-            std::int32_t               z    = 0;
+            Geometry                     geometry;
+            std::optional<StrokeStyle>   stroke;
+            std::optional<FillStyle>     fill;
+            LifetimePolicy               lifetime{ Persistent{} };
+            Band                         band      = Band::Annotation;
+            std::int32_t                 z         = 0;
+            std::optional<AnimationSpec> animation = std::nullopt;
     };
 
     struct SceneEpoch

@@ -6,6 +6,7 @@
 #include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/presentation/overlay_animation.hpp"
 #include "kernel/presentation/overlay_raster.hpp"
 #include "kernel/scheduling/pacing_governor.hpp"
 #include "kernel/scheduling/reactor.hpp"
@@ -91,7 +92,7 @@ namespace grab::drivers::desktop::x11
         };
         constexpr std::string_view reactorRequiredReason{
             "X11 overlay requires a bound reactor to map (compositor monitor "
-            "and fade/TTL frame clock)"
+            "and lifetime/animation frame clock)"
         };
         constexpr std::string_view compositorSelectionPrefix{ "_NET_WM_CM_S" };
         constexpr bool             hostByteOrderKnown{
@@ -737,6 +738,20 @@ namespace grab::drivers::desktop::x11
             return std::nullopt;
         }
 
+        [[nodiscard]]
+        std::optional<std::chrono::milliseconds>
+        animation_deadline( const overlay::ShapeRecord& record ) noexcept
+        {
+            if( !record.shape.animation.has_value() )
+            {
+                return std::nullopt;
+            }
+            return saturating_deadline(
+                record.started_at,
+                kernel::presentation::animation_duration( *record.shape.animation )
+            );
+        }
+
     }    // namespace
 
     namespace detail
@@ -766,9 +781,11 @@ namespace grab::drivers::desktop::x11
                              bool                                  scene_dirty ) noexcept
         {
             OverlayDamagePlan plan{
-                .render_frame           = scene_dirty,
-                .continue_fade          = false,
-                .next_lifetime_deadline = std::nullopt,
+                .render_frame            = scene_dirty,
+                .continue_fade           = false,
+                .continue_animation      = false,
+                .next_lifetime_deadline  = std::nullopt,
+                .next_animation_deadline = std::nullopt,
             };
             for( const auto& record : shapes )
             {
@@ -785,6 +802,18 @@ namespace grab::drivers::desktop::x11
                         plan.render_frame  = true;
                         plan.continue_fade = true;
                     }
+                }
+
+                const auto animation = animation_deadline( record );
+                if( animation.has_value() && *animation > now )
+                {
+                    if( !plan.next_animation_deadline.has_value() ||
+                        *animation < *plan.next_animation_deadline )
+                    {
+                        plan.next_animation_deadline = *animation;
+                    }
+                    plan.render_frame       = true;
+                    plan.continue_animation = true;
                 }
             }
             return plan;
@@ -1142,7 +1171,7 @@ namespace grab::drivers::desktop::x11
                 if( map_window && reactor_ == nullptr )
                 {
                     // A mapped overlay without a reactor has no compositor
-                    // monitor and no fade/TTL frame clock: compositor loss
+                    // monitor and no lifetime/animation frame clock: compositor loss
                     // would leave a fullscreen opaque window on screen. The
                     // capability requires a bound reactor to map. Checked
                     // after the probe so missing-prerequisite reasons
@@ -1939,6 +1968,16 @@ namespace grab::drivers::desktop::x11
                     if( !next.has_value() || lifetime < *next )
                     {
                         next = lifetime;
+                    }
+                }
+                if( plan.next_animation_deadline.has_value() )
+                {
+                    const auto animation = std::chrono::steady_clock::time_point{
+                        *plan.next_animation_deadline
+                    };
+                    if( !next.has_value() || animation < *next )
+                    {
+                        next = animation;
                     }
                 }
                 if( !next.has_value() )

@@ -37,7 +37,9 @@ namespace grab::drivers::desktop::x11
         {
                 bool                                     render_frame{};
                 bool                                     continue_fade{};
+                bool                                     continue_animation{};
                 std::optional<std::chrono::milliseconds> next_lifetime_deadline;
+                std::optional<std::chrono::milliseconds> next_animation_deadline;
         };
 
         [[nodiscard]]

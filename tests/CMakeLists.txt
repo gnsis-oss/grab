@@ -4,6 +4,9 @@ add_test(NAME grab_invariant_checks
 add_test(NAME grab_public_header_allowlist
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_headers.sh)
 
+target_sources(grab_kernel PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/kernel/presentation/overlay_animation.cpp)
+
 add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/input_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/overlay_command.cpp
@@ -102,6 +105,7 @@ add_executable(grab_kernel_tests
     kernel/graph/test_state_manager.cpp
     kernel/graph/test_state_snapshot_provider.cpp
     kernel/test_ui.cpp
+    kernel/test_overlay_animation.cpp
     kernel/test_overlay_delegate_contract.cpp
     kernel/test_overlay_raster.cpp
     kernel/test_overlay_scene.cpp

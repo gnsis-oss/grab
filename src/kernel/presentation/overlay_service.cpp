@@ -2,6 +2,7 @@
 #include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/presentation/overlay_animation.hpp"
 #include "kernel/presentation/overlay_scene.hpp"
 #include "kernel/presentation/overlay_service.hpp"
 #include "kernel/presentation/space_graph.hpp"
@@ -366,11 +367,83 @@ namespace grab::kernel::presentation
         }
 
         [[nodiscard]]
+        bool
+        path_is_in_space( const overlay::Path& path,
+                          CoordinateSpaceId    space ) noexcept
+        {
+            return std::ranges::all_of(
+                path.commands,
+                [space]( const overlay::PathCommand& command )
+                {
+                    if( const auto* move = std::get_if<overlay::MoveTo>( &command ) )
+                    {
+                        return move->point.space == space;
+                    }
+                    if( const auto* line = std::get_if<overlay::LineTo>( &command ) )
+                    {
+                        return line->point.space == space;
+                    }
+                    if( const auto* bezier = std::get_if<overlay::BezierTo>( &command ) )
+                    {
+                        return std::ranges::all_of( bezier->control,
+                                                    [space]( SpacePoint point )
+                                                    {
+                                                        return point.space == space;
+                                                    } );
+                    }
+                    return true;
+                }
+            );
+        }
+
+        [[nodiscard]]
+        bool
+        geometry_is_in_space( const overlay::Geometry& geometry,
+                              CoordinateSpaceId        space ) noexcept
+        {
+            if( const auto* path = std::get_if<overlay::Path>( &geometry ) )
+            {
+                return path_is_in_space( *path, space );
+            }
+            if( const auto* rect = std::get_if<overlay::Rect>( &geometry ) )
+            {
+                return rect->bounds.space == space;
+            }
+            if( const auto* ellipse = std::get_if<overlay::Ellipse>( &geometry ) )
+            {
+                return ellipse->center.space == space;
+            }
+            const auto* polygon = std::get_if<overlay::Polygon>( &geometry );
+            return polygon !=
+                   nullptr &&
+                   std::ranges::all_of( polygon->points,
+                                        [space]( SpacePoint point )
+                                        {
+                                            return point.space == space;
+                                        } );
+        }
+
+        [[nodiscard]]
         Result<overlay::Shape>
         transform_shape( const detail::SpaceGraph& graph,
                          CoordinateSpaceId         destination,
                          const overlay::Shape&     source )
         {
+            if( source.animation.has_value() )
+            {
+                if( !valid_animation( *source.animation ) )
+                {
+                    return fail( ErrorCode::InvalidArgument,
+                                 "overlay animation specification is invalid" );
+                }
+                if( !geometry_is_in_space( source.geometry, destination ) )
+                {
+                    return fail(
+                        ErrorCode::InvalidArgument,
+                        "animated overlay geometry must already be in delegate space"
+                    );
+                }
+            }
             auto geometry = transform_geometry( graph, destination, source.geometry );
             if( !geometry.has_value() )
             {

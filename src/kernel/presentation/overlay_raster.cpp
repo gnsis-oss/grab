@@ -6,6 +6,7 @@
 #include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/presentation/overlay_animation.hpp"
 #include "kernel/presentation/overlay_raster.hpp"
 
 #include <algorithm>
@@ -82,11 +83,21 @@ namespace grab::kernel::presentation
                 int    winding_delta{};
         };
 
+        struct RevealMask
+        {
+                overlay::Axis axis      = overlay::Axis::X;
+                overlay::Edge from_edge = overlay::Edge::Min;
+                double        boundary{};
+                double        fraction{};
+        };
+
         struct TrackedShape
         {
                 overlay::ShapeRecord               record;
                 std::optional<geometry::Rectangle> bounds;
                 double                             opacity{};
+                EvaluatedAnimation                 animation;
+                std::optional<RevealMask>          reveal;
         };
 
         [[nodiscard]]
@@ -252,37 +263,99 @@ namespace grab::kernel::presentation
         }
 
         [[nodiscard]]
-        double
-        lifetime_opacity( const overlay::ShapeRecord& record,
-                          std::chrono::milliseconds   now ) noexcept
+        bool
+        reveals_equal( const std::optional<EvaluatedReveal>& left,
+                       const std::optional<EvaluatedReveal>& right ) noexcept
         {
-            if( std::holds_alternative<overlay::Persistent>( record.shape.lifetime ) )
+            if( left.has_value() != right.has_value() )
+            {
+                return false;
+            }
+            return !left.has_value() || ( left->axis ==
+                                          right->axis &&
+                                          left->from_edge ==
+                                          right->from_edge &&
+                                          left->fraction == right->fraction );
+        }
+
+        [[nodiscard]]
+        bool
+        animated_geometry_equal( const EvaluatedAnimation& left,
+                                 const EvaluatedAnimation& right ) noexcept
+        {
+            return left.scale ==
+                   right.scale &&
+                   left.translate_x ==
+                   right.translate_x &&
+                   left.translate_y ==
+                   right.translate_y &&
+                   reveals_equal( left.reveal, right.reveal );
+        }
+
+        [[nodiscard]]
+        bool
+        reveal_is_hidden( const std::optional<RevealMask>& reveal ) noexcept
+        {
+            return reveal.has_value() && reveal->fraction <= fullyTransparent;
+        }
+
+        [[nodiscard]]
+        bool
+        reveal_is_partial( const std::optional<RevealMask>& reveal ) noexcept
+        {
+            return reveal.has_value() &&
+                   reveal->fraction >
+                   fullyTransparent &&
+                   reveal->fraction < fullyOpaque;
+        }
+
+        [[nodiscard]]
+        bool
+        sample_passes_reveal( double                           sample,
+                              const std::optional<RevealMask>& reveal ) noexcept
+        {
+            if( !reveal.has_value() )
+            {
+                return true;
+            }
+            const auto& mask = *reveal;
+            if( mask.fraction <=
+                fullyTransparent ||
+                mask.fraction >=
+                fullyOpaque ||
+                mask.axis != overlay::Axis::Y )
+            {
+                return true;
+            }
+            return mask.from_edge == overlay::Edge::Min ? sample < mask.boundary
+                                                        : sample >= mask.boundary;
+        }
+
+        [[nodiscard]]
+        double
+        horizontal_reveal_coverage( std::size_t                      pixel,
+                                    const std::optional<RevealMask>& reveal ) noexcept
+        {
+            if( !reveal.has_value() )
             {
                 return fullyOpaque;
             }
-
-            const auto elapsed = static_cast<double>( now.count() ) -
-                                 static_cast<double>( record.started_at.count() );
-            if( const auto* ttl = std::get_if<overlay::Ttl>( &record.shape.lifetime ) )
+            const auto& mask = *reveal;
+            if( mask.fraction <=
+                fullyTransparent ||
+                mask.fraction >=
+                fullyOpaque ||
+                mask.axis != overlay::Axis::X )
             {
-                const auto duration = static_cast<double>( ttl->duration.count() );
-                return duration > elapsed && duration > fullyTransparent
-                         ? fullyOpaque
-                         : fullyTransparent;
+                return fullyOpaque;
             }
-
-            const auto* fade = std::get_if<overlay::Fade>( &record.shape.lifetime );
-            if( fade == nullptr )
+            const auto left  = static_cast<double>( pixel );
+            const auto right = left + fullyOpaque;
+            if( mask.from_edge == overlay::Edge::Min )
             {
-                return fullyTransparent;
+                return std::clamp( mask.boundary - left, fullyTransparent, fullyOpaque );
             }
-            const auto duration = static_cast<double>( fade->duration.count() );
-            if( duration <= fullyTransparent )
-            {
-                return fullyTransparent;
-            }
-            const auto factor = fullyOpaque - ( elapsed / duration );
-            return std::clamp( factor, fullyTransparent, fullyOpaque );
+            return std::clamp( right - mask.boundary, fullyTransparent, fullyOpaque );
         }
 
         [[nodiscard]]
@@ -686,6 +759,95 @@ namespace grab::kernel::presentation
             return bounds;
         }
 
+        void
+        scale_contours( FlatContours& contours,
+                        double        scale )
+        {
+            if( scale == fullyOpaque )
+            {
+                return;
+            }
+            const auto bounds = point_bounds( contours );
+            if( !bounds.has_value() )
+            {
+                return;
+            }
+            const auto center_x =
+                ( bounds->left + bounds->right ) / static_cast<double>( circleHalves );
+            const auto center_y =
+                ( bounds->top + bounds->bottom ) / static_cast<double>( circleHalves );
+            for( auto& point : contours.points )
+            {
+                point.x = center_x + ( ( point.x - center_x ) * scale );
+                point.y = center_y + ( ( point.y - center_y ) * scale );
+            }
+        }
+
+        void
+        translate_contours( FlatContours& contours,
+                            double        translate_x,
+                            double        translate_y )
+        {
+            if( translate_x == fullyTransparent && translate_y == fullyTransparent )
+            {
+                return;
+            }
+            for( auto& point : contours.points )
+            {
+                point.x += translate_x;
+                point.y += translate_y;
+            }
+        }
+
+        [[nodiscard]]
+        std::optional<RevealMask>
+        apply_animation( FlatContours&             contours,
+                         const EvaluatedAnimation& animation )
+        {
+            scale_contours( contours, animation.scale );
+
+            std::optional<RevealMask> mask;
+            if( animation.reveal.has_value() )
+            {
+                const auto bounds = point_bounds( contours );
+                if( bounds.has_value() )
+                {
+                    const auto clipped = reveal_clip(
+                        AnimationRect{
+                            .x      = bounds->left,
+                            .y      = bounds->top,
+                            .width  = bounds->right - bounds->left,
+                            .height = bounds->bottom - bounds->top,
+                        },
+                        *animation.reveal
+                    );
+                    auto boundary = animation.reveal->axis == overlay::Axis::X
+                                      ? clipped.x
+                                      : clipped.y;
+                    if( animation.reveal->from_edge == overlay::Edge::Min )
+                    {
+                        boundary += animation.reveal->axis == overlay::Axis::X
+                                      ? clipped.width
+                                      : clipped.height;
+                    }
+                    mask = RevealMask{
+                        .axis      = animation.reveal->axis,
+                        .from_edge = animation.reveal->from_edge,
+                        .boundary  = boundary,
+                        .fraction  = animation.reveal->fraction,
+                    };
+                }
+            }
+
+            translate_contours( contours, animation.translate_x, animation.translate_y );
+            if( mask.has_value() )
+            {
+                mask->boundary += mask->axis == overlay::Axis::X ? animation.translate_x
+                                                                 : animation.translate_y;
+            }
+            return mask;
+        }
+
         [[nodiscard]]
         std::optional<geometry::Rectangle>
         device_bounds( const BoundsF& bounds,
@@ -804,6 +966,79 @@ namespace grab::kernel::presentation
         {
             return static_cast<std::int64_t>( rectangle.y ) +
                    static_cast<std::int64_t>( rectangle.height );
+        }
+
+        [[nodiscard]]
+        std::optional<geometry::Rectangle>
+        apply_reveal_to_bounds( const std::optional<geometry::Rectangle>& bounds,
+                                const std::optional<RevealMask>&          reveal,
+                                geometry::Size                            surface )
+        {
+            if( !bounds.has_value() || !reveal.has_value() )
+            {
+                return bounds;
+            }
+            if( reveal_is_hidden( reveal ) )
+            {
+                return std::nullopt;
+            }
+            if( !reveal_is_partial( reveal ) )
+            {
+                return bounds;
+            }
+
+            auto left   = static_cast<std::int64_t>( bounds->x );
+            auto top    = static_cast<std::int64_t>( bounds->y );
+            auto right  = rectangle_right( *bounds );
+            auto bottom = rectangle_bottom( *bounds );
+            if( reveal->axis == overlay::Axis::X )
+            {
+                const auto boundary = std::clamp( reveal->boundary,
+                                                  fullyTransparent,
+                                                  static_cast<double>( surface.width ) );
+                if( reveal->from_edge == overlay::Edge::Min )
+                {
+                    right =
+                        std::min( right,
+                                  static_cast<std::int64_t>( std::ceil( boundary ) ) );
+                }
+                else
+                {
+                    left =
+                        std::max( left,
+                                  static_cast<std::int64_t>( std::floor( boundary ) ) );
+                }
+            }
+            else
+            {
+                const auto boundary =
+                    std::clamp( reveal->boundary,
+                                fullyTransparent,
+                                static_cast<double>( surface.height ) );
+                if( reveal->from_edge == overlay::Edge::Min )
+                {
+                    bottom =
+                        std::min( bottom,
+                                  static_cast<std::int64_t>( std::ceil( boundary ) ) );
+                }
+                else
+                {
+                    top =
+                        std::max( top,
+                                  static_cast<std::int64_t>( std::floor( boundary ) ) );
+                }
+            }
+
+            if( right <= left || bottom <= top )
+            {
+                return std::nullopt;
+            }
+            return geometry::Rectangle{
+                .x      = static_cast<std::int32_t>( left ),
+                .y      = static_cast<std::int32_t>( top ),
+                .width  = static_cast<std::uint32_t>( right - left ),
+                .height = static_cast<std::uint32_t>( bottom - top ),
+            };
         }
 
         [[nodiscard]]
@@ -1145,20 +1380,59 @@ namespace grab::kernel::presentation
         rasterize_contours( const FlatContours&                  contours,
                             const overlay::Color&                color,
                             double                               opacity,
+                            const std::optional<RevealMask>&     reveal,
                             std::span<const geometry::Rectangle> damage,
                             Image&                               image,
                             std::vector<double>&                 row_coverage,
                             std::vector<Crossing>&               crossings )
         {
             const auto bounds = point_bounds( contours );
-            if( !bounds.has_value() || color.a == 0U || opacity <= fullyTransparent )
+            if( !bounds.has_value() ||
+                color.a ==
+                0U ||
+                opacity <=
+                fullyTransparent ||
+                reveal_is_hidden( reveal ) )
             {
                 return;
             }
-            const auto first_x = clipped_lower_pixel( bounds->left, image.width );
-            const auto last_x  = clipped_upper_pixel( bounds->right, image.width );
-            const auto first_y = clipped_lower_pixel( bounds->top, image.height );
-            const auto last_y  = clipped_upper_pixel( bounds->bottom, image.height );
+            auto first_x = clipped_lower_pixel( bounds->left, image.width );
+            auto last_x  = clipped_upper_pixel( bounds->right, image.width );
+            auto first_y = clipped_lower_pixel( bounds->top, image.height );
+            auto last_y  = clipped_upper_pixel( bounds->bottom, image.height );
+            if( reveal.has_value() )
+            {
+                const auto& mask = *reveal;
+                const auto  partial =
+                    mask.fraction > fullyTransparent && mask.fraction < fullyOpaque;
+                if( partial && mask.axis == overlay::Axis::X )
+                {
+                    if( mask.from_edge == overlay::Edge::Min )
+                    {
+                        last_x = std::min( last_x,
+                                           clipped_upper_pixel( mask.boundary,
+                                                                image.width ) );
+                    }
+                    else
+                    {
+                        first_x = std::max( first_x,
+                                            clipped_lower_pixel( mask.boundary,
+                                                                 image.width ) );
+                    }
+                }
+                else if( partial && mask.from_edge == overlay::Edge::Min )
+                {
+                    last_y =
+                        std::min( last_y,
+                                  clipped_upper_pixel( mask.boundary, image.height ) );
+                }
+                else if( partial )
+                {
+                    first_y =
+                        std::max( first_y,
+                                  clipped_lower_pixel( mask.boundary, image.height ) );
+                }
+            }
             if( first_x >= last_x || first_y >= last_y )
             {
                 return;
@@ -1199,6 +1473,10 @@ namespace grab::kernel::presentation
                             ( ( static_cast<double>( sample ) +
                                 ( fullyOpaque / static_cast<double>( circleHalves ) ) ) /
                               static_cast<double>( antiAliasSubscanlines ) );
+                        if( !sample_passes_reveal( sample_y, reveal ) )
+                        {
+                            continue;
+                        }
                         accumulate_scanline( contours,
                                              sample_y,
                                              row_coverage,
@@ -1208,14 +1486,11 @@ namespace grab::kernel::presentation
                     }
                     for( auto x = clipped_first_x; x < clipped_last_x; ++x )
                     {
-                        blend_pixel( image,
-                                     x,
-                                     y,
-                                     color,
-                                     opacity,
-                                     std::clamp( row_coverage.at( x ),
-                                                 fullyTransparent,
-                                                 fullyOpaque ) );
+                        const auto coverage = std::clamp( row_coverage.at( x ),
+                                                          fullyTransparent,
+                                                          fullyOpaque ) *
+                                              horizontal_reveal_coverage( x, reveal );
+                        blend_pixel( image, x, y, color, opacity, coverage );
                     }
                 }
             }
@@ -1245,6 +1520,7 @@ namespace grab::kernel::presentation
                     rasterize_contours( geometry,
                                         tracked.record.shape.fill->color,
                                         tracked.opacity,
+                                        tracked.reveal,
                                         damage,
                                         image,
                                         row_coverage,
@@ -1261,6 +1537,7 @@ namespace grab::kernel::presentation
                     rasterize_contours( outline,
                                         tracked.record.shape.stroke->color,
                                         tracked.opacity,
+                                        tracked.reveal,
                                         damage,
                                         image,
                                         row_coverage,
@@ -1371,12 +1648,17 @@ namespace grab::kernel::presentation
 
             for( const auto& record : shapes )
             {
-                const auto opacity  = lifetime_opacity( record, now );
-                auto       geometry = flatten_geometry( record.shape.geometry );
-                const auto bounds   = rendered_bounds( record.shape,
-                                                       geometry,
-                                                       opacity,
-                                                       impl_->image.size() );
+                const auto animation = evaluate_animation( record, now );
+                const auto opacity   = evaluate_opacity( record, now );
+                auto       geometry  = flatten_geometry( record.shape.geometry );
+                const auto reveal    = apply_animation( geometry, animation );
+                const auto bounds =
+                    apply_reveal_to_bounds( rendered_bounds( record.shape,
+                                                             geometry,
+                                                             opacity,
+                                                             impl_->image.size() ),
+                                            reveal,
+                                            impl_->image.size() );
                 const auto previous =
                     std::ranges::find( impl_->previous_shapes,
                                        record.id.slot,
@@ -1388,6 +1670,7 @@ namespace grab::kernel::presentation
                     previous ==
                     impl_->previous_shapes.end() ||
                     !appearances_equal( previous->record.shape, record.shape ) ||
+                    !animated_geometry_equal( previous->animation, animation ) ||
                     previous->opacity != opacity;
                 if( changed )
                 {
@@ -1402,9 +1685,11 @@ namespace grab::kernel::presentation
                     }
                 }
                 current_shapes.push_back( TrackedShape{
-                    .record  = record,
-                    .bounds  = bounds,
-                    .opacity = opacity,
+                    .record    = record,
+                    .bounds    = bounds,
+                    .opacity   = opacity,
+                    .animation = animation,
+                    .reveal    = reveal,
                 } );
                 flattened_shapes.push_back( std::move( geometry ) );
             }
