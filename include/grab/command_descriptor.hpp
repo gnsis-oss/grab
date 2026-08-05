@@ -33,6 +33,7 @@ namespace grab
         OverlayTrail,
         OverlayShape,
         OverlayFeedback,
+        OverlaySketch,
         Count,
     };
 
@@ -184,6 +185,12 @@ namespace grab
                                 false ),
             command_descriptor( "overlay.feedback",
                                 CommandKind::OverlayFeedback,
+                                RetryClass::ResolveOnly,
+                                Mutability::Mutating,
+                                false,
+                                false ),
+            command_descriptor( "overlay.sketch",
+                                CommandKind::OverlaySketch,
                                 RetryClass::ResolveOnly,
                                 Mutability::Mutating,
                                 false,

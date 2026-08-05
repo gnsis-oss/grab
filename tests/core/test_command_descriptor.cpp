@@ -31,6 +31,7 @@ namespace
         "overlay.trail",
         "overlay.shape",
         "overlay.feedback",
+        "overlay.sketch",
     } );
 
 }    // namespace
@@ -54,6 +55,7 @@ TEST( CommandDescriptor,
         std::string_view{ "overlay.trail" },
         std::string_view{ "overlay.shape" },
         std::string_view{ "overlay.feedback" },
+        std::string_view{ "overlay.sketch" },
     };
 
     for( const auto name : overlayNames )

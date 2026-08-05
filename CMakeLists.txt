@@ -315,6 +315,7 @@ add_executable(grab_cli
     src/frontends/cli/input_command.cpp
     src/frontends/cli/overlay_command.cpp
     src/frontends/cli/session_command.cpp
+    src/frontends/cli/sketch_command.cpp
     src/frontends/cli/watch_daemon.cpp
     src/frontends/cli/windows_command.cpp
 )
