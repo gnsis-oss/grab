@@ -58,8 +58,8 @@ add_executable(grab_core_tests
     core/test_result_taxonomy.cpp
     core/test_session.cpp
     core/test_space_graph.cpp
+    core/test_adjacency_graph.cpp
     core/test_trace_enums.cpp
-    core/test_vendor_l0.cpp
     core/test_version.cpp
     codec/test_image.cpp
     codec/test_png.cpp
@@ -79,7 +79,7 @@ add_executable(grab_core_tests
     transport/test_service.cpp
     transport/test_service_hardening.cpp
 )
-target_link_libraries(grab_core_tests PRIVATE grab_core grab_kernel grab_vendor_l0 grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
+target_link_libraries(grab_core_tests PRIVATE grab_core grab_kernel grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
 target_compile_definitions(grab_core_tests PRIVATE
@@ -128,7 +128,6 @@ add_executable(grab_kernel_tests
 )
 target_link_libraries(grab_kernel_tests PRIVATE
     grab_kernel
-    grab_vendor_l0
     grab_codec
     GTest::gtest_main)
 target_include_directories(grab_kernel_tests PRIVATE
@@ -157,7 +156,6 @@ add_executable(grab_driver_x11_tests
 )
 target_link_libraries(grab_driver_x11_tests PRIVATE
     grab_driver_x11
-    grab_vendor_l0
     grab_notify
     ${GRAB_LIBAV_TARGETS}
     GTest::gtest_main
@@ -206,7 +204,6 @@ add_executable(grab_driver_atspi_tests
 target_link_libraries(grab_driver_atspi_tests PRIVATE
     grab_driver_atspi
     grab_driver_x11
-    grab_vendor_l0
     GTest::gtest_main
 )
 target_include_directories(grab_driver_atspi_tests PRIVATE

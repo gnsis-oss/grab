@@ -24,7 +24,7 @@ endif()
 
 # Dev tooling is for grab's OWN top-level builds only. As an add_subdirectory
 # dependency the `format ALL` target collides with the consumer's, so guard the
-# whole group on PROJECT_IS_TOP_LEVEL (mirrors every l0 library).
+# whole group on PROJECT_IS_TOP_LEVEL.
 #
 # Order matters: Coverage reads GRAB_SANITIZER, Logging is read by every
 # target below.
@@ -70,9 +70,6 @@ grab_proto_library(grab_proto
     proto/eventgrab/v1/service.proto
 )
 
-add_library(grab_vendor_l0 INTERFACE)
-target_include_directories(grab_vendor_l0 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/vendor/l0)
-
 add_library(grab_core STATIC
     src/config/batch_manifest.cpp
     src/config/environment.cpp
@@ -104,7 +101,6 @@ target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
 # kernel/support/log.hpp, which is any of them. PUBLIC on grab_core carries it
 # to every other grab target and to the tests.
 target_link_libraries(grab_core PUBLIC grab_log_config)
-target_link_libraries(grab_core PRIVATE grab_vendor_l0)
 # Composition root: SessionCore (grab_core) composes the X11 and AT-SPI driver stacks.
 # The static-library cycles through grab_kernel and both drivers are intentional; CMake supports cycles among STATIC libraries.
 target_link_libraries(grab_core PRIVATE grab_driver_x11)
@@ -146,7 +142,7 @@ add_library(grab_kernel STATIC
     src/kernel/query/locator.cpp
     src/kernel/query/snapshot_tree_nav.cpp
 )
-target_link_libraries(grab_kernel PUBLIC grab_core PRIVATE grab_vendor_l0)
+target_link_libraries(grab_kernel PUBLIC grab_core)
 target_include_directories(grab_kernel PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_kernel PUBLIC cxx_std_23)
 
@@ -265,7 +261,6 @@ target_link_libraries(grab_driver_x11
         grab_kernel
         grab_platform_x11
     PRIVATE
-        grab_vendor_l0
         grab_screen
         grab_input_x11
         ${GRAB_LIBAV_TARGETS}
@@ -297,8 +292,6 @@ target_link_libraries(grab_driver_atspi
         # atspi_monitor.hpp exposes <dbus/dbus.h> types, so consumers of the
         # driver header need the D-Bus include path.
         PkgConfig::GRAB_DBUS_1
-    PRIVATE
-        grab_vendor_l0
 )
 target_include_directories(grab_driver_atspi PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_atspi PUBLIC cxx_std_23)
