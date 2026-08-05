@@ -361,12 +361,36 @@ target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_ima
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 
+# Until now there was no install rule of any kind, so the only way to run the
+# CLI was by path into a build directory -- and the obvious such path held a
+# months-old binary that predated half the verbs. Installing is what makes
+# `grab` a command rather than an artifact you have to go find.
+#
+#   cmake --install build/dev --prefix ~/.local
+#
+# The headers go with it so an add_subdirectory consumer is not the only way to
+# build against the library. The static archives are deliberately NOT exported:
+# that needs an export set covering every internal target and a config package
+# to go with it, and shipping half of one would be worse than shipping none.
+if(PROJECT_IS_TOP_LEVEL)
+    include(GNUInstallDirs)
+    install(TARGETS grab_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/include/grab
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.hpp")
+endif()
+
 # grab's own examples and tests build only for grab's top-level builds. As an
 # add_subdirectory dependency (spider's SPIDER_ENABLE_GRAB path) a consumer only
 # wants grab_core, and BUILD_TESTING is the consumer's flag for ITS tests.
 option(GRAB_BUILD_EXAMPLES "Build example programs" ON)
 if(PROJECT_IS_TOP_LEVEL AND GRAB_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+option(GRAB_BUILD_BENCHMARKS "Build benchmark programs" ON)
+if(PROJECT_IS_TOP_LEVEL AND GRAB_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
 
 if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)

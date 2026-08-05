@@ -2,7 +2,18 @@
 # Compile-time log ceiling, expressed as a generated C++ constant rather
 # than a preprocessor define.
 #
-#   -DGRAB_LOG_LEVEL=off|nominal|verbose|debug     (default: nominal)
+#   -DGRAB_LOG_LEVEL=off|nominal|verbose|debug     (default: debug)
+#
+# The default is the FULL ceiling, in every preset including release, and that
+# is deliberate. A diagnostic facility that has to be compiled in before it can
+# be used is a facility nobody has when they need it: the first symptom of a
+# problem arrives on a machine running whatever binary is already there, and
+# "rebuild with logging on and reproduce it" is not an answer. Levels above the
+# ceiling cost nothing at runtime, but they also cannot be turned on at
+# runtime, which is the wrong trade for everything except a measured hot loop.
+#
+# `off` remains selectable for a consumer who wants the code gone entirely.
+# Nothing in grab's own presets selects it.
 #
 # The level reaches the code as `grab::log::compileLevel`, an
 # `inline constexpr int` in a per-build-directory generated header. Callers
@@ -13,7 +24,7 @@
 # independently settable level (GRAB_LOG / --log-level), defaulting to off.
 # ─────────────────────────────────────────────────────────────
 
-set(GRAB_LOG_LEVEL "nominal" CACHE STRING
+set(GRAB_LOG_LEVEL "debug" CACHE STRING
     "Compile-time log ceiling: off | nominal | verbose | debug")
 set_property(CACHE GRAB_LOG_LEVEL PROPERTY STRINGS off nominal verbose debug)
 

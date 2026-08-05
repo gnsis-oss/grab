@@ -84,8 +84,7 @@
       "binaryDir": "${sourceDir}/build/coverage",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "GRAB_COVERAGE": "ON",
-        "GRAB_LOG_LEVEL": "nominal"
+        "GRAB_COVERAGE": "ON"
       }
     },
     {
@@ -96,18 +95,16 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "GRAB_FRAME_POINTERS": "ON",
-        "GRAB_LOG_LEVEL": "nominal",
         "ENABLE_PERF": "ON"
       }
     },
     {
       "name": "release",
-      "displayName": "release — -O3 -DNDEBUG, logging compiled out",
+      "displayName": "release — -O3 -DNDEBUG, logging still reachable",
       "inherits": "base",
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "GRAB_LOG_LEVEL": "off"
+        "CMAKE_BUILD_TYPE": "Release"
       }
     },
     {
