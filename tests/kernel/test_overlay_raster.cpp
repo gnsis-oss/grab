@@ -124,10 +124,13 @@ namespace
         .width  = OverlapTestSurfaceWidth,
         .height = OverlapTestSurfaceHeight,
     };
-    constexpr std::array OverlapExpectedDamage{
-        grab::geometry::Rectangle{ .x = 5,  .y = 5, .width = 20U, .height = 16U},
-        grab::geometry::Rectangle{.x = 13, .y = 21, .width = 20U,  .height = 4U},
-        grab::geometry::Rectangle{.x = 25,  .y = 9,  .width = 8U, .height = 12U},
+    // Everything the two overlapping shapes touch once both fades advance.
+    // Damage must contain this; it is not required to partition it.
+    constexpr grab::geometry::Rectangle OverlapChangedRegion{
+        .x      = 5,
+        .y      = 5,
+        .width  = 28U,
+        .height = 20U,
     };
     constexpr std::uint32_t        RetentionTestSurfaceWidth  = 64U;
     constexpr std::uint32_t        RetentionTestSurfaceHeight = 32U;
@@ -588,18 +591,41 @@ namespace
                right.y < left.bottom();
     }
 
-    void
-    expect_damage( std::span<const grab::geometry::Rectangle> actual,
-                   std::span<const grab::geometry::Rectangle> expected )
+    [[nodiscard]]
+    std::uint64_t
+    damage_area( std::span<const grab::geometry::Rectangle> damage )
     {
-        ASSERT_EQ( actual.size(), expected.size() );
-        auto        expected_rectangle = expected.begin();
-        std::size_t index{};
-        for( const auto rectangle : actual )
+        std::uint64_t area{};
+        for( const auto rectangle : damage )
         {
-            EXPECT_EQ( rectangle, *expected_rectangle ) << "damage rectangle " << index;
-            ++expected_rectangle;
-            ++index;
+            area += static_cast<std::uint64_t>( rectangle.width ) * rectangle.height;
+        }
+        return area;
+    }
+
+    // Every pixel of `region` falls in at least one damage rectangle.
+    void
+    expect_damage_covers( std::span<const grab::geometry::Rectangle> damage,
+                          grab::geometry::Rectangle                  region )
+    {
+        for( std::int64_t y = region.y; y < region.bottom(); ++y )
+        {
+            for( std::int64_t x = region.x; x < region.right(); ++x )
+            {
+                const bool covered =
+                    std::ranges::any_of( damage,
+                                         [x, y]( grab::geometry::Rectangle rectangle )
+                                         {
+                                             return x >=
+                                                    rectangle.x &&
+                                                    x <
+                                                    rectangle.right() &&
+                                                    y >=
+                                                    rectangle.y &&
+                                                    y < rectangle.bottom();
+                                         } );
+                ASSERT_TRUE( covered ) << "pixel " << x << "," << y << " not damaged";
+            }
         }
     }
 
@@ -853,7 +879,22 @@ TEST( OverlayRaster,
     // Advancing both fades changes both shapes and produces overlapping raw damage.
     const auto damaged_frame = raster->render( shapes, halfFadeAt );
     ASSERT_TRUE( damaged_frame.has_value() ) << damaged_frame.error().message;
-    expect_damage( damaged_frame->damage, OverlapExpectedDamage );
+    // Damage is a cover, not a partition.
+    //
+    // It used to be made disjoint by subtracting every rectangle from every
+    // other, which turned these two overlapping shapes into three fragments
+    // and a 600-segment trail into 3236 of them — each one then re-running the
+    // rasterizer's full setup for the shapes that touched it. Rectangles are
+    // merged now and may overlap; the rasterizer merges each row's x-runs
+    // before it blends, so a pixel still receives exactly one blend per shape.
+    //
+    // What the raster owes its caller is that damage contains everything that
+    // changed, that it stays cheaper than a full redraw, and — the assertion
+    // that actually proves it, at the end of this test — that the incremental
+    // frame is pixel-identical to a full one.
+    expect_damage_covers( damaged_frame->damage, OverlapChangedRegion );
+    EXPECT_LT( damage_area( damaged_frame->damage ),
+               damage_area( std::array{ OverlapFullSurfaceDamage } ) );
 
     auto reference_raster = OverlayRaster::create( OverlapTestSurface );
     ASSERT_TRUE( reference_raster.has_value() ) << reference_raster.error().message;
