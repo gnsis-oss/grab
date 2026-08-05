@@ -30,6 +30,9 @@ namespace grab::log::tags
     inline constexpr std::string_view edit  = "edit";
     inline constexpr std::string_view trail = "trail";
 
+    // Coordinate spaces and the transforms between them
+    inline constexpr std::string_view space = "space";
+
     // Lifecycle
     inline constexpr std::string_view session = "session";
 
