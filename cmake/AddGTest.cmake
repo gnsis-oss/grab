@@ -11,6 +11,12 @@ FetchContent_Declare(
     GIT_TAG        v1.14.0
 )
 
+# GoogleTest carries its own install() rules and adds them to the default
+# component, so `cmake --install` on grab would deposit gtest and gmock headers
+# and archives into the caller's prefix alongside grab's. A test dependency has
+# no business in an install tree.
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+
 # ── Suspend project strictness for GTest ──
 set(_saved_tidy "${CMAKE_CXX_CLANG_TIDY}")
 set(CMAKE_CXX_CLANG_TIDY "")
