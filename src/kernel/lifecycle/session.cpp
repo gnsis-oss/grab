@@ -3,6 +3,7 @@
 #include "grab/interaction.hpp"
 #include "grab/locator.hpp"
 #include "grab/overlay.hpp"
+#include "grab/overlay_edit.hpp"
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
@@ -14,6 +15,7 @@
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/lifecycle/startup_signal.hpp"
 #include "kernel/presentation/cursor_feedback.hpp"
+#include "kernel/presentation/overlay_edit_session.hpp"
 #include "kernel/presentation/overlay_service.hpp"
 #include "kernel/scheduling/reactor.hpp"
 #include "spi/runtime.hpp"
@@ -258,8 +260,53 @@ namespace grab
                 std::make_shared<OverlayExecutionGate>();
     };
 
+    class EditSession::Impl
+    {
+        public:
+
+            Impl( std::shared_ptr<Overlay::Impl>                            dispatcher,
+                  std::shared_ptr<kernel::presentation::OverlayEditSession> session ) :
+                dispatcher_{ std::move( dispatcher ) },
+                session_{ std::move( session ) }
+            {
+            }
+
+            ~Impl() noexcept
+            {
+                if( dispatcher_ == nullptr || session_ == nullptr )
+                {
+                    return;
+                }
+                try
+                {
+                    [[maybe_unused]]
+                    auto stopped = dispatcher_->invoke<void>(
+                        [session =
+                             session_]( kernel::presentation::OverlayService& service )
+                        {
+                            return service.stop_edit( session );
+                        }
+                    );
+                }
+                catch( ... )
+                {
+                    return;
+                }
+            }
+
+            Impl( const Impl& ) = delete;
+            Impl&
+            operator=( const Impl& ) = delete;
+            Impl( Impl&& )           = delete;
+            Impl&
+                                           operator=( Impl&& ) = delete;
+
+            std::shared_ptr<Overlay::Impl> dispatcher_;
+            std::shared_ptr<kernel::presentation::OverlayEditSession> session_;
+    };
+
     Overlay::Overlay() :
-        impl_( std::make_unique<Impl>() )
+        impl_( std::make_shared<Impl>() )
     {
     }
 
@@ -353,21 +400,114 @@ namespace grab
         );
     }
 
+    EditSession::EditSession( std::unique_ptr<Impl> impl ) noexcept :
+        impl_{ std::move( impl ) }
+    {
+    }
+
+    EditSession::~EditSession()                        = default;
+
+    EditSession::EditSession( EditSession&& ) noexcept = default;
+
+    EditSession&
+    EditSession::operator=( EditSession&& ) noexcept = default;
+
+    Result<void>
+    EditSession::status() const
+    {
+        if( impl_ == nullptr || impl_->session_ == nullptr )
+        {
+            return {};
+        }
+        return impl_->session_->status();
+    }
+
+    Result<EditSession>
+    EditSession::create( Overlay&                          overlay,
+                         std::span<const overlay::ShapeId> editable,
+                         EditCallbacks                     callbacks )
+    {
+        auto owned_editable =
+            std::vector<overlay::ShapeId>{ editable.begin(), editable.end() };
+        auto dispatcher = overlay.impl_;
+        auto started =
+            dispatcher
+                ->invoke<std::shared_ptr<kernel::presentation::OverlayEditSession>>(
+                    [editable_ids = std::move( owned_editable ),
+                     callbacks    = std::move( callbacks )](
+                        kernel::presentation::OverlayService& service
+                    ) mutable
+                    {
+                        return service.start_edit( editable_ids,
+                                                   std::move( callbacks ) );
+                    }
+                );
+        if( !started.has_value() )
+        {
+            return std::unexpected( std::move( started.error() ) );
+        }
+
+        try
+        {
+            return EditSession{ std::make_unique<Impl>( dispatcher, *started ) };
+        }
+        catch( const std::exception& exception )
+        {
+            [[maybe_unused]]
+            auto stopped = dispatcher->invoke<void>(
+                [session = *started]( kernel::presentation::OverlayService& service )
+                {
+                    return service.stop_edit( session );
+                }
+            );
+            return std::unexpected(
+                kernel::lifecycle::exception_error( overlayDispatchStep, exception )
+            );
+        }
+        catch( ... )
+        {
+            [[maybe_unused]]
+            auto stopped = dispatcher->invoke<void>(
+                [session = *started]( kernel::presentation::OverlayService& service )
+                {
+                    return service.stop_edit( session );
+                }
+            );
+            return std::unexpected(
+                kernel::lifecycle::unknown_exception_error( overlayDispatchStep )
+            );
+        }
+    }
+
+    Result<EditSession>
+    overlay_edit( Overlay&                          overlay,
+                  std::span<const overlay::ShapeId> editable,
+                  EditCallbacks                     callbacks )
+    {
+        return EditSession::create( overlay, editable, std::move( callbacks ) );
+    }
+
     void
     Overlay::detach() noexcept
     {
+        bool called_on_reactor{};
         {
             const std::scoped_lock lock{ impl_->mutex_ };
-            impl_->core_           = nullptr;
-            impl_->reactor_        = nullptr;
+            called_on_reactor = std::this_thread::get_id() == impl_->reactor_thread_;
+            impl_->core_      = nullptr;
+            impl_->reactor_   = nullptr;
             impl_->reactor_thread_ = {};
         }
         // Refuse new executions, then wait out any execution already running
         // on the reactor thread before the SessionCore may be torn down.
         impl_->execution_gate_->alive.store( false, std::memory_order_release );
+        if( !called_on_reactor )
         {
             const std::unique_lock drain{ impl_->execution_gate_->mutex };
         }
+        // Reactor-thread close queues SessionCore teardown at the reactor tail.
+        // It must not try to upgrade the shared gate held by the callback's
+        // enclosing facade invocation; that invocation releases it on return.
         // Settle every invocation still waiting on a reactor that will never
         // run it; each settles exactly once.
         impl_->registry_->cancel_all();

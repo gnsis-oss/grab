@@ -216,12 +216,10 @@ namespace grab::client
                     disposition = grab::ErrorDisposition::RetrySame;
                     break;
                 case grpc::StatusCode::DEADLINE_EXCEEDED :
-                    code        = grab::ErrorCode::DeadlineExceeded;
-                    disposition = grab::ErrorDisposition::RetrySame;
+                    code = grab::ErrorCode::DeadlineExceeded;
                     break;
                 case grpc::StatusCode::CANCELLED :
-                    code        = grab::ErrorCode::Cancelled;
-                    disposition = grab::ErrorDisposition::RetrySame;
+                    code = grab::ErrorCode::Cancelled;
                     break;
                 case grpc::StatusCode::INVALID_ARGUMENT :
                     code = grab::ErrorCode::InvalidArgument;

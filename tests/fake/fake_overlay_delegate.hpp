@@ -44,6 +44,24 @@ namespace grab::testing
             overlay::Revision through{};
     };
 
+    struct OverlayInputRegionCall
+    {
+            std::vector<geometry::Rectangle> rectangles{};
+    };
+
+    struct OverlayEditHandlerCall
+    {
+            bool installed{};
+    };
+
+    struct OverlayGrabPointerCall
+    {
+    };
+
+    struct OverlayUngrabPointerCall
+    {
+    };
+
     struct OverlayCloseCall
     {
     };
@@ -52,6 +70,10 @@ namespace grab::testing
                                          OverlayApplyCall,
                                          OverlayResyncCall,
                                          OverlayFlushCall,
+                                         OverlayInputRegionCall,
+                                         OverlayEditHandlerCall,
+                                         OverlayGrabPointerCall,
+                                         OverlayUngrabPointerCall,
                                          OverlayCloseCall>;
     using OverlayShapeMap = std::map<overlay::ShapeId, overlay::ShapeRecord>;
 
@@ -75,8 +97,13 @@ namespace grab::testing
                 epoch_.reset();
                 through_revision_ = {};
                 shapes_.clear();
+                input_region_.clear();
+                edit_handler_    = {};
+                pointer_grabbed_ = false;
                 apply_failure_.reset();
                 flush_failure_.reset();
+                input_region_failure_.reset();
+                grab_failure_.reset();
                 return {};
             }
 
@@ -217,6 +244,83 @@ namespace grab::testing
                 return {};
             }
 
+            [[nodiscard]]
+            Result<void>
+            set_input_region( std::span<const geometry::Rectangle> rectangles ) override
+            {
+                std::vector<geometry::Rectangle> candidate{
+                    rectangles.begin(),
+                    rectangles.end()
+                };
+                calls_.emplace_back( OverlayInputRegionCall{
+                    .rectangles = candidate,
+                } );
+                if( state_ == OverlayDelegateState::Closed && !candidate.empty() )
+                {
+                    return fail(
+                        ErrorCode::InvalidArgument,
+                        "overlay delegate input region requires an open delegate"
+                    );
+                }
+                if( input_region_failure_.has_value() )
+                {
+                    auto failure = std::move( *input_region_failure_ );
+                    input_region_failure_.reset();
+                    return fail( failure.code, std::move( failure.message ) );
+                }
+                input_region_ = std::move( candidate );
+                return {};
+            }
+
+            [[nodiscard]]
+            Result<void>
+            set_edit_handler( spi::OverlayEditHandler handler ) override
+            {
+                calls_.emplace_back( OverlayEditHandlerCall{
+                    .installed = static_cast<bool>( handler ),
+                } );
+                if( state_ == OverlayDelegateState::Closed && handler )
+                {
+                    return fail(
+                        ErrorCode::InvalidArgument,
+                        "overlay delegate edit handler requires an open delegate"
+                    );
+                }
+                edit_handler_ = std::move( handler );
+                return {};
+            }
+
+            [[nodiscard]]
+            Result<void>
+            grab_pointer() override
+            {
+                calls_.emplace_back( OverlayGrabPointerCall{} );
+                if( state_ == OverlayDelegateState::Closed )
+                {
+                    return fail(
+                        ErrorCode::InvalidArgument,
+                        "overlay delegate pointer grab requires an open delegate"
+                    );
+                }
+                if( grab_failure_.has_value() )
+                {
+                    auto failure = std::move( *grab_failure_ );
+                    grab_failure_.reset();
+                    return fail( failure.code, std::move( failure.message ) );
+                }
+                pointer_grabbed_ = true;
+                return {};
+            }
+
+            [[nodiscard]]
+            Result<void>
+            ungrab_pointer() override
+            {
+                calls_.emplace_back( OverlayUngrabPointerCall{} );
+                pointer_grabbed_ = false;
+                return {};
+            }
+
             void
             close() override
             {
@@ -226,8 +330,13 @@ namespace grab::testing
                 epoch_.reset();
                 through_revision_ = {};
                 shapes_.clear();
+                input_region_.clear();
+                edit_handler_    = {};
+                pointer_grabbed_ = false;
                 apply_failure_.reset();
                 flush_failure_.reset();
+                input_region_failure_.reset();
+                grab_failure_.reset();
             }
 
             void
@@ -259,6 +368,40 @@ namespace grab::testing
                     .code    = code,
                     .message = std::move( message ),
                 };
+            }
+
+            void
+            fail_next_input_region( ErrorCode   code,
+                                    std::string message )
+            {
+                input_region_failure_ = InjectedFailure{
+                    .code    = code,
+                    .message = std::move( message ),
+                };
+            }
+
+            void
+            fail_next_grab( ErrorCode   code,
+                            std::string message )
+            {
+                grab_failure_ = InjectedFailure{
+                    .code    = code,
+                    .message = std::move( message ),
+                };
+            }
+
+            void
+            emit_edit_event( const spi::OverlayEditEvent& event )
+            {
+                if( event.kind == spi::OverlayEditEventKind::NotifyUngrab )
+                {
+                    pointer_grabbed_ = false;
+                }
+                const auto handler = edit_handler_;
+                if( handler )
+                {
+                    handler( event );
+                }
             }
 
             [[nodiscard]]
@@ -318,6 +461,27 @@ namespace grab::testing
             }
 
             [[nodiscard]]
+            const std::vector<geometry::Rectangle>&
+            input_region() const noexcept
+            {
+                return input_region_;
+            }
+
+            [[nodiscard]]
+            bool
+            edit_handler_installed() const noexcept
+            {
+                return static_cast<bool>( edit_handler_ );
+            }
+
+            [[nodiscard]]
+            bool
+            pointer_grabbed() const noexcept
+            {
+                return pointer_grabbed_;
+            }
+
+            [[nodiscard]]
             const std::vector<OverlayCall>&
             calls() const noexcept
             {
@@ -365,10 +529,15 @@ namespace grab::testing
             std::optional<overlay::SceneEpoch> epoch_{};
             overlay::Revision                  through_revision_{};
             OverlayShapeMap                    shapes_{};
+            std::vector<geometry::Rectangle>   input_region_{};
             std::vector<OverlayCall>           calls_{};
+            spi::OverlayEditHandler            edit_handler_{};
             std::optional<InjectedFailure>     apply_failure_{};
             std::optional<InjectedFailure>     flush_failure_{};
+            std::optional<InjectedFailure>     input_region_failure_{};
+            std::optional<InjectedFailure>     grab_failure_{};
             std::uint32_t                      flush_failures_remaining_{};
+            bool                               pointer_grabbed_{};
     };
 
 }    // namespace grab::testing

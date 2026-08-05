@@ -1,13 +1,33 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "grab/geometry/rectangle.hpp"
 #include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
 
+#include <cstdint>
+#include <functional>
 #include <span>
 
 namespace grab::spi
 {
+
+    enum class OverlayEditEventKind : std::uint8_t
+    {
+        ButtonPress,
+        PointerMotion,
+        ButtonRelease,
+        NotifyUngrab,
+    };
+
+    struct OverlayEditEvent
+    {
+            OverlayEditEventKind kind{};
+            SpacePoint           position{};
+            std::uint8_t         button{};
+    };
+
+    using OverlayEditHandler = std::function<void( const OverlayEditEvent& )>;
 
     // Delegates apply enveloped deltas contiguously within an epoch. A Clear
     // delta that opens a new epoch (revision 1 of that epoch) is the explicit
@@ -42,6 +62,45 @@ namespace grab::spi
             [[nodiscard]]
             virtual Result<void>
             flush( overlay::Revision through ) = 0;
+
+            [[nodiscard]]
+            virtual Result<void>
+            set_input_region( std::span<const geometry::Rectangle> rectangles )
+            {
+                if( rectangles.empty() )
+                {
+                    return {};
+                }
+                return fail( ErrorCode::CapabilityUnavailable,
+                             "overlay delegate has no editable input region" );
+            }
+
+            [[nodiscard]]
+            virtual Result<void>
+            set_edit_handler( OverlayEditHandler handler )
+            {
+                if( !handler )
+                {
+                    return {};
+                }
+                return fail( ErrorCode::CapabilityUnavailable,
+                             "overlay delegate has no edit event source" );
+            }
+
+            [[nodiscard]]
+            virtual Result<void>
+            grab_pointer()
+            {
+                return fail( ErrorCode::CapabilityUnavailable,
+                             "overlay delegate cannot grab the pointer" );
+            }
+
+            [[nodiscard]]
+            virtual Result<void>
+            ungrab_pointer()
+            {
+                return {};
+            }
 
             virtual void
             close() = 0;

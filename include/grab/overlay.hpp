@@ -243,6 +243,8 @@ namespace grab::overlay
 namespace grab
 {
 
+    class EditSession;
+
     class Overlay
     {
         public:
@@ -301,6 +303,7 @@ namespace grab
 
         private:
 
+            friend class EditSession;
             friend class Session;
 
             Overlay();
@@ -309,7 +312,7 @@ namespace grab
             detach() noexcept;
 
             class Impl;
-            std::unique_ptr<Impl> impl_;
+            std::shared_ptr<Impl> impl_;
     };
 
 }    // namespace grab
