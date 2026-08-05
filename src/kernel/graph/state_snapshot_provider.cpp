@@ -58,11 +58,23 @@ namespace grab::event
     {
         if( bus_ != nullptr )
         {
+            // These are the real teardown barrier, not the mutex below.
+            // Unregistering takes the bus lock, and the bus holds that same
+            // lock across a whole snapshot-provider invocation, so once these
+            // return no callback is in flight and none can start. That also
+            // gives the happens-before edge with the last callback's writes to
+            // manager_ and subscription_.
             bus_->unregister_snapshot_provider( grab::EventKind::StateSnapshot );
             bus_->unregister_snapshot_provider( grab::EventKind::WindowCreated );
         }
 
-        const std::scoped_lock lock( mutex_ );
+        // Deliberately NOT under mutex_. ~Subscription re-enters the bus to
+        // unsubscribe, so holding the provider lock across it takes
+        // (provider -> bus) while EventBusState::add takes (bus -> provider)
+        // when it invokes a snapshot callback under the bus lock. That is an
+        // ABBA inversion; ThreadSanitizer reports it as a potential deadlock.
+        // The lock guarded nothing here — drain_locked() is reachable only
+        // from the two callbacks unregistered above.
         subscription_.reset();
     }
 

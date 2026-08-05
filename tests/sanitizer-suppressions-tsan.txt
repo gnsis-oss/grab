@@ -1,0 +1,42 @@
+# ThreadSanitizer suppressions.
+#
+# grab links gRPC, Abseil and protobuf as system shared libraries, which are
+# NOT built with -fsanitize=thread. TSan cannot see their internal
+# synchronization, so it reports every access inside them as a race. On the
+# 2026-08-05 baseline that was 1130 of 1131 reports — enough noise to make the
+# tool useless without this file.
+#
+# Each entry suppresses reports whose racing instruction is inside the named
+# library. A race in GRAB's OWN code is still reported even when a grab frame
+# appears further down one of these stacks, because these match the library
+# frame that performs the access.
+#
+# Do NOT add a grab source file here. If TSan reports grab's own code, fix the
+# code. The one such report on the baseline — a lock-order inversion between
+# EventBus's mutex and StateSnapshotProvider's — was a real latent ABBA and was
+# fixed in state_snapshot_provider.cpp rather than suppressed.
+#
+# Usage:
+#   TSAN_OPTIONS=suppressions=tests/sanitizer-suppressions-tsan.txt ctest --preset tsan
+
+# ── Abseil ──────────────────────────────────────────────────
+# Every libabsl_*.so: GraphCycles (Abseil's deadlock-detection graph, whose own
+# mutex is invisible to TSan so every node insert looks like a race),
+# absl::Status and absl::Cord (refcounted, atomically shared across gRPC's
+# server threads).
+race:libabsl_
+race:absl::debian3::
+
+# ── gRPC ────────────────────────────────────────────────────
+race:libgrpc.so
+race:libgrpc++.so
+race:libgpr.so
+race:grpc_core::
+race:grpc_event_engine::
+
+# ── protobuf ────────────────────────────────────────────────
+# MessageLite's ctor/dtor vs virtual-call vptr reports come from arena-allocated
+# messages crossing gRPC's server threads.
+race:libprotobuf.so
+race:google::protobuf::MessageLite
+race:google::protobuf::internal::ZeroFieldsBase

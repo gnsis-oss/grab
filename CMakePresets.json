@@ -154,8 +154,24 @@
     },
     { "name": "dev", "inherits": "serial", "configurePreset": "dev" },
     { "name": "debug", "inherits": "serial", "configurePreset": "debug" },
-    { "name": "asan", "inherits": "serial", "configurePreset": "asan" },
-    { "name": "tsan", "inherits": "serial", "configurePreset": "tsan" },
+    {
+      "name": "asan",
+      "inherits": "serial",
+      "configurePreset": "asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:print_stacktrace=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "serial",
+      "configurePreset": "tsan",
+      "environment": {
+        "TSAN_OPTIONS": "print_stacktrace=1:suppressions=${sourceDir}/tests/sanitizer-suppressions-tsan.txt",
+        "UBSAN_OPTIONS": "print_stacktrace=1"
+      }
+    },
     { "name": "msan", "inherits": "serial", "configurePreset": "msan" },
     { "name": "coverage", "inherits": "serial", "configurePreset": "coverage" },
     { "name": "release", "inherits": "serial", "configurePreset": "release" }
