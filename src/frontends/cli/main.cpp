@@ -11,6 +11,7 @@
 #include "frontends/cli/common.hpp"
 #include "frontends/cli/feedback_command.hpp"
 #include "frontends/cli/input_command.hpp"
+#include "frontends/cli/log_options.hpp"
 #include "frontends/cli/overlay_command.hpp"
 #include "frontends/cli/session_command.hpp"
 #include "frontends/cli/sketch_command.hpp"
@@ -274,6 +275,8 @@ namespace
                             "       grab overlay rect|ellipse|path --at VALUES "
                             "[--ttl MS | --fade MS | --hold]\n",
                             stderr );
+        ( void )std::fputs( "\nglobal options, accepted by every verb:\n", stderr );
+        ( void )std::fputs( grab::cli::log_options_usage().data(), stderr );
     }
 
     using Printer = int ( * )( std::FILE*,
@@ -2423,7 +2426,22 @@ namespace
         }
 
         const std::span<char*> args( argv, static_cast<std::size_t>( argc ) );
-        const auto             cli_args = args.subspan( 1 );
+
+        // --log-level / --log-tags / --log-file are global, so they are applied
+        // and stripped before dispatch: every verb parses its own flags
+        // strictly and would reject them as unknown.
+        auto log_options = grab::cli::apply_log_options( args.subspan( 1 ) );
+        if( !log_options.has_value() )
+        {
+            print_error( log_options.error().message );
+            return usageError;
+        }
+        const std::span<char*> cli_args{ log_options->remaining };
+        if( cli_args.empty() )
+        {
+            print_usage();
+            return usageError;
+        }
         const auto* const command = grab::cli::find_command_by_verb( cli_args.front() );
         constexpr std::string_view jsonFlag{ "--json" };
 

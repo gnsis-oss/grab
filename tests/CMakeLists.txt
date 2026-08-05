@@ -33,6 +33,7 @@ add_executable(grab_core_tests
     core/test_capture.cpp
     core/test_context.cpp
     core/test_enum_table.cpp
+    core/test_diag.cpp
     core/test_log.cpp
     core/test_cli_doctor.cpp
     geometry/test_point.cpp

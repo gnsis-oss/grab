@@ -83,6 +83,8 @@ add_library(grab_core STATIC
     src/spi/monitor.cpp
     src/kernel/lifecycle/context.cpp
     src/kernel/routing/doctor.cpp
+    src/kernel/support/log.cpp
+    src/kernel/support/diag.cpp
     src/kernel/events/event_bus.cpp
     src/kernel/identity/id_factory.cpp
     src/kernel/support/posix_open.c
@@ -346,6 +348,7 @@ add_executable(grab_cli
     src/frontends/cli/main.cpp
     src/frontends/cli/feedback_command.cpp
     src/frontends/cli/input_command.cpp
+    src/frontends/cli/log_options.cpp
     src/frontends/cli/overlay_command.cpp
     src/frontends/cli/session_command.cpp
     src/frontends/cli/sketch_command.cpp

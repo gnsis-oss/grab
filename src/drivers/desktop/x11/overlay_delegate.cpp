@@ -10,6 +10,9 @@
 #include "kernel/presentation/overlay_raster.hpp"
 #include "kernel/scheduling/pacing_governor.hpp"
 #include "kernel/scheduling/reactor.hpp"
+#include "kernel/support/diag.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/log_tags.hpp"
 #include "spi/overlay_delegate.hpp"
 
 #include <algorithm>
@@ -2476,13 +2479,25 @@ namespace grab::drivers::desktop::x11
                     return fail( ErrorCode::InternalFault,
                                  "X11 overlay raster is unavailable" );
                 }
-                auto frame = raster_->render( shapes_, monotonic_milliseconds() );
+
+                // The four phases of a frame, each timed separately. Against a
+                // 16.7 ms budget, "the overlay is laggy" is only actionable
+                // once you know which of these spent it.
+                diag::FrameSample                      sample{};
+
+                const diag::Scope<log::Level::Nominal> raster_scope;
+                auto frame    = raster_->render( shapes_, monotonic_milliseconds() );
+                sample.raster = raster_scope.elapsed();
                 if( !frame.has_value() )
                 {
                     return std::unexpected( std::move( frame.error() ) );
                 }
+
                 if( !frame->damage.empty() )
                 {
+                    sample.damaged_pixels = damaged_pixel_count( frame->damage );
+
+                    const diag::Scope<log::Level::Nominal> convert_scope;
                     auto converted = convert_image( frame->pixels,
                                                     probe_.layout,
                                                     probe_.screen.width,
@@ -2491,28 +2506,103 @@ namespace grab::drivers::desktop::x11
                                                     native_storage(),
                                                     frame->damage,
                                                     native_memcpy_eligible_ );
+                    sample.convert = convert_scope.elapsed();
                     if( !converted.has_value() )
                     {
                         return converted;
                     }
+
+                    const diag::Scope<log::Level::Nominal> present_scope;
                     auto presented = shm_.attached ? present_shm( frame->damage )
                                                    : present_put_image( frame->damage );
+                    sample.present = present_scope.elapsed();
                     if( !presented.has_value() )
                     {
                         return presented;
                     }
+
+                    log::verbose(
+                        [&frame, &sample, this]( auto& event )
+                        {
+                            event.tag( log::tags::present )
+                                .value( "damage_rects", frame->damage.size() )
+                                .value( "damage_px", sample.damaged_pixels )
+                                .value( "route", shm_.attached ? "shm" : "put_image" )
+                                .value( "memcpy_fast_path", native_memcpy_eligible_ )
+                                .value( "revision", accepted_revision_.value );
+                        }
+                    );
                 }
-                if( xcb_flush( connection_.get() ) <=
+
+                const diag::Scope<log::Level::Nominal> flush_scope;
+                const bool                             flush_failed =
+                    xcb_flush( connection_.get() ) <=
                     flushFailure ||
-                    xcb_connection_has_error( connection_.get() ) != xcbSuccess )
+                    xcb_connection_has_error( connection_.get() ) != xcbSuccess;
+                sample.flush = flush_scope.elapsed();
+                if( flush_failed )
                 {
                     return fail( ErrorCode::DeviceInaccessible,
                                  "X11 overlay presentation flush failed" );
                 }
+
+                sample.events_drained   = frame_events_drained_;
+                sample.input_to_present = input_to_present_latency();
+                // Cleared so a frame driven by no new input reports zero
+                // latency rather than re-reporting the previous frame's.
+                frame_events_drained_ = 0;
+                frame_input_server_ms_.reset();
+
+                diag::record_frame( sample );
+                if( diag::due_for_report() )
+                {
+                    diag::log_report( diag::report(), log::Level::Verbose );
+                }
+
                 dirty_              = false;
                 surface_presented_  = true;
                 presented_revision_ = accepted_revision_;
                 return {};
+            }
+
+            // Total pixels in the damage set, for the frame report. Damage
+            // rectangles may overlap, so this is an upper bound on the work
+            // done rather than an exact count of distinct pixels — which is
+            // the quantity that matters for "how much did this frame paint".
+            [[nodiscard]]
+            static std::uint32_t
+            damaged_pixel_count( std::span<const geometry::Rectangle> damage ) noexcept
+            {
+                std::uint64_t total = 0;
+                for( const auto& rectangle : damage )
+                {
+                    total += static_cast<std::uint64_t>( rectangle.width ) *
+                             static_cast<std::uint64_t>( rectangle.height );
+                }
+                return static_cast<std::uint32_t>(
+                    std::min<std::uint64_t>( total,
+                                             std::numeric_limits<std::uint32_t>::max() )
+                );
+            }
+
+            // Server-timestamp of the newest input this frame reflects, to now.
+            // Zero when the clock is uncalibrated or no input drove this frame:
+            // reporting a number derived from an uncalibrated server clock
+            // would be confidently wrong.
+            [[nodiscard]]
+            std::chrono::nanoseconds
+            input_to_present_latency() const noexcept
+            {
+                if( !frame_input_server_ms_.has_value() )
+                {
+                    return {};
+                }
+                const auto instant = server_clock_.instant_of( *frame_input_server_ms_ );
+                if( !instant.has_value() )
+                {
+                    return {};
+                }
+                return std::chrono::steady_clock::now() - *instant;
             }
 
             [[nodiscard]]
@@ -2842,6 +2932,23 @@ namespace grab::drivers::desktop::x11
                 );
             }
 
+            // Records that an input event with this X server timestamp is about
+            // to drive the next frame, calibrating the server clock on first
+            // sight. Only events delivered to the overlay window arrive here —
+            // the trail path observes XI raw events elsewhere and does not pass
+            // through this delegate, so `input_to_present` covers interactive
+            // overlay input rather than every source.
+            void
+            note_input_timestamp( std::uint32_t server_ms ) noexcept
+            {
+                if( !server_clock_.calibrated() )
+                {
+                    server_clock_.calibrate( server_ms );
+                }
+                frame_input_server_ms_ = server_ms;
+                ++frame_events_drained_;
+            }
+
             void
             drain_events( bool defer_edit_events )
             {
@@ -2864,6 +2971,7 @@ namespace grab::drivers::desktop::x11
                             event_as<xcb_button_press_event_t>( event.get() );
                         if( button->event == window_ )
                         {
+                            note_input_timestamp( button->time );
                             dispatch_edit_event(
                                 spi::OverlayEditEvent{
                                     .kind = type == XCB_BUTTON_PRESS
@@ -2884,6 +2992,7 @@ namespace grab::drivers::desktop::x11
                             event_as<xcb_motion_notify_event_t>( event.get() );
                         if( motion->event == window_ )
                         {
+                            note_input_timestamp( motion->time );
                             dispatch_edit_event(
                                 spi::OverlayEditEvent{
                                     .kind = spi::OverlayEditEventKind::PointerMotion,
@@ -3230,6 +3339,15 @@ namespace grab::drivers::desktop::x11
             std::uint64_t                                        timer_serial_{};
             std::optional<std::chrono::steady_clock::time_point> scheduled_wakeup_;
             std::chrono::steady_clock::time_point                next_frame_deadline_;
+
+            // Frame instrumentation. server_clock_ ties the X server's 32-bit
+            // millisecond timestamps to steady_clock; without it an event
+            // timestamp and a steady_clock reading share no origin and
+            // subtracting them yields a meaningless latency.
+            diag::ServerClock                                    server_clock_;
+            std::optional<std::uint32_t>                         frame_input_server_ms_;
+            std::uint32_t                                        frame_events_drained_{};
+
             std::optional<Error>                                 last_error_;
             AvailabilityChanged                                  availability_changed_;
             TopologyRefresh                                      topology_refresh_;

@@ -8,6 +8,9 @@
 #include "grab/space.hpp"
 #include "kernel/presentation/overlay_animation.hpp"
 #include "kernel/presentation/overlay_raster.hpp"
+#include "kernel/support/diag.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/log_tags.hpp"
 
 #include <algorithm>
 #include <array>
@@ -22,6 +25,7 @@
 #include <new>
 #include <numbers>
 #include <optional>
+#include <ratio>
 #include <span>
 #include <stdexcept>
 #include <tuple>
@@ -55,6 +59,8 @@ namespace grab::kernel::presentation
             std::numbers::pi_v<double> * static_cast<double>( circleHalves );
         constexpr double minimumSegmentLengthSquared =
             std::numeric_limits<double>::epsilon();
+        // Round-half-up for an already-clamped non-negative channel value.
+        constexpr double roundingBias = 0.5;
 
         struct Contour
         {
@@ -1167,16 +1173,23 @@ namespace grab::kernel::presentation
             return normalized;
         }
 
-        [[nodiscard]]
-        bool
-        intersects_damage( geometry::Rectangle                  bounds,
-                           std::span<const geometry::Rectangle> damage ) noexcept
+        // Collects the damage rectangles `bounds` overlaps. Replaces an any_of
+        // predicate: paint_shapes needs the subset, not just whether one
+        // exists, because handing rasterize_contours the whole damage set makes
+        // its cost shapes x damage.
+        void
+        select_damage( geometry::Rectangle                  bounds,
+                       std::span<const geometry::Rectangle> damage,
+                       std::vector<geometry::Rectangle>&    selected )
         {
-            return std::ranges::any_of( damage,
-                                        [bounds]( geometry::Rectangle rectangle )
-                                        {
-                                            return intersects( bounds, rectangle );
-                                        } );
+            selected.clear();
+            for( const auto rectangle : damage )
+            {
+                if( intersects( bounds, rectangle ) )
+                {
+                    selected.push_back( rectangle );
+                }
+            }
         }
 
         void
@@ -1211,21 +1224,35 @@ namespace grab::kernel::presentation
             }
         }
 
+        // `value` is already clamped to [0, 255] by the caller, so rounding is
+        // an add-and-truncate. std::lround is a libm call that honours the
+        // current rounding mode; four of them per pixel showed up as real time
+        // in the frame instrument.
         [[nodiscard]]
         std::uint8_t
-        channel_byte( double value )
+        channel_byte( double value ) noexcept
         {
             const auto clamped = std::clamp( value, fullyTransparent, channelMaximum );
-            return static_cast<std::uint8_t>( std::lround( clamped ) );
+            return static_cast<std::uint8_t>( clamped + roundingBias );
         }
 
+        // The innermost loop of the whole overlay: called once per covered
+        // pixel per shape per frame.
+        //
+        // It used to index `image.pixels` with std::vector::at() eight times —
+        // four reads and four writes — putting a bounds check and an exception
+        // edge on every channel access. The frame instrument measured ~100 us
+        // to rasterize a single two-point trail segment, which caps the overlay
+        // near 165 shapes against its 16.7 ms budget. The offset is computed
+        // once and asserted once instead; callers derive x and y from extents
+        // already clipped to the image.
         void
         blend_pixel( Image&                image,
                      std::size_t           x,
                      std::size_t           y,
                      const overlay::Color& color,
                      double                opacity,
-                     double                coverage )
+                     double                coverage ) noexcept
         {
             const auto source_alpha =
                 ( static_cast<double>( color.a ) / channelMaximum ) * opacity * coverage;
@@ -1236,28 +1263,31 @@ namespace grab::kernel::presentation
             const auto inverse_alpha = fullyOpaque - source_alpha;
             const auto pixel_offset  = ( y * static_cast<std::size_t>( image.stride ) ) +
                                        ( x * bgraBytesPerPixel );
-            const auto destination   = [&image, pixel_offset]( std::size_t channel )
+            assert( pixel_offset + bgraBytesPerPixel <= image.pixels.size() );
+
+            auto* const pixel = std::next( image.pixels.data(),
+                                           static_cast<std::ptrdiff_t>( pixel_offset ) );
+
+            const auto  blend =
+                [source_alpha, inverse_alpha]( double source, std::byte destination )
             {
-                return static_cast<double>( std::to_integer<std::uint8_t>(
-                    image.pixels.at( pixel_offset + channel )
-                ) );
+                return std::byte{
+                    channel_byte( ( source * source_alpha ) +
+                                  ( static_cast<double>(
+                                        std::to_integer<std::uint8_t>( destination )
+                                    ) *
+                                    inverse_alpha ) )
+                };
             };
-            image.pixels.at( pixel_offset + blueChannelOffset ) = std::byte{
-                channel_byte( ( static_cast<double>( color.b ) * source_alpha ) +
-                              ( destination( blueChannelOffset ) * inverse_alpha ) ),
-            };
-            image.pixels.at( pixel_offset + greenChannelOffset ) = std::byte{
-                channel_byte( ( static_cast<double>( color.g ) * source_alpha ) +
-                              ( destination( greenChannelOffset ) * inverse_alpha ) ),
-            };
-            image.pixels.at( pixel_offset + redChannelOffset ) = std::byte{
-                channel_byte( ( static_cast<double>( color.r ) * source_alpha ) +
-                              ( destination( redChannelOffset ) * inverse_alpha ) ),
-            };
-            image.pixels.at( pixel_offset + alphaChannelOffset ) = std::byte{
-                channel_byte( ( channelMaximum * source_alpha ) +
-                              ( destination( alphaChannelOffset ) * inverse_alpha ) ),
-            };
+
+            pixel[blueChannelOffset] =
+                blend( static_cast<double>( color.b ), pixel[blueChannelOffset] );
+            pixel[greenChannelOffset] =
+                blend( static_cast<double>( color.g ), pixel[greenChannelOffset] );
+            pixel[redChannelOffset] =
+                blend( static_cast<double>( color.r ), pixel[redChannelOffset] );
+            pixel[alphaChannelOffset] =
+                blend( channelMaximum, pixel[alphaChannelOffset] );
         }
 
         void
@@ -1313,6 +1343,11 @@ namespace grab::kernel::presentation
             const auto last  = static_cast<std::size_t>( std::ceil( clipped_end ) );
             const auto sample_weight =
                 fullyOpaque / static_cast<double>( antiAliasSubscanlines );
+            // `first`/`last` derive from clipped_start/clipped_end, which the
+            // caller already clamped to [first_pixel, last_pixel] within the
+            // coverage row. Bounds-checking each accumulation put a branch in
+            // the per-sub-scanline loop, eight of which run per pixel row.
+            assert( last <= coverage.size() );
             for( auto pixel = first; pixel < last; ++pixel )
             {
                 const auto pixel_start = static_cast<double>( pixel );
@@ -1320,7 +1355,7 @@ namespace grab::kernel::presentation
                                      std::max( clipped_start, pixel_start );
                 if( overlap > fullyTransparent )
                 {
-                    coverage.at( pixel ) += overlap * sample_weight;
+                    coverage[pixel] += overlap * sample_weight;
                 }
             }
         }
@@ -1484,9 +1519,12 @@ namespace grab::kernel::presentation
                                              clipped_last_x,
                                              crossings );
                     }
+                    // clipped_last_x is bounded by the image width, and
+                    // row_coverage is sized to it.
+                    assert( clipped_last_x <= row_coverage.size() );
                     for( auto x = clipped_first_x; x < clipped_last_x; ++x )
                     {
-                        const auto coverage = std::clamp( row_coverage.at( x ),
+                        const auto coverage = std::clamp( row_coverage[x],
                                                           fullyTransparent,
                                                           fullyOpaque ) *
                                               horizontal_reveal_coverage( x, reveal );
@@ -1502,7 +1540,8 @@ namespace grab::kernel::presentation
                       std::span<const geometry::Rectangle> damage,
                       Image&                               image,
                       std::vector<double>&                 row_coverage,
-                      std::vector<Crossing>&               crossings )
+                      std::vector<Crossing>&               crossings,
+                      std::vector<geometry::Rectangle>&    shape_damage )
         {
             assert( shapes.size() == geometries.size() );
             auto geometry_iterator = geometries.begin();
@@ -1510,18 +1549,33 @@ namespace grab::kernel::presentation
             {
                 const auto& geometry = *geometry_iterator;
                 ++geometry_iterator;
-                if( !tracked.bounds.has_value() ||
-                    !intersects_damage( *tracked.bounds, damage ) )
+                if( !tracked.bounds.has_value() )
                 {
                     continue;
                 }
+
+                // Hand rasterize_contours only the damage rectangles this shape
+                // actually touches. It iterates every rectangle it is given and
+                // re-runs the full scanline accumulation for each one the shape
+                // overlaps, so passing the whole damage set made the cost
+                // shapes x damage rather than proportional to the pixels
+                // painted. A cursor trail is the pathological case: a 4 s fade
+                // leaves ~200 short segments alive against ~50 damage rects,
+                // i.e. ~11 000 shape/rectangle pairs per frame for 410 contour
+                // points, and the frame budget is 16.7 ms.
+                select_damage( *tracked.bounds, damage, shape_damage );
+                if( shape_damage.empty() )
+                {
+                    continue;
+                }
+
                 if( tracked.record.shape.fill.has_value() )
                 {
                     rasterize_contours( geometry,
                                         tracked.record.shape.fill->color,
                                         tracked.opacity,
                                         tracked.reveal,
-                                        damage,
+                                        shape_damage,
                                         image,
                                         row_coverage,
                                         crossings );
@@ -1538,7 +1592,7 @@ namespace grab::kernel::presentation
                                         tracked.record.shape.stroke->color,
                                         tracked.opacity,
                                         tracked.reveal,
-                                        damage,
+                                        shape_damage,
                                         image,
                                         row_coverage,
                                         crossings );
@@ -1574,11 +1628,14 @@ namespace grab::kernel::presentation
             {
             }
 
-            Image                     image;
-            std::vector<double>       row_coverage;
-            std::vector<Crossing>     crossings;
-            std::vector<TrackedShape> previous_shapes;
-            bool                      full_redraw_required{ true };
+            Image                            image;
+            std::vector<double>              row_coverage;
+            std::vector<Crossing>            crossings;
+            std::vector<TrackedShape>        previous_shapes;
+            // Per-shape subset of the frame's damage. Lives here so it keeps
+            // its capacity across frames instead of allocating per shape.
+            std::vector<geometry::Rectangle> shape_damage;
+            bool                             full_redraw_required{ true };
     };
 
     OverlayRaster::OverlayRaster( std::unique_ptr<Impl> impl ) noexcept :
@@ -1722,12 +1779,45 @@ namespace grab::kernel::presentation
             auto normalized_damage      = normalize_damage( damage );
             impl_->full_redraw_required = true;
             clear_damage( impl_->image, normalized_damage );
+
+            // paint_shapes is O(shapes x damage rects) before it touches a
+            // pixel, and rasterizes a shape once per damage rect it overlaps.
+            // These two counts are what tell you whether a slow frame is
+            // shape-bound or pixel-bound.
+            const diag::Scope<log::Level::Verbose> paint_scope;
             paint_shapes( current_shapes,
                           flattened_shapes,
                           normalized_damage,
                           impl_->image,
                           impl_->row_coverage,
-                          impl_->crossings );
+                          impl_->crossings,
+                          impl_->shape_damage );
+
+            // Shape count, damage count and the time the fill actually took,
+            // on the same record. The scanline fill supersamples every shape
+            // over its own bounding box, so this is the line that shows whether
+            // a slow frame is shape-bound.
+            log::verbose(
+                [&current_shapes, &flattened_shapes, &normalized_damage, &paint_scope](
+                    auto& event
+                )
+                {
+                    std::size_t points = 0;
+                    for( const auto& flattened : flattened_shapes )
+                    {
+                        points += flattened.points.size();
+                    }
+                    const auto paint_ms = std::chrono::duration<double, std::milli>(
+                                              paint_scope.elapsed()
+                    )
+                                              .count();
+                    event.tag( log::tags::raster )
+                        .value( "shapes", current_shapes.size() )
+                        .value( "damage_rects", normalized_damage.size() )
+                        .value( "contour_points", points )
+                        .value( "paint_ms", paint_ms );
+                }
+            );
 
             impl_->previous_shapes      = std::move( current_shapes );
             impl_->full_redraw_required = false;
