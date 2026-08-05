@@ -6,21 +6,27 @@
 #include "grab/query.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
+#include "grab/space.hpp"
 #include "grab/trace.hpp"
 #include "grab/watch.hpp"
 #include "kernel/events/event_bus.hpp"
 #include "kernel/lifecycle/session_errors.hpp"
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/lifecycle/startup_signal.hpp"
+#include "kernel/presentation/cursor_feedback.hpp"
 #include "kernel/presentation/overlay_service.hpp"
 #include "kernel/scheduling/reactor.hpp"
 #include "spi/runtime.hpp"
 
 #include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <expected>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -37,6 +43,30 @@ namespace grab
     {
 
         constexpr std::string_view overlayDispatchStep = "overlay reactor dispatch";
+        constexpr std::string_view cursorFeedbackStartupStep = "start cursor feedback";
+        constexpr std::string_view cursorFeedbackTimerStep =
+            "schedule cursor feedback timer";
+        constexpr auto overlayClosePollInterval = std::chrono::milliseconds{ 16 };
+
+        void
+        stop_cursor_feedback_noexcept(
+            const std::shared_ptr<kernel::presentation::CursorFeedbackObserver>& observer
+        ) noexcept
+        {
+            if( observer == nullptr )
+            {
+                return;
+            }
+            try
+            {
+                [[maybe_unused]]
+                auto stopped = observer->stop();
+            }
+            catch( ... )
+            {
+                return;
+            }
+        }
 
     }    // namespace
 
@@ -343,6 +373,54 @@ namespace grab
         impl_->registry_->cancel_all();
     }
 
+    class CursorFeedback::Impl
+    {
+        public:
+
+            explicit Impl(
+                std::shared_ptr<kernel::presentation::CursorFeedbackObserver> observer
+            ) :
+                observer_{ std::move( observer ) }
+            {
+            }
+
+            ~Impl() noexcept
+            {
+                stop_cursor_feedback_noexcept( observer_ );
+            }
+
+            Impl( const Impl& ) = delete;
+            Impl&
+            operator=( const Impl& ) = delete;
+            Impl( Impl&& )           = delete;
+            Impl&
+            operator=( Impl&& ) = delete;
+
+            std::shared_ptr<kernel::presentation::CursorFeedbackObserver> observer_;
+    };
+
+    CursorFeedback::CursorFeedback( std::unique_ptr<Impl> impl ) noexcept :
+        impl_{ std::move( impl ) }
+    {
+    }
+
+    CursorFeedback::~CursorFeedback()                           = default;
+
+    CursorFeedback::CursorFeedback( CursorFeedback&& ) noexcept = default;
+
+    CursorFeedback&
+    CursorFeedback::operator=( CursorFeedback&& ) noexcept = default;
+
+    Result<void>
+    CursorFeedback::status() const
+    {
+        if( impl_ == nullptr || impl_->observer_ == nullptr )
+        {
+            return {};
+        }
+        return impl_->observer_->status();
+    }
+
     class Session::Impl
     {
         public:
@@ -416,6 +494,33 @@ namespace grab
                 overlay_ = std::move( overlay );
             }
 
+            [[nodiscard]]
+            Result<void>
+            start_manual_observation();
+
+            void
+            stop_manual_observation() noexcept;
+
+            [[nodiscard]]
+            Result<void>
+            acquire_feedback_observation();
+
+            [[nodiscard]]
+            Result<void>
+            release_feedback_observation();
+
+            [[nodiscard]]
+            Result<std::shared_ptr<kernel::presentation::CursorFeedbackObserver>>
+            start_feedback( CursorFeedbackConfig config,
+                            Overlay&             overlay );
+
+            [[nodiscard]]
+            kernel::presentation::CursorFeedbackObserverHooks
+            feedback_hooks( Overlay& overlay );
+
+            void
+            stop_feedback() noexcept;
+
         private:
 
             [[nodiscard]]
@@ -432,6 +537,12 @@ namespace grab
             finish_close_on_reactor() noexcept;
 
             void
+            stop_feedback_observation_if_unused() noexcept;
+
+            void
+            reset_core() noexcept;
+
+            void
                                                             join_thread() noexcept;
 
             SessionOptions                                  options_;
@@ -443,6 +554,14 @@ namespace grab
             std::unique_ptr<kernel::lifecycle::SessionCore> core_;
             std::unique_ptr<Overlay>                        overlay_;
             std::atomic_bool                                open_{ false };
+            std::atomic_bool                                reactor_running_{ false };
+            std::mutex                                      observation_mutex_;
+            bool                                            manual_observation_{};
+            std::size_t feedback_observation_count_{};
+            std::mutex  feedback_mutex_;
+            bool        feedback_closing_{};
+            std::vector<std::weak_ptr<kernel::presentation::CursorFeedbackObserver>>
+                feedback_;
     };
 
     Session::Impl::Impl( SessionOptions options ) :
@@ -468,7 +587,10 @@ namespace grab
             reactor_thread_ = std::thread(
                 [this, startup]
                 {
-                    startup->report( run_reactor() );
+                    reactor_running_.store( true, std::memory_order_release );
+                    auto result = run_reactor();
+                    reactor_running_.store( false, std::memory_order_release );
+                    startup->report( std::move( result ) );
                 }
             );
         }
@@ -572,14 +694,14 @@ namespace grab
             reactor_.stop();
         }
         join_thread();
-        core_.reset();
+        reset_core();
     }
 
     void
     Session::Impl::finish_close_on_reactor() noexcept
     {
         close_overlay_on_reactor();
-        core_.reset();
+        reset_core();
         reactor_.stop();
     }
 
@@ -598,13 +720,365 @@ namespace grab
     grab::Result<void>
     Session::Impl::post( std::function<void()> fn )
     {
-        if( !is_open() )
+        if( !is_open() || !reactor_running_.load( std::memory_order_acquire ) )
         {
             return std::unexpected( kernel::lifecycle::session_closed_error() );
         }
 
         reactor_.post( std::move( fn ) );
         return {};
+    }
+
+    Result<void>
+    Session::Impl::start_manual_observation()
+    {
+        const std::scoped_lock observation_lock{ observation_mutex_ };
+        if( !is_open() )
+        {
+            return std::unexpected( kernel::lifecycle::session_closed_error() );
+        }
+        if( core_ == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                               "session has no composed runtime for observation" );
+        }
+        if( manual_observation_ )
+        {
+            return {};
+        }
+        if( feedback_observation_count_ == 0U )
+        {
+            auto started = core_->start_observation( grab::OperationContext{} );
+            if( !started.has_value() )
+            {
+                return started;
+            }
+        }
+        manual_observation_ = true;
+        return {};
+    }
+
+    void
+    Session::Impl::stop_manual_observation() noexcept
+    {
+        try
+        {
+            const std::scoped_lock observation_lock{ observation_mutex_ };
+            if( !manual_observation_ )
+            {
+                return;
+            }
+            manual_observation_ = false;
+            if( feedback_observation_count_ == 0U && core_ != nullptr )
+            {
+                core_->stop_observation();
+            }
+        }
+        catch( ... )
+        {
+            return;
+        }
+    }
+
+    Result<void>
+    Session::Impl::acquire_feedback_observation()
+    {
+        try
+        {
+            const std::scoped_lock observation_lock{ observation_mutex_ };
+            if( !is_open() )
+            {
+                return std::unexpected( kernel::lifecycle::session_closed_error() );
+            }
+            if( core_ == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                                   "session has no composed runtime for observation" );
+            }
+            if( feedback_observation_count_ ==
+                std::numeric_limits<decltype( feedback_observation_count_ )>::max() )
+            {
+                return grab::fail( grab::ErrorCode::Overflowed,
+                                   "cursor feedback observation count is exhausted" );
+            }
+            if( !manual_observation_ && feedback_observation_count_ == 0U )
+            {
+                try
+                {
+                    auto started = core_->start_observation( grab::OperationContext{} );
+                    if( !started.has_value() )
+                    {
+                        return started;
+                    }
+                }
+                catch( const std::exception& exception )
+                {
+                    core_->stop_observation();
+                    return std::unexpected(
+                        kernel::lifecycle::exception_error( cursorFeedbackStartupStep,
+                                                            exception )
+                    );
+                }
+                catch( ... )
+                {
+                    core_->stop_observation();
+                    return std::unexpected( kernel::lifecycle::unknown_exception_error(
+                        cursorFeedbackStartupStep
+                    ) );
+                }
+            }
+            ++feedback_observation_count_;
+            return {};
+        }
+        catch( const std::exception& exception )
+        {
+            return std::unexpected(
+                kernel::lifecycle::exception_error( cursorFeedbackStartupStep,
+                                                    exception )
+            );
+        }
+        catch( ... )
+        {
+            return std::unexpected(
+                kernel::lifecycle::unknown_exception_error( cursorFeedbackStartupStep )
+            );
+        }
+    }
+
+    Result<void>
+    Session::Impl::release_feedback_observation()
+    {
+        try
+        {
+            {
+                const std::scoped_lock observation_lock{ observation_mutex_ };
+                if( feedback_observation_count_ == 0U )
+                {
+                    return {};
+                }
+                --feedback_observation_count_;
+                if( feedback_observation_count_ !=
+                    0U ||
+                    manual_observation_ ||
+                    core_ == nullptr )
+                {
+                    return {};
+                }
+            }
+
+            return post(
+                [this]
+                {
+                    stop_feedback_observation_if_unused();
+                }
+            );
+        }
+        catch( const std::exception& exception )
+        {
+            return std::unexpected(
+                kernel::lifecycle::exception_error( cursorFeedbackStartupStep,
+                                                    exception )
+            );
+        }
+        catch( ... )
+        {
+            return std::unexpected(
+                kernel::lifecycle::unknown_exception_error( cursorFeedbackStartupStep )
+            );
+        }
+    }
+
+    void
+    Session::Impl::stop_feedback_observation_if_unused() noexcept
+    {
+        try
+        {
+            const std::scoped_lock observation_lock{ observation_mutex_ };
+            if( feedback_observation_count_ ==
+                0U &&
+                !manual_observation_ &&
+                core_ != nullptr )
+            {
+                core_->stop_observation();
+            }
+        }
+        catch( ... )
+        {
+            return;
+        }
+    }
+
+    kernel::presentation::CursorFeedbackObserverHooks
+    Session::Impl::feedback_hooks( Overlay& overlay_facade )
+    {
+        return kernel::presentation::CursorFeedbackObserverHooks{
+            .bus = &bus(),
+            .post =
+                [this]( std::function<void()> fn )
+            {
+                return post( std::move( fn ) );
+            },
+            .schedule = [this]( std::chrono::nanoseconds delay,
+                                std::function<void()>    callback ) -> Result<void>
+            {
+                if( !reactor_running_.load( std::memory_order_acquire ) )
+                {
+                    return std::unexpected( kernel::lifecycle::session_closed_error() );
+                }
+                try
+                {
+                    static_cast<void>( reactor().add_timer( delay,
+                                                            std::move( callback ) ) );
+                    return {};
+                }
+                catch( const std::exception& exception )
+                {
+                    return std::unexpected(
+                        kernel::lifecycle::exception_error( cursorFeedbackTimerStep,
+                                                            exception )
+                    );
+                }
+                catch( ... )
+                {
+                    return std::unexpected( kernel::lifecycle::unknown_exception_error(
+                        cursorFeedbackTimerStep
+                    ) );
+                }
+            },
+            .clock =
+                []
+            {
+                return std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()
+                );
+            },
+            .add_shape =
+                [&overlay_facade]( overlay::Shape shape )
+            {
+                return overlay_facade.add( std::move( shape ) );
+            },
+            .remove_shape =
+                [&overlay_facade]( overlay::ShapeId id )
+            {
+                return overlay_facade.remove( id );
+            },
+            .on_reactor_thread =
+                [this]
+            {
+                return std::this_thread::get_id() == reactor_thread_id();
+            },
+            .reactor_alive =
+                [this]
+            {
+                return reactor_running_.load( std::memory_order_acquire );
+            },
+            .release_observation = [this]() -> Result<void>
+            {
+                return release_feedback_observation();
+            },
+        };
+    }
+
+    Result<std::shared_ptr<kernel::presentation::CursorFeedbackObserver>>
+    Session::Impl::start_feedback( CursorFeedbackConfig config,
+                                   Overlay&             overlay_facade )
+    {
+        const std::scoped_lock feedback_lock{ feedback_mutex_ };
+        if( feedback_closing_ || !is_open() )
+        {
+            return std::unexpected( kernel::lifecycle::session_closed_error() );
+        }
+
+        bool observation_acquired = false;
+        std::shared_ptr<kernel::presentation::CursorFeedbackObserver> observer;
+        try
+        {
+            auto observation = acquire_feedback_observation();
+            if( !observation.has_value() )
+            {
+                return std::unexpected( std::move( observation.error() ) );
+            }
+            observation_acquired = true;
+
+            auto started         = kernel::presentation::CursorFeedbackObserver::start(
+                config,
+                feedback_hooks( overlay_facade )
+            );
+            if( !started.has_value() )
+            {
+                [[maybe_unused]]
+                auto released        = release_feedback_observation();
+                observation_acquired = false;
+                return std::unexpected( std::move( started.error() ) );
+            }
+
+            observer             = std::move( *started );
+            observation_acquired = false;
+            std::erase_if( feedback_,
+                           []( const auto& candidate )
+                           {
+                               return candidate.expired();
+                           } );
+            feedback_.push_back( observer );
+            return observer;
+        }
+        catch( const std::exception& exception )
+        {
+            if( observer != nullptr )
+            {
+                stop_cursor_feedback_noexcept( observer );
+            }
+            else if( observation_acquired )
+            {
+                [[maybe_unused]]
+                auto released = release_feedback_observation();
+            }
+            return std::unexpected(
+                kernel::lifecycle::exception_error( cursorFeedbackStartupStep,
+                                                    exception )
+            );
+        }
+        catch( ... )
+        {
+            if( observer != nullptr )
+            {
+                stop_cursor_feedback_noexcept( observer );
+            }
+            else if( observation_acquired )
+            {
+                [[maybe_unused]]
+                auto released = release_feedback_observation();
+            }
+            return std::unexpected(
+                kernel::lifecycle::unknown_exception_error( cursorFeedbackStartupStep )
+            );
+        }
+    }
+
+    void
+    Session::Impl::stop_feedback() noexcept
+    {
+        std::vector<std::weak_ptr<kernel::presentation::CursorFeedbackObserver>>
+            observers;
+        try
+        {
+            {
+                const std::scoped_lock feedback_lock{ feedback_mutex_ };
+                feedback_closing_ = true;
+                observers.swap( feedback_ );
+            }
+            for( const auto& candidate : observers )
+            {
+                if( auto observer = candidate.lock() )
+                {
+                    stop_cursor_feedback_noexcept( observer );
+                }
+            }
+        }
+        catch( ... )
+        {
+            return;
+        }
     }
 
     void
@@ -615,6 +1089,11 @@ namespace grab
             return;
         }
         if( std::this_thread::get_id() == reactor_thread_.get_id() )
+        {
+            core_->close_overlay();
+            return;
+        }
+        if( !reactor_running_.load( std::memory_order_acquire ) )
         {
             core_->close_overlay();
             return;
@@ -632,13 +1111,41 @@ namespace grab
                     completion->set_value();
                 }
             );
-            completed.wait();
+            while( completed.wait_for( overlayClosePollInterval ) !=
+                   std::future_status::ready )
+            {
+                if( !reactor_running_.load( std::memory_order_acquire ) )
+                {
+                    core_->close_overlay();
+                    return;
+                }
+            }
         }
         catch( ... )
         {
             // Session teardown must still release the lease if dispatch setup
             // itself cannot allocate. Runtime shutdown remains best-effort.
             core_->close_overlay();
+        }
+    }
+
+    void
+    Session::Impl::reset_core() noexcept
+    {
+        std::unique_ptr<kernel::lifecycle::SessionCore> core;
+        try
+        {
+            {
+                const std::scoped_lock observation_lock{ observation_mutex_ };
+                manual_observation_         = false;
+                feedback_observation_count_ = 0U;
+                core                        = std::move( core_ );
+            }
+            core.reset();
+        }
+        catch( ... )
+        {
+            return;
         }
     }
 
@@ -714,6 +1221,7 @@ namespace grab
     void
     Session::close() noexcept
     {
+        impl_->stop_feedback();
         if( auto* const overlay = impl_->overlay_facade() )
         {
             overlay->detach();
@@ -798,6 +1306,49 @@ namespace grab
         return facade;
     }
 
+    Result<CursorFeedback>
+    Session::cursor_feedback( CursorFeedbackConfig config )
+    {
+        auto valid = kernel::presentation::validate_cursor_feedback_config( config );
+        if( !valid.has_value() )
+        {
+            return std::unexpected( std::move( valid.error() ) );
+        }
+        auto overlay_result = overlay();
+        if( !overlay_result.has_value() )
+        {
+            return std::unexpected( std::move( overlay_result.error() ) );
+        }
+
+        auto observer = impl_->start_feedback( config, **overlay_result );
+        if( !observer.has_value() )
+        {
+            return std::unexpected( std::move( observer.error() ) );
+        }
+
+        try
+        {
+            return CursorFeedback{
+                std::make_unique<CursorFeedback::Impl>( std::move( *observer ) )
+            };
+        }
+        catch( const std::exception& exception )
+        {
+            stop_cursor_feedback_noexcept( *observer );
+            return std::unexpected(
+                kernel::lifecycle::exception_error( cursorFeedbackStartupStep,
+                                                    exception )
+            );
+        }
+        catch( ... )
+        {
+            stop_cursor_feedback_noexcept( *observer );
+            return std::unexpected(
+                kernel::lifecycle::unknown_exception_error( cursorFeedbackStartupStep )
+            );
+        }
+    }
+
     grab::Result<std::unique_ptr<Session>>
     Session::open_owning_runtime( std::unique_ptr<grab::spi::Runtime> runtime )
     {
@@ -820,22 +1371,13 @@ namespace grab
     grab::Result<void>
     Session::start_observation()
     {
-        auto* const core = impl_->core();
-        if( core == nullptr )
-        {
-            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
-                               "session has no composed runtime for observation" );
-        }
-        return core->start_observation( grab::OperationContext{} );
+        return impl_->start_manual_observation();
     }
 
     void
     Session::stop_observation() noexcept
     {
-        if( auto* const core = impl_->core() )
-        {
-            core->stop_observation();
-        }
+        impl_->stop_manual_observation();
     }
 
     grab::Result<void>
