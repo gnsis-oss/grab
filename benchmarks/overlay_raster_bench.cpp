@@ -84,10 +84,33 @@ namespace
     constexpr double largeShapeHeight = 1'600.0;
     constexpr double growthPerFrame   = 2.0;
 
+    // What batching would produce: the same 1200 samples carried by a bounded
+    // number of polylines instead of one shape each.
+    constexpr std::size_t batchedTrailShapes = 32U;
+    constexpr std::size_t batchedTrailPoints = 38U;
+
     constexpr std::size_t smallTrailShapes  = 64U;
     constexpr std::size_t mediumTrailShapes = 150U;
     constexpr std::size_t largeTrailShapes  = 600U;
     constexpr std::size_t hugeTrailShapes   = 1'200U;
+
+    // A pointer that reaches an edge turns round; it does not teleport to the
+    // other side. Folding rather than wrapping matters here: a wrapped sample
+    // makes one segment as wide as the screen, which is a property of the
+    // synthetic path and not of anything grab does.
+    [[nodiscard]]
+    double
+    reflected( double value,
+               double range )
+    {
+        const auto period = range * halves;
+        auto       folded = std::fmod( value, period );
+        if( folded < 0.0 )
+        {
+            folded += period;
+        }
+        return folded <= range ? folded : period - folded;
+    }
 
     [[nodiscard]]
     grab::SpacePoint
@@ -112,6 +135,36 @@ namespace
         commands.reserve( 2U );
         commands.emplace_back( grab::overlay::MoveTo{ .point = from } );
         commands.emplace_back( grab::overlay::LineTo{ .point = to } );
+        return grab::overlay::Shape{
+            .geometry =
+                grab::overlay::Path{
+                                    .commands = std::move( commands ),
+                                    .closed   = false,
+                                    },
+            .stroke =
+                grab::overlay::StrokeStyle{
+                                    .color    = benchColor,
+                                    .width_px = trailStrokeWidth,
+                                    },
+            .fill     = std::nullopt,
+            .lifetime = grab::overlay::Fade{ .duration = trailFade },
+            .band     = grab::overlay::Band::Trail,
+        };
+    }
+
+    // One stroked polyline: a batch of consecutive motion samples sharing a
+    // single fade, which is what a batching TrailAnimator would emit.
+    [[nodiscard]]
+    grab::overlay::Shape
+    trail_polyline( std::span<const grab::SpacePoint> points )
+    {
+        std::vector<grab::overlay::PathCommand> commands;
+        commands.reserve( points.size() );
+        commands.emplace_back( grab::overlay::MoveTo{ .point = points.front() } );
+        for( const auto point : points.subspan( 1U ) )
+        {
+            commands.emplace_back( grab::overlay::LineTo{ .point = point } );
+        }
         return grab::overlay::Shape{
             .geometry =
                 grab::overlay::Path{
@@ -301,10 +354,12 @@ namespace
         const auto sample_point = [step_scale]( std::size_t index )
         {
             const auto offset = static_cast<double>( index );
-            const auto x = trailOriginX + std::fmod( offset * trailStepX * step_scale,
-                                                     surfaceWidth - trailOriginX * 2.0 );
-            const auto y = trailOriginY + std::fmod( offset * trailStepY * step_scale,
-                                                     surfaceHeight - trailOriginY * 2.0 );
+            const auto x =
+                trailOriginX + reflected( offset * trailStepX * step_scale,
+                                          surfaceWidth - ( trailOriginX * halves ) );
+            const auto y =
+                trailOriginY + reflected( offset * trailStepY * step_scale,
+                                          surfaceHeight - ( trailOriginY * halves ) );
             return point_at( x, y );
         };
 
@@ -353,6 +408,67 @@ namespace
                                                  sample_point( index + 1U ) ),
                     .started_at = now,
                 } );
+            }
+        );
+    }
+
+    [[nodiscard]]
+    Result
+    batched_trail_scenario( std::string_view name,
+                            std::size_t      frames )
+    {
+        auto raster = OverlayRaster::create( benchSurface );
+        if( !raster.has_value() )
+        {
+            std::fputs( "raster creation failed\n", stderr );
+            std::exit( EXIT_FAILURE );
+        }
+        std::vector<grab::overlay::ShapeRecord> scene;
+
+        const auto sample_point = []( std::size_t index )
+        {
+            const auto offset = static_cast<double>( index );
+            const auto x =
+                trailOriginX +
+                reflected( offset * trailStepX, surfaceWidth - ( trailOriginX * halves ) );
+            const auto y =
+                trailOriginY +
+                reflected( offset * trailStepY,
+                           surfaceHeight - ( trailOriginY * halves ) );
+            return point_at( x, y );
+        };
+
+        return run_scenario(
+            name,
+            *raster,
+            scene,
+            frames,
+            [&sample_point]( std::vector<grab::overlay::ShapeRecord>& shapes,
+                             std::size_t                              frame,
+                             std::chrono::milliseconds                now )
+            {
+                shapes.clear();
+                for( std::size_t batch{}; batch < batchedTrailShapes; ++batch )
+                {
+                    std::vector<grab::SpacePoint> points;
+                    points.reserve( batchedTrailPoints );
+                    const auto first = frame + ( batch * batchedTrailPoints );
+                    for( std::size_t step{}; step < batchedTrailPoints; ++step )
+                    {
+                        points.push_back( sample_point( first + step ) );
+                    }
+                    shapes.push_back( grab::overlay::ShapeRecord{
+                        .id =
+                            grab::overlay::ShapeId{
+                                                   .slot = static_cast<std::uint32_t>( batch ),
+                                                   },
+                        .shape = trail_polyline( points ),
+                        .started_at =
+                            now - ( ( trailFade *
+                                      static_cast<std::int64_t>( batch ) ) /
+                                    static_cast<std::int64_t>( batchedTrailShapes ) ),
+                    } );
+                }
             }
         );
     }
@@ -519,6 +635,10 @@ main( int    argc,
                                    largeTrailShapes,
                                    fastPointerScale,
                                    frames ) );
+    }
+    if( wanted( "trail-batched" ) )
+    {
+        print_row( batched_trail_scenario( "trail-batched", frames ) );
     }
     if( wanted( "big-rect-fill" ) )
     {

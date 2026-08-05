@@ -50,18 +50,51 @@ namespace grab::kernel::presentation
         constexpr double        antiAliasDamageMargin  = 1.0;
         constexpr std::size_t   antiAliasSubscanlines  = 8U;
         constexpr std::size_t   bezierSubdivisionSteps = 32U;
-        constexpr std::size_t   ellipseSamples         = 128U;
-        constexpr std::size_t   roundHalfCircleSamples = 16U;
         constexpr std::size_t   circleHalves           = 2U;
-        constexpr std::size_t roundCircleSamples = roundHalfCircleSamples * circleHalves;
-        constexpr double      roundAngularStepRadians =
-            std::numbers::pi_v<double> / static_cast<double>( roundHalfCircleSamples );
-        constexpr double fullCircleRadians =
+        constexpr double        fullCircleRadians =
             std::numbers::pi_v<double> * static_cast<double>( circleHalves );
-        constexpr double minimumSegmentLengthSquared =
+
+        // How far a flattened arc may sit from the curve it stands in for.
+        // A fifth of a pixel is below what the 8x sub-scanline coverage can
+        // resolve, so the chord count derived from it is the smallest that
+        // still costs nothing visually.
+        constexpr double      maximumChordDeviationPx = 0.05;
+        constexpr std::size_t minimumArcChords        = 8U;
+        constexpr std::size_t maximumArcChords        = 256U;
+        constexpr double      minimumSegmentLengthSquared =
             std::numeric_limits<double>::epsilon();
         // Round-half-up for an already-clamped non-negative channel value.
         constexpr double roundingBias = 0.5;
+
+        // Chords for a circular arc of `radius`, from the deviation budget:
+        // a regular n-gon's worst error is radius * (1 - cos(pi / n)).
+        //
+        // Round caps and joins used to be a fixed 32 chords whatever the stroke
+        // width, and an ellipse a fixed 128 whatever its size. Both are wrong
+        // in both directions. A trail is a 3-pixel stroke — a 1.5-pixel radius,
+        // where 8 chords are already accurate to a tenth of a pixel — and it
+        // pays for a round join at every sample, each chord becoming an edge
+        // that is sorted once and tested eight times per row it spans. In the
+        // other direction a 1500-pixel ellipse radius at 128 chords is visibly
+        // faceted at the extremes.
+        [[nodiscard]]
+        std::size_t
+        arc_chord_count( double radius ) noexcept
+        {
+            if( !( radius > 0.0 ) )
+            {
+                return minimumArcChords;
+            }
+            const auto ratio = maximumChordDeviationPx / radius;
+            if( ratio >= 1.0 )
+            {
+                return minimumArcChords;
+            }
+            const auto chords = std::numbers::pi_v<double> / std::acos( 1.0 - ratio );
+            return std::clamp( static_cast<std::size_t>( std::ceil( chords ) ),
+                               minimumArcChords,
+                               maximumArcChords );
+        }
 
         struct Contour
         {
@@ -549,16 +582,19 @@ namespace grab::kernel::presentation
                 return {};
             }
             FlatContours result;
-            result.points.reserve( ellipseSamples );
+            // The wider radius sets the accuracy the other one inherits.
+            const auto   samples =
+                arc_chord_count( std::max( ellipse.radius_x, ellipse.radius_y ) );
+            result.points.reserve( samples );
             result.contours.push_back( Contour{
-                .count  = ellipseSamples,
+                .count  = samples,
                 .closed = true,
             } );
-            for( std::size_t sample{}; sample < ellipseSamples; ++sample )
+            for( std::size_t sample{}; sample < samples; ++sample )
             {
                 const auto angle = fullCircleRadians *
                                    static_cast<double>( sample ) /
-                                   static_cast<double>( ellipseSamples );
+                                   static_cast<double>( samples );
                 result.points.push_back( geometry::PointF{
                     .x = ellipse.center.x + ( ellipse.radius_x * std::cos( angle ) ),
                     .y = ellipse.center.y + ( ellipse.radius_y * std::sin( angle ) ),
@@ -708,12 +744,13 @@ namespace grab::kernel::presentation
                               geometry::PointF center,
                               double           radius )
         {
-            const auto first = destination.points.size();
-            destination.points.reserve( first + roundCircleSamples );
-            for( std::size_t sample{}; sample < roundCircleSamples; ++sample )
+            const auto first  = destination.points.size();
+            const auto chords = arc_chord_count( radius );
+            const auto step   = fullCircleRadians / static_cast<double>( chords );
+            destination.points.reserve( first + chords );
+            for( std::size_t sample{}; sample < chords; ++sample )
             {
-                const auto angle =
-                    static_cast<double>( sample ) * roundAngularStepRadians;
+                const auto angle = static_cast<double>( sample ) * step;
                 destination.points.push_back( geometry::PointF{
                     .x = center.x + ( radius * std::cos( angle ) ),
                     .y = center.y + ( radius * std::sin( angle ) ),
@@ -721,7 +758,7 @@ namespace grab::kernel::presentation
             }
             destination.contours.push_back( Contour{
                 .first  = first,
-                .count  = roundCircleSamples,
+                .count  = chords,
                 .closed = true,
             } );
         }
