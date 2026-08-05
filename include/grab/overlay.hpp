@@ -1,5 +1,6 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "grab/geometry/rectangle.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
 
@@ -307,6 +308,33 @@ namespace grab
             [[nodiscard]]
             Result<CoordinateSpaceId>
             space();
+
+            // Makes the overlay consume pointer input over its whole surface
+            // instead of passing it through to whatever is underneath.
+            //
+            // An overlay is click-through by default, which is right for
+            // annotation (a trail, a highlight) and wrong for a modal tool that
+            // draws from the pointer. Such a tool learns about input from the
+            // observation stream, which the server delivers regardless of who
+            // owns the pointer — so without capture the same press ALSO reaches
+            // the window below and, on a desktop, starts its rubber-band
+            // selection alongside yours.
+            //
+            // Arm this when the tool becomes active, NOT when the button goes
+            // down: by then the press has already been delivered elsewhere, and
+            // grabbing afterwards only strands whatever it started.
+            //
+            // THE CALLER OWNS THE CAPTURE. A pointer grab that outlives its
+            // owner freezes the user's desktop, so pair this with
+            // release_pointer() on every exit path including the error ones.
+            [[nodiscard]]
+            Result<void>
+            capture_pointer();
+
+            // Idempotent and safe when nothing is captured.
+            [[nodiscard]]
+            Result<void>
+            release_pointer();
 
         private:
 

@@ -137,6 +137,18 @@ namespace
                         ++end_edit_calls;
                         return {};
                     },
+                    .capture_pointer = [this]() -> grab::Result<void>
+                    {
+                        ++capture_calls;
+                        captured = true;
+                        return {};
+                    },
+                    .release_pointer = [this]() -> grab::Result<void>
+                    {
+                        ++release_calls;
+                        captured = false;
+                        return {};
+                    },
                 };
             }
 
@@ -147,6 +159,9 @@ namespace
             std::vector<grab::overlay::Shape>                updated_shapes;
             std::vector<grab::overlay::ShapeId>              removed_ids;
             std::vector<std::vector<grab::overlay::ShapeId>> edit_sets;
+            std::size_t                                      capture_calls{};
+            std::size_t                                      release_calls{};
+            bool                                             captured{};
             std::size_t                                      begin_edit_calls{};
             std::size_t                                      end_edit_calls{};
     };
@@ -298,6 +313,102 @@ namespace
         ASSERT_TRUE( controller.consume( key_event( editKey ) ).has_value() );
         EXPECT_FALSE( controller.editing() );
         EXPECT_EQ( recorder.end_edit_calls, oneCall );
+    }
+
+    // Sketch learns about a press from the observation stream, which the X
+    // server delivers to non-grabbing clients regardless of who owns the
+    // pointer. If the overlay stays click-through, that same press ALSO reaches
+    // the desktop underneath, and GNOME starts its own rubber-band selection
+    // alongside grab's -- two rubber bands for one drag.
+    //
+    // Capture has to be armed on entering a draw kind, not on button-press: by
+    // then the press has already been delivered elsewhere.
+    TEST( SketchCommand,
+          SelectingADrawKindCapturesThePointerBeforeAnyButtonPress )
+    {
+        BackendRecorder                recorder;
+        const grab::cli::SketchOptions options{};
+        grab::cli::SketchController    controller{ options, recorder.backend() };
+
+        EXPECT_FALSE( recorder.captured );
+        EXPECT_EQ( recorder.capture_calls, noCalls );
+
+        ASSERT_TRUE( controller.consume( key_event( rectangleKey ) ).has_value() );
+
+        EXPECT_TRUE( recorder.captured );
+        EXPECT_TRUE( controller.capturing() );
+        EXPECT_EQ( recorder.capture_calls, oneCall );
+
+        // Still captured once the stroke actually starts, and not re-armed.
+        ASSERT_TRUE( controller
+                         .consume( button_event( grab::EventKind::MouseButtonDown,
+                                                 origin ) )
+                         .has_value() );
+        EXPECT_TRUE( recorder.captured );
+        EXPECT_EQ( recorder.capture_calls, oneCall );
+    }
+
+    TEST( SketchCommand,
+          EscapeReleasesTheCapturedPointer )
+    {
+        BackendRecorder                recorder;
+        const grab::cli::SketchOptions options{};
+        grab::cli::SketchController    controller{ options, recorder.backend() };
+
+        ASSERT_TRUE( controller.consume( key_event( rectangleKey ) ).has_value() );
+        ASSERT_TRUE( recorder.captured );
+
+        ASSERT_TRUE( controller.consume( key_event( escapeKey ) ).has_value() );
+
+        EXPECT_FALSE( recorder.captured );
+        EXPECT_FALSE( controller.capturing() );
+        EXPECT_EQ( recorder.release_calls, oneCall );
+    }
+
+    // Edit mode installs its own input region over the editable shapes, so
+    // draw mode's full-surface capture must come down first rather than the two
+    // fighting over the same region.
+    TEST( SketchCommand,
+          SwitchingToEditModeReleasesTheDrawCapture )
+    {
+        BackendRecorder                recorder;
+        const grab::cli::SketchOptions options{};
+        grab::cli::SketchController    controller{ options, recorder.backend() };
+
+        ASSERT_TRUE( controller.consume( key_event( rectangleKey ) ).has_value() );
+        ASSERT_TRUE( recorder.captured );
+        commit_rectangle( controller, origin, firstExtent );
+
+        ASSERT_TRUE( controller.consume( key_event( editKey ) ).has_value() );
+
+        EXPECT_TRUE( controller.editing() );
+        EXPECT_FALSE( recorder.captured );
+        EXPECT_FALSE( controller.capturing() );
+        EXPECT_EQ( recorder.release_calls, oneCall );
+    }
+
+    // A capture that fails to install must not leave the controller believing
+    // it holds one, and must still have issued the release: a pointer grab the
+    // owner has forgotten about freezes the user's whole desktop.
+    TEST( SketchCommand,
+          AFailedCaptureIsReleasedAndReported )
+    {
+        BackendRecorder recorder;
+        auto            backend = recorder.backend();
+        backend.capture_pointer = [&recorder]() -> grab::Result<void>
+        {
+            ++recorder.capture_calls;
+            return grab::fail( grab::ErrorCode::CapabilityUnavailable, "no compositor" );
+        };
+        const grab::cli::SketchOptions options{};
+        grab::cli::SketchController    controller{ options, std::move( backend ) };
+
+        const auto result = controller.consume( key_event( rectangleKey ) );
+
+        ASSERT_FALSE( result.has_value() );
+        EXPECT_EQ( result.error().code, grab::ErrorCode::CapabilityUnavailable );
+        EXPECT_FALSE( controller.capturing() );
+        EXPECT_EQ( recorder.release_calls, oneCall );
     }
 
     TEST( SketchCommand,

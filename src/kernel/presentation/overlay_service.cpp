@@ -8,6 +8,8 @@
 #include "kernel/presentation/overlay_scene.hpp"
 #include "kernel/presentation/overlay_service.hpp"
 #include "kernel/presentation/space_graph.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/log_tags.hpp"
 #include "spi/overlay_delegate.hpp"
 #include "spi/runtime.hpp"
 
@@ -947,6 +949,109 @@ namespace grab::kernel::presentation
         }
         invoke_notification( std::move( notification ) );
         return result;
+    }
+
+    Result<void>
+    OverlayService::capture_pointer()
+    {
+        const std::scoped_lock lock{ mutex_ };
+        if( delegate_ == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "overlay has no delegate to capture the pointer with" );
+        }
+        if( pointer_captured_ )
+        {
+            return {};
+        }
+
+        // A zero-sized surface means the delegate cannot report its extent.
+        // Installing an empty region would be click-through, i.e. silently the
+        // opposite of a capture, so refuse instead.
+        const auto bounds = delegate_->surface_bounds();
+        if( bounds.width == 0U || bounds.height == 0U )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "overlay delegate does not report a surface extent" );
+        }
+
+        const std::array<geometry::Rectangle, 1> region{ bounds };
+        auto installed = delegate_->set_input_region( region );
+        if( !installed.has_value() )
+        {
+            return installed;
+        }
+
+        // Treat a failed grab as possibly installed: the teardown path must
+        // still issue the ungrab, because a pointer grab left behind freezes
+        // the user's whole desktop. This mirrors OverlayEditSession.
+        pointer_captured_ = true;
+        auto grabbed      = delegate_->grab_pointer();
+        if( !grabbed.has_value() )
+        {
+            [[maybe_unused]]
+            auto reverted = release_pointer_locked();
+            return grabbed;
+        }
+
+        log::nominal(
+            [&bounds]( auto& event )
+            {
+                event.tag( log::tags::overlay )
+                    .value( "pointer", "captured" )
+                    .value( "w", bounds.width )
+                    .value( "h", bounds.height );
+            }
+        );
+        return {};
+    }
+
+    Result<void>
+    OverlayService::release_pointer()
+    {
+        const std::scoped_lock lock{ mutex_ };
+        return release_pointer_locked();
+    }
+
+    Result<void>
+    OverlayService::release_pointer_locked()
+    {
+        if( !pointer_captured_ )
+        {
+            return {};
+        }
+        if( delegate_ == nullptr )
+        {
+            pointer_captured_ = false;
+            return {};
+        }
+
+        auto released = delegate_->ungrab_pointer();
+        // Restore click-through even when the ungrab reported failure. Leaving
+        // a full-surface input region installed would swallow every click on
+        // the display, which is worse than the failure being reported.
+        auto emptied =
+            delegate_->set_input_region( std::span<const geometry::Rectangle>{} );
+        pointer_captured_ = false;
+
+        log::nominal(
+            []( auto& event )
+            {
+                event.tag( log::tags::overlay ).value( "pointer", "released" );
+            }
+        );
+
+        if( !released.has_value() )
+        {
+            return released;
+        }
+        return emptied;
+    }
+
+    bool
+    OverlayService::pointer_captured() const noexcept
+    {
+        return pointer_captured_;
     }
 
     void

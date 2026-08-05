@@ -1720,6 +1720,19 @@ namespace grab::drivers::desktop::x11
                 return {};
             }
 
+            // Extent of the overlay surface, which spans the probed screen.
+            [[nodiscard]]
+            geometry::Rectangle
+            surface_bounds() const noexcept
+            {
+                return geometry::Rectangle{
+                    .x      = 0,
+                    .y      = 0,
+                    .width  = probe_.screen.width,
+                    .height = probe_.screen.height,
+                };
+            }
+
             [[nodiscard]]
             Result<void>
             grab_pointer()
@@ -3447,6 +3460,12 @@ namespace grab::drivers::desktop::x11
     X11OverlayDelegate::set_edit_handler( spi::OverlayEditHandler handler )
     {
         return impl_->set_edit_handler( std::move( handler ) );
+    }
+
+    geometry::Rectangle
+    X11OverlayDelegate::surface_bounds() const noexcept
+    {
+        return impl_->surface_bounds();
     }
 
     Result<void>

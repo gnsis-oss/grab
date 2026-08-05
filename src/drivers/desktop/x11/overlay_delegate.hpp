@@ -111,6 +111,10 @@ namespace grab::drivers::desktop::x11
             set_edit_handler( spi::OverlayEditHandler handler ) override;
 
             [[nodiscard]]
+            geometry::Rectangle
+            surface_bounds() const noexcept override;
+
+            [[nodiscard]]
             Result<void>
             grab_pointer() override;
 

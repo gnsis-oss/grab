@@ -380,6 +380,30 @@ namespace grab::cli
                 {
                 }
 
+                // A pointer grab that outlives its owner freezes the user's
+                // whole desktop, so the release is unconditional and reaches
+                // every exit path -- normal return, error, and the signal
+                // teardown -- rather than living on a success path. Idempotent
+                // when nothing is captured.
+                ~RuntimeBackendState()
+                {
+                    try
+                    {
+                        [[maybe_unused]]
+                        auto released = overlay_->release_pointer();
+                    }
+                    catch( ... )    // NOLINT(bugprone-empty-catch)
+                    {
+                    }
+                }
+
+                RuntimeBackendState( const RuntimeBackendState& ) = delete;
+                RuntimeBackendState&
+                operator=( const RuntimeBackendState& )      = delete;
+                RuntimeBackendState( RuntimeBackendState&& ) = delete;
+                RuntimeBackendState&
+                operator=( RuntimeBackendState&& ) = delete;
+
                 [[nodiscard]]
                 Result<overlay::ShapeId>
                 add( overlay::Shape shape )
@@ -430,6 +454,20 @@ namespace grab::cli
                     return status;
                 }
 
+                [[nodiscard]]
+                Result<void>
+                capture_pointer()
+                {
+                    return overlay_->capture_pointer();
+                }
+
+                [[nodiscard]]
+                Result<void>
+                release_pointer()
+                {
+                    return overlay_->release_pointer();
+                }
+
             private:
 
                 Overlay*                   overlay_{};
@@ -465,6 +503,16 @@ namespace grab::cli
                     [state]
                 {
                     return state->end_edit();
+                },
+                .capture_pointer =
+                    [state]
+                {
+                    return state->capture_pointer();
+                },
+                .release_pointer =
+                    [state]
+                {
+                    return state->release_pointer();
                 },
             };
         }
@@ -920,7 +968,15 @@ namespace grab::cli
         }
         if( key.name == escapeKey && !editing_ )
         {
-            return cancel_draw();
+            // Escape leaves draw mode, so the overlay stops consuming the
+            // pointer and becomes click-through again.
+            auto cancelled = cancel_draw();
+            auto released  = disarm_capture();
+            if( !cancelled.has_value() )
+            {
+                return cancelled;
+            }
+            return released;
         }
         if( key.name == backspaceKey )
         {
@@ -1009,7 +1065,46 @@ namespace grab::cli
             return std::unexpected( std::move( cancelled.error() ) );
         }
         options_.kind = kind;
+
+        // Arm capture on entering the mode. Doing it on button-press would be
+        // too late: the press that begins the stroke has already reached the
+        // desktop and started its selection.
+        return arm_capture();
+    }
+
+    Result<void>
+    SketchController::arm_capture()
+    {
+        if( captured_ || !backend_.capture_pointer )
+        {
+            return {};
+        }
+        // Marked captured before the call so a failure still obliges teardown
+        // to release: a pointer grab left behind freezes the whole desktop.
+        captured_    = true;
+        auto grabbed = backend_.capture_pointer();
+        if( !grabbed.has_value() )
+        {
+            [[maybe_unused]]
+            auto reverted = disarm_capture();
+            return grabbed;
+        }
         return {};
+    }
+
+    Result<void>
+    SketchController::disarm_capture()
+    {
+        if( !captured_ )
+        {
+            return {};
+        }
+        captured_ = false;
+        if( !backend_.release_pointer )
+        {
+            return {};
+        }
+        return backend_.release_pointer();
     }
 
     Result<void>
@@ -1031,6 +1126,14 @@ namespace grab::cli
         if( !cancelled.has_value() )
         {
             return std::unexpected( std::move( cancelled.error() ) );
+        }
+        // Edit mode installs its own input region over the editable shapes, so
+        // draw mode's full-surface capture must come down first or the two
+        // would fight over the same region.
+        auto released = disarm_capture();
+        if( !released.has_value() )
+        {
+            return released;
         }
         if( !backend_.begin_edit )
         {

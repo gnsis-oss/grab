@@ -87,6 +87,19 @@ namespace grab::spi
                              "overlay delegate has no edit event source" );
             }
 
+            // The overlay surface's extent, in its own coordinate space. Used
+            // to build a full-surface input region; a zero-sized result means
+            // the delegate does not know, and callers must treat that as a
+            // capability failure rather than installing an empty region — an
+            // empty input region is click-through, which is the opposite of
+            // what a capture asks for.
+            [[nodiscard]]
+            virtual geometry::Rectangle
+            surface_bounds() const noexcept
+            {
+                return {};
+            }
+
             [[nodiscard]]
             virtual Result<void>
             grab_pointer()

@@ -400,6 +400,28 @@ namespace grab
         );
     }
 
+    Result<void>
+    Overlay::capture_pointer()
+    {
+        return impl_->invoke<void>(
+            []( kernel::presentation::OverlayService& service )
+            {
+                return service.capture_pointer();
+            }
+        );
+    }
+
+    Result<void>
+    Overlay::release_pointer()
+    {
+        return impl_->invoke<void>(
+            []( kernel::presentation::OverlayService& service )
+            {
+                return service.release_pointer();
+            }
+        );
+    }
+
     EditSession::EditSession( std::unique_ptr<Impl> impl ) noexcept :
         impl_{ std::move( impl ) }
     {

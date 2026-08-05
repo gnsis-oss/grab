@@ -28,6 +28,18 @@ namespace grab::cli
             std::function<Result<void>( overlay::ShapeId )>                 remove_shape;
             std::function<Result<void>( std::span<const overlay::ShapeId> )> begin_edit;
             std::function<Result<void>()>                                    end_edit;
+
+            // Draw mode is modal, and while it is armed the overlay must
+            // consume pointer input rather than pass it through. Without this,
+            // the press that starts a stroke also reaches the desktop below and
+            // GNOME begins its own rubber-band selection alongside grab's --
+            // sketch learns about the press from the observation stream, which
+            // the server delivers regardless of who owns the pointer.
+            //
+            // Armed when a draw kind is selected, not when the button goes
+            // down: by then the press has already been delivered elsewhere.
+            std::function<Result<void>()> capture_pointer;
+            std::function<Result<void>()> release_pointer;
     };
 
     // Input-state core shared by the live command and no-display CLI tests.
@@ -72,6 +84,15 @@ namespace grab::cli
             std::span<const overlay::ShapeId>
             editable_shapes() const noexcept;
 
+            // True while draw mode is consuming pointer input rather than
+            // letting it fall through to whatever is underneath.
+            [[nodiscard]]
+            bool
+            capturing() const noexcept
+            {
+                return captured_;
+            }
+
         private:
 
             [[nodiscard]]
@@ -102,6 +123,16 @@ namespace grab::cli
             Result<void>
             cancel_draw();
 
+            // Pointer capture for draw mode. Armed on entering a draw kind,
+            // disarmed on Escape, on switching to edit mode, and on teardown.
+            [[nodiscard]]
+            Result<void>
+            arm_capture();
+
+            [[nodiscard]]
+            Result<void>
+            disarm_capture();
+
             [[nodiscard]]
             Result<void>
             clear_preview();
@@ -123,6 +154,7 @@ namespace grab::cli
             std::optional<overlay::Shape>   pending_preview_;
             bool                            preview_dirty_{};
             bool                            editing_{};
+            bool                            captured_{};
     };
 
     [[nodiscard]]
