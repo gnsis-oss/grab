@@ -1,4 +1,5 @@
 #include "frontends/cli/feedback_command.hpp"
+#include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/session.hpp"
 
@@ -53,6 +54,16 @@ namespace
     constexpr double                    customBarWidth     = 90.5;
     constexpr double                    customBarHeight    = 8.25;
 
+    void
+    expect_color( const grab::overlay::Color& actual,
+                  const grab::overlay::Color& expected )
+    {
+        EXPECT_EQ( actual.r, expected.r );
+        EXPECT_EQ( actual.g, expected.g );
+        EXPECT_EQ( actual.b, expected.b );
+        EXPECT_EQ( actual.a, expected.a );
+    }
+
     TEST( FeedbackCommand,
           DefaultsEnableClickAndHoldStyles )
     {
@@ -62,10 +73,12 @@ namespace
         ASSERT_TRUE( parsed->click.has_value() );
         EXPECT_DOUBLE_EQ( parsed->click->radius_px, defaultRippleRadius );
         EXPECT_EQ( parsed->click->duration, defaultRipple );
+        expect_color( parsed->click->color, grab::overlay::defaultOverlayColor );
         ASSERT_TRUE( parsed->hold.has_value() );
         EXPECT_DOUBLE_EQ( parsed->hold->width_px, defaultBarWidth );
         EXPECT_DOUBLE_EQ( parsed->hold->height_px, defaultBarHeight );
         EXPECT_DOUBLE_EQ( parsed->hold->offset_y_px, defaultBarOffsetY );
+        expect_color( parsed->hold->color, grab::overlay::defaultOverlayColor );
         EXPECT_EQ( parsed->thresholds.hold, defaultHold );
         EXPECT_EQ( parsed->thresholds.double_click, defaultDoubleClick );
         EXPECT_EQ( parsed->thresholds.pause, defaultPause );

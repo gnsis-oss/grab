@@ -77,19 +77,12 @@ namespace grab::cli
         constexpr char         asciiZero        = '0';
         constexpr char         asciiNine        = '9';
         constexpr std::uint8_t alphaHexOffset   = 10U;
-        constexpr std::uint8_t annotationGreen  = 196U;
         constexpr std::chrono::milliseconds defaultShapeTtl{ 3'000 };
-        constexpr overlay::Color            defaultAnnotationColor{
-            .r = opaqueChannel,
-            .g = annotationGreen,
-            .b = 0U,
-            .a = opaqueChannel,
-        };
-        constexpr float             defaultAnnotationWidthPx = 3.0F;
+        constexpr float                     defaultAnnotationWidthPx = 3.0F;
         // Shape parsing runs before any session exists; geometry is produced
         // space-unresolved and open_shape stamps the overlay's real space.
-        constexpr CoordinateSpaceId unresolvedSpace{};
-        constexpr std::uint32_t     signalEvents =
+        constexpr CoordinateSpaceId         unresolvedSpace{};
+        constexpr std::uint32_t             signalEvents =
             static_cast<std::uint32_t>( EPOLLIN | EPOLLERR | EPOLLHUP );
         constexpr int         posixSuccess    = 0;
         constexpr int         invalidFile     = -1;
@@ -427,7 +420,7 @@ namespace grab::cli
         annotation_stroke() noexcept
         {
             return overlay::StrokeStyle{
-                .color    = defaultAnnotationColor,
+                .color    = overlay::defaultOverlayColor,
                 .width_px = defaultAnnotationWidthPx,
             };
         }
@@ -1087,8 +1080,8 @@ namespace grab::cli
     parse_overlay_trail_options( std::span<const std::string_view> args )
     {
         OverlayTrailOptions options{
-            .physical_color = kernel::presentation::defaultPhysicalTrailColor,
-            .injected_color = kernel::presentation::defaultInjectedTrailColor,
+            .physical_color = overlay::defaultOverlayColor,
+            .injected_color = overlay::defaultOverlayColor,
             .fade           = kernel::presentation::defaultTrailFade,
             .width_px       = kernel::presentation::defaultTrailWidthPx,
         };

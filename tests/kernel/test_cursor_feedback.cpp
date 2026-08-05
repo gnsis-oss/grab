@@ -188,6 +188,16 @@ namespace
 }    // namespace
 
 TEST( CursorFeedback,
+      DefaultStylesUseDefaultOverlayColor )
+{
+    constexpr grab::RippleStyle   ripple{};
+    constexpr grab::ProgressStyle progress{};
+
+    expect_color( ripple.color, grab::overlay::defaultOverlayColor );
+    expect_color( progress.color, grab::overlay::defaultOverlayColor );
+}
+
+TEST( CursorFeedback,
       ClickAddsOneRippleWithScaleAndOpacityChannels )
 {
     auto                                  scene = feedback_scene();

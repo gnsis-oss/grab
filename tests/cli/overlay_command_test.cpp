@@ -24,6 +24,16 @@ namespace
     constexpr std::uint32_t             unresolvedSpaceValue = 0U;
     constexpr std::size_t               pathPointCount       = 3U;
 
+    void
+    expect_color( const grab::overlay::Color& actual,
+                  const grab::overlay::Color& expected )
+    {
+        EXPECT_EQ( actual.r, expected.r );
+        EXPECT_EQ( actual.g, expected.g );
+        EXPECT_EQ( actual.b, expected.b );
+        EXPECT_EQ( actual.a, expected.a );
+    }
+
     TEST( OverlayCommand,
           RectDefaultsToThreeSecondTtl )
     {
@@ -47,6 +57,8 @@ namespace
         EXPECT_DOUBLE_EQ( rectangle->bounds.w, 30.0 );
         EXPECT_DOUBLE_EQ( rectangle->bounds.h, 40.0 );
         EXPECT_EQ( rectangle->bounds.space.value, unresolvedSpaceValue );
+        ASSERT_TRUE( parsed->shape.stroke.has_value() );
+        expect_color( parsed->shape.stroke->color, grab::overlay::defaultOverlayColor );
     }
 
     TEST( OverlayCommand,
@@ -120,6 +132,25 @@ namespace
         ASSERT_FALSE( parsed.has_value() );
         EXPECT_EQ( parsed.error().code, grab::ErrorCode::InvalidArgument );
         EXPECT_TRUE( parsed.error().message.contains( "one lifetime policy" ) );
+    }
+
+    TEST( OverlayCommand,
+          TrailOptionsDefaultBothOriginsToDefaultOverlayColor )
+    {
+        const grab::cli::OverlayTrailOptions options{};
+
+        expect_color( options.physical_color, grab::overlay::defaultOverlayColor );
+        expect_color( options.injected_color, grab::overlay::defaultOverlayColor );
+    }
+
+    TEST( OverlayCommand,
+          TrailDefaultsBothOriginsToDefaultOverlayColor )
+    {
+        const auto parsed = grab::cli::parse_overlay_trail_options( {} );
+
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+        expect_color( parsed->physical_color, grab::overlay::defaultOverlayColor );
+        expect_color( parsed->injected_color, grab::overlay::defaultOverlayColor );
     }
 
     TEST( OverlayCommand,

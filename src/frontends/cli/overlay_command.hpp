@@ -13,8 +13,8 @@ namespace grab::cli
 
     struct OverlayTrailOptions
     {
-            overlay::Color            physical_color{};
-            overlay::Color            injected_color{};
+            overlay::Color            physical_color{ overlay::defaultOverlayColor };
+            overlay::Color            injected_color{ overlay::defaultOverlayColor };
             std::chrono::milliseconds fade{};
             float                     width_px{};
     };

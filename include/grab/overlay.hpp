@@ -24,6 +24,13 @@ namespace grab::overlay
             std::uint8_t a = std::numeric_limits<std::uint8_t>::max();
     };
 
+    inline constexpr Color defaultOverlayColor{
+        .r = 237U,
+        .g = 206U,
+        .b = 89U,
+        .a = 255U,
+    };
+
     struct StrokeStyle
     {
             Color color{};

@@ -46,7 +46,7 @@ namespace grab
     struct RippleStyle
     {
             double                    radius_px = 48.0;
-            overlay::Color            color{};
+            overlay::Color            color{ overlay::defaultOverlayColor };
             std::chrono::milliseconds duration{ 400 };
     };
 
@@ -55,7 +55,7 @@ namespace grab
             double         width_px    = 64.0;
             double         height_px   = 6.0;
             double         offset_y_px = 24.0;
-            overlay::Color color{};
+            overlay::Color color{ overlay::defaultOverlayColor };
     };
 
     struct CursorFeedbackConfig

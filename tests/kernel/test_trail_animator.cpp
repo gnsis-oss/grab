@@ -71,7 +71,23 @@ namespace
         .y     = zeroDelta,
         .space = firstSpace,
     };
-    constexpr double notANumber = std::numeric_limits<double>::quiet_NaN();
+    constexpr double               notANumber = std::numeric_limits<double>::quiet_NaN();
+    constexpr grab::overlay::Color physicalTestColor{
+        .r = 17U,
+        .g = 34U,
+        .b = 51U,
+        .a = 255U,
+    };
+    constexpr grab::overlay::Color injectedTestColor{
+        .r = 68U,
+        .g = 85U,
+        .b = 102U,
+        .a = 255U,
+    };
+    constexpr grab::kernel::presentation::TrailStyle distinctOriginStyle{
+        .physical = physicalTestColor,
+        .injected = injectedTestColor,
+    };
 
     [[nodiscard]]
     constexpr double
@@ -193,6 +209,15 @@ namespace
 }    // namespace
 
 TEST( TrailAnimator,
+      DefaultStyleUsesDefaultOverlayColorForBothOrigins )
+{
+    constexpr grab::kernel::presentation::TrailStyle style{};
+
+    expect_color( style.physical, grab::overlay::defaultOverlayColor );
+    expect_color( style.injected, grab::overlay::defaultOverlayColor );
+}
+
+TEST( TrailAnimator,
       ThreePhysicalMotionsAppendTwoOrderedDefaultSegments )
 {
     auto                                      now = sceneTime;
@@ -216,11 +241,11 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.at( firstShapeIndex ),
                     firstPoint,
                     secondPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
     expect_segment( snapshot.shapes.at( secondShapeIndex ),
                     secondPoint,
                     thirdPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
     EXPECT_LT( snapshot.shapes.at( firstShapeIndex ).started_at,
                snapshot.shapes.at( secondShapeIndex ).started_at );
 }
@@ -234,7 +259,7 @@ TEST( TrailAnimator,
                                                      } };
     grab::kernel::presentation::TrailAnimator animator{
         scene,
-        grab::kernel::presentation::TrailStyle{},
+        distinctOriginStyle,
     };
 
     animator.consume( motion( grab::EventOrigin::Physical, firstPoint ) );
@@ -247,11 +272,11 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.at( firstShapeIndex ),
                     firstPoint,
                     secondPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    physicalTestColor );
     expect_segment( snapshot.shapes.at( secondShapeIndex ),
                     thirdPoint,
                     fourthPoint,
-                    grab::kernel::presentation::defaultInjectedTrailColor );
+                    injectedTestColor );
 }
 
 TEST( TrailAnimator,
@@ -263,7 +288,7 @@ TEST( TrailAnimator,
                                                      } };
     grab::kernel::presentation::TrailAnimator animator{
         scene,
-        grab::kernel::presentation::TrailStyle{},
+        distinctOriginStyle,
     };
 
     animator.consume( motion( grab::EventOrigin::InjectedOther, firstPoint ) );
@@ -274,7 +299,7 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.front(),
                     firstPoint,
                     secondPoint,
-                    grab::kernel::presentation::defaultInjectedTrailColor );
+                    injectedTestColor );
 }
 
 TEST( TrailAnimator,
@@ -299,7 +324,7 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.front(),
                     thirdPoint,
                     fourthPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
 }
 
 TEST( TrailAnimator,
@@ -311,7 +336,7 @@ TEST( TrailAnimator,
                                                      } };
     grab::kernel::presentation::TrailAnimator animator{
         scene,
-        grab::kernel::presentation::TrailStyle{},
+        distinctOriginStyle,
     };
 
     animator.consume( motion( grab::EventOrigin::InjectedSelf, firstPoint ) );
@@ -324,7 +349,7 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.front(),
                     firstPoint,
                     secondPoint,
-                    grab::kernel::presentation::defaultInjectedTrailColor );
+                    injectedTestColor );
 }
 
 TEST( TrailAnimator,
@@ -357,11 +382,11 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.at( firstShapeIndex ),
                     firstPoint,
                     secondPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
     expect_segment( snapshot.shapes.at( secondShapeIndex ),
                     thirdPoint,
                     fourthPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
 }
 
 TEST( TrailAnimator,
@@ -386,11 +411,11 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.at( firstShapeIndex ),
                     distanceFirstPoint,
                     distanceSecondPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
     expect_segment( snapshot.shapes.at( secondShapeIndex ),
                     distanceThirdPoint,
                     distanceFourthPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
 }
 
 TEST( TrailAnimator,
@@ -434,7 +459,7 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.at( secondShapeIndex ),
                     thirdPoint,
                     fourthPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
 }
 
 TEST( TrailAnimator,
@@ -469,7 +494,7 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.at( secondShapeIndex ),
                     thirdInSecondSpace,
                     fourthInSecondSpace,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
 }
 
 TEST( TrailAnimator,
@@ -494,7 +519,7 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.front(),
                     secondPoint,
                     thirdPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
 }
 
 TEST( TrailAnimator,
@@ -521,7 +546,7 @@ TEST( TrailAnimator,
     expect_segment( snapshot.shapes.at( secondShapeIndex ),
                     thirdPoint,
                     fourthPoint,
-                    grab::kernel::presentation::defaultPhysicalTrailColor );
+                    grab::overlay::defaultOverlayColor );
 }
 
 TEST( TrailAnimator,
