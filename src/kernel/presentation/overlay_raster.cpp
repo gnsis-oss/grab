@@ -1703,6 +1703,106 @@ namespace grab::kernel::presentation
             return static_cast<std::size_t>( clipped );
         }
 
+        // A row's coverage, read out of the dense accumulators as runs.
+        //
+        // Flush whenever a pixel's coverage differs from the run being built,
+        // so the blend still happens a run at a time even though the coverage
+        // was accumulated one pixel at a time. Both accumulators are reset on
+        // the way past, so the next row starts clean without a second sweep.
+        template<typename Emit>
+        void
+        resolve_dense_row( RasterScratch& scratch,
+                           std::size_t    first_pixel,
+                           std::size_t    last_pixel,
+                           Emit&&         emit )
+        {
+            double      running   = fullyTransparent;
+            std::size_t run_first = first_pixel;
+            double      run_value = fullyTransparent;
+            for( auto x = first_pixel; x < last_pixel; ++x )
+            {
+                const auto step      = scratch.delta[x];
+                const auto own       = scratch.coverage[x];
+                scratch.delta[x]     = fullyTransparent;
+                scratch.coverage[x]  = fullyTransparent;
+                running             += step;
+                const auto value     = running + own;
+                if( value != run_value )
+                {
+                    emit( run_first, x, run_value );
+                    run_first = x;
+                    run_value = value;
+                }
+            }
+            emit( run_first, last_pixel, run_value );
+            // A span ending exactly at the right edge closes one past it.
+            scratch.delta[last_pixel] = fullyTransparent;
+        }
+
+        // The same runs, read out of coverage events and partial pixels.
+        //
+        // Between two events every pixel has the same coverage, so the walk
+        // jumps from boundary to boundary and the interior of a shape never
+        // costs anything per pixel until it is blended. Only the pixels a
+        // sub-scanline cut through are handled one at a time, and there are at
+        // most two of those per span.
+        template<typename Emit>
+        void
+        resolve_sparse_row( RasterScratch& scratch,
+                            std::size_t    first_pixel,
+                            std::size_t    last_pixel,
+                            Emit&&         emit )
+        {
+            std::ranges::sort( scratch.events, {}, &CoverageEvent::x );
+            std::ranges::sort( scratch.partials, {}, &PartialPixel::x );
+
+            double      accumulated   = fullyTransparent;
+            std::size_t cursor        = first_pixel;
+            std::size_t event_index   = 0;
+            std::size_t partial_index = 0;
+            while( cursor < last_pixel )
+            {
+                auto boundary = last_pixel;
+                if( event_index < scratch.events.size() )
+                {
+                    boundary = std::min( boundary, scratch.events[event_index].x );
+                }
+                if( partial_index < scratch.partials.size() )
+                {
+                    boundary = std::min( boundary, scratch.partials[partial_index].x );
+                }
+                if( boundary > cursor )
+                {
+                    emit( cursor, boundary, accumulated );
+                    cursor = boundary;
+                    continue;
+                }
+                while( event_index <
+                       scratch.events.size() &&
+                       scratch.events[event_index].x == cursor )
+                {
+                    accumulated += scratch.events[event_index].weight;
+                    ++event_index;
+                }
+                if( partial_index >=
+                    scratch.partials.size() ||
+                    scratch.partials[partial_index].x != cursor )
+                {
+                    continue;
+                }
+                auto extra = fullyTransparent;
+                while( partial_index <
+                       scratch.partials.size() &&
+                       scratch.partials[partial_index].x == cursor )
+                {
+                    extra += scratch.partials[partial_index].coverage;
+                    ++partial_index;
+                }
+                emit( cursor, cursor + 1U, accumulated + extra );
+                ++cursor;
+            }
+        }
+
         void
         rasterize_contours( const FlatContours&                  contours,
                             const overlay::Color&                color,
@@ -1823,8 +1923,9 @@ namespace grab::kernel::presentation
                 ( static_cast<double>( color.a ) / channelMaximum ) * opacity;
             // A reveal along X is the one thing that makes coverage differ
             // between neighbouring pixels of an otherwise constant run.
-            const bool reveal_varies =
-                reveal_is_partial( reveal ) && reveal->axis == overlay::Axis::X;
+            const bool reveal_varies = reveal.has_value() &&
+                                       reveal_is_partial( reveal ) &&
+                                       reveal->axis == overlay::Axis::X;
             const bool dense_rows =
                 covered_last_x - covered_first_x <= denseRowWidthLimit;
 
@@ -1921,19 +2022,10 @@ namespace grab::kernel::presentation
                     }
                 }
 
-                // Resolve the row into constant-coverage runs.
+                // Resolve the row into constant-coverage runs and blend them.
                 //
-                // Between two coverage events every pixel of the row has the
-                // same coverage, so a shape's interior is blended as runs with
-                // one alpha computed per run. Only the pixels a sub-scanline
-                // cut through are handled individually, and there are at most
-                // two of those per span.
-                if( !dense_rows )
-                {
-                    std::ranges::sort( scratch.events, {}, &CoverageEvent::x );
-                    std::ranges::sort( scratch.partials, {}, &PartialPixel::x );
-                }
-
+                // The two representations have opposite failure modes, so the
+                // shape picks one and both end at the same `emit`.
                 const auto emit =
                     [&scratch, &image, &color, reveal_varies, &reveal, y, base_alpha](
                         std::size_t run_first,
@@ -1983,79 +2075,11 @@ namespace grab::kernel::presentation
 
                 if( dense_rows )
                 {
-                    // Same runs, read out of a value per pixel: flush whenever
-                    // a pixel's coverage differs from the run being built, so
-                    // the blend still happens a run at a time even though the
-                    // coverage was accumulated densely.
-                    double      running   = fullyTransparent;
-                    std::size_t run_first = covered_first_x;
-                    double      run_value = fullyTransparent;
-                    for( auto x = covered_first_x; x < covered_last_x; ++x )
-                    {
-                        const auto step      = scratch.delta[x];
-                        const auto own       = scratch.coverage[x];
-                        scratch.delta[x]     = fullyTransparent;
-                        scratch.coverage[x]  = fullyTransparent;
-                        running             += step;
-                        const auto value     = running + own;
-                        if( value != run_value )
-                        {
-                            emit( run_first, x, run_value );
-                            run_first = x;
-                            run_value = value;
-                        }
-                    }
-                    emit( run_first, covered_last_x, run_value );
-                    // A span ending exactly at the right edge closes one past it.
-                    scratch.delta[covered_last_x] = fullyTransparent;
-                    continue;
+                    resolve_dense_row( scratch, covered_first_x, covered_last_x, emit );
                 }
-
-                double      accumulated   = fullyTransparent;
-                std::size_t cursor        = covered_first_x;
-                std::size_t event_index   = 0;
-                std::size_t partial_index = 0;
-                while( cursor < covered_last_x )
+                else
                 {
-                    auto boundary = covered_last_x;
-                    if( event_index < scratch.events.size() )
-                    {
-                        boundary = std::min( boundary, scratch.events[event_index].x );
-                    }
-                    if( partial_index < scratch.partials.size() )
-                    {
-                        boundary =
-                            std::min( boundary, scratch.partials[partial_index].x );
-                    }
-                    if( boundary > cursor )
-                    {
-                        emit( cursor, boundary, accumulated );
-                        cursor = boundary;
-                        continue;
-                    }
-                    while( event_index <
-                           scratch.events.size() &&
-                           scratch.events[event_index].x == cursor )
-                    {
-                        accumulated += scratch.events[event_index].weight;
-                        ++event_index;
-                    }
-                    if( partial_index >=
-                        scratch.partials.size() ||
-                        scratch.partials[partial_index].x != cursor )
-                    {
-                        continue;
-                    }
-                    auto extra = fullyTransparent;
-                    while( partial_index <
-                           scratch.partials.size() &&
-                           scratch.partials[partial_index].x == cursor )
-                    {
-                        extra += scratch.partials[partial_index].coverage;
-                        ++partial_index;
-                    }
-                    emit( cursor, cursor + 1U, accumulated + extra );
-                    ++cursor;
+                    resolve_sparse_row( scratch, covered_first_x, covered_last_x, emit );
                 }
             }
         }
