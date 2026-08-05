@@ -81,7 +81,7 @@ namespace grab::session
     }
 
     grab::Result<SessionRuntime>
-    X11SeatSessionProvider::create( const WorkspaceDesc& desc ) const
+    X11SeatSessionProvider::create( const WorkspaceDescriptor& descriptor ) const
     {
         auto connection = grab::platform::x11::XcbConnection::open( "" );
         if( !connection.has_value() )
@@ -93,7 +93,7 @@ namespace grab::session
             std::move( connection.value() )
         );
 
-        const std::string seat_name = std::string{ seat_name_prefix } + desc.name;
+        const std::string seat_name = std::string{ seat_name_prefix } + descriptor.name;
         auto              seat = grab::platform::x11::XiSeat::create( *conn, seat_name );
         if( !seat.has_value() )
         {

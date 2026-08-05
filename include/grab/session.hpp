@@ -217,9 +217,9 @@ namespace grab
             std::unique_ptr<Impl> impl_;
     };
 
-    using SessionDesc [[deprecated( "use WorkspaceDesc" )]]         = WorkspaceDesc;
-    using SessionMode [[deprecated( "use WorkspaceMode" )]]         = WorkspaceMode;
-    using SessionState [[deprecated( "use WorkspaceState" )]]       = WorkspaceState;
+    using SessionDesc [[deprecated( "use WorkspaceDescriptor" )]] = WorkspaceDescriptor;
+    using SessionMode [[deprecated( "use WorkspaceMode" )]]       = WorkspaceMode;
+    using SessionState [[deprecated( "use WorkspaceState" )]]     = WorkspaceState;
     using SessionGeometry [[deprecated( "use WorkspaceGeometry" )]] = WorkspaceGeometry;
 
 }    // namespace grab

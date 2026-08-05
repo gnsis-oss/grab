@@ -48,7 +48,7 @@ namespace grab::test
 
             [[nodiscard]]
             grab::Result<grab::session::SessionRuntime>
-            create( const grab::WorkspaceDesc& desc ) const override
+            create( const grab::WorkspaceDescriptor& descriptor ) const override
             {
                 ++create_call_count;
                 if( create_failure.has_value() )
@@ -59,7 +59,7 @@ namespace grab::test
                 }
 
                 return grab::session::SessionRuntime{
-                    .endpoint       = std::string{ endpoint_prefix } + desc.name,
+                    .endpoint       = std::string{ endpoint_prefix } + descriptor.name,
                     .control_socket = {},
                     .supervisor_pid = no_supervisor_pid,
                 };

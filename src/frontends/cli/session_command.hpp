@@ -10,7 +10,7 @@ namespace grab::cli
 {
 
     [[nodiscard]]
-    grab::Result<grab::WorkspaceDesc>
+    grab::Result<grab::WorkspaceDescriptor>
     parse_session_start_args( std::span<const std::string_view> args );
 
     [[nodiscard]]

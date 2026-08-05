@@ -277,16 +277,16 @@ namespace grab::drivers::desktop::x11
         return std::nullopt;
     }
 
-    ScratchKeycodePool::Loan::Loan( ScratchKeycodePool& pool,
-                                    std::uint32_t       keysym,
-                                    std::uint8_t        keycode ) noexcept :
+    ScratchKeycodePool::Lease::Lease( ScratchKeycodePool& pool,
+                                      std::uint32_t       keysym,
+                                      std::uint8_t        keycode ) noexcept :
         pool_( &pool ),
         keysym_( keysym ),
         keycode_( keycode )
     {
     }
 
-    ScratchKeycodePool::Loan::~Loan()
+    ScratchKeycodePool::Lease::~Lease()
     {
         if( pool_ != nullptr )
         {
@@ -294,7 +294,7 @@ namespace grab::drivers::desktop::x11
         }
     }
 
-    ScratchKeycodePool::Loan::Loan( Loan&& other ) noexcept :
+    ScratchKeycodePool::Lease::Lease( Lease&& other ) noexcept :
         pool_( std::exchange( other.pool_,
                               nullptr ) ),
         keysym_( std::exchange( other.keysym_,
@@ -304,8 +304,8 @@ namespace grab::drivers::desktop::x11
     {
     }
 
-    ScratchKeycodePool::Loan&
-    ScratchKeycodePool::Loan::operator=( Loan&& other ) noexcept
+    ScratchKeycodePool::Lease&
+    ScratchKeycodePool::Lease::operator=( Lease&& other ) noexcept
     {
         if( this != &other )
         {
@@ -321,13 +321,13 @@ namespace grab::drivers::desktop::x11
     }
 
     std::uint8_t
-    ScratchKeycodePool::Loan::keycode() const noexcept
+    ScratchKeycodePool::Lease::keycode() const noexcept
     {
         return keycode_;
     }
 
     grab::Result<void>
-    ScratchKeycodePool::Loan::restore()
+    ScratchKeycodePool::Lease::restore()
     {
         if( pool_ == nullptr )
         {
@@ -365,15 +365,15 @@ namespace grab::drivers::desktop::x11
         }
     }
 
-    grab::Result<ScratchKeycodePool::Loan>
-    ScratchKeycodePool::loan( std::uint32_t keysym )
+    grab::Result<ScratchKeycodePool::Lease>
+    ScratchKeycodePool::acquire( std::uint32_t keysym )
     {
         const std::scoped_lock lock( mutex_ );
         const auto existing = std::ranges::find( entries_, keysym, &Entry::keysym );
         if( existing != entries_.end() )
         {
             ++existing->references;
-            return Loan{ *this, keysym, existing->keycode };
+            return Lease{ *this, keysym, existing->keycode };
         }
 
         auto mappings = backend_->mappings();
@@ -402,8 +402,8 @@ namespace grab::drivers::desktop::x11
         );
         if( selected == mappings->end() )
         {
-            return failure<Loan>( grab::ErrorCode::CapabilityUnavailable,
-                                  "No unused X11 scratch keycode is available" );
+            return failure<Lease>( grab::ErrorCode::CapabilityUnavailable,
+                                   "No unused X11 scratch keycode is available" );
         }
 
         auto replacement    = selected->keysyms;
@@ -428,7 +428,7 @@ namespace grab::drivers::desktop::x11
             .references = 1U,
             .original   = std::move( selected->keysyms ),
         } );
-        return Loan{ *this, keysym, entries_.back().keycode };
+        return Lease{ *this, keysym, entries_.back().keycode };
     }
 
     grab::Result<void>

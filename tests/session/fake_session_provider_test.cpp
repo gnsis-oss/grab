@@ -15,10 +15,10 @@ namespace
     constexpr grab::WorkspaceGeometry default_geometry{};
 
     [[nodiscard]]
-    grab::WorkspaceDesc
-    desc()
+    grab::WorkspaceDescriptor
+    descriptor()
     {
-        return grab::WorkspaceDesc{
+        return grab::WorkspaceDescriptor{
             .name        = session_name,
             .mode        = grab::WorkspaceMode::Offscreen,
             .geometry    = default_geometry,
@@ -32,7 +32,7 @@ TEST( FakeSessionProvider,
       CreateReturnsRuntimeAndRecords )
 {
     const grab::test::FakeSessionProvider provider;
-    const auto                            runtime = provider.create( desc() );
+    const auto                            runtime = provider.create( descriptor() );
 
     ASSERT_TRUE( runtime.has_value() ) << runtime.error().message;
     EXPECT_FALSE( runtime->endpoint.empty() );
@@ -44,7 +44,7 @@ TEST( FakeSessionProvider,
 {
     grab::test::FakeSessionProvider provider;
     provider.fail_next_create( grab::ErrorCode::ProviderFailed, failure_message );
-    const auto runtime = provider.create( desc() );
+    const auto runtime = provider.create( descriptor() );
 
     ASSERT_FALSE( runtime.has_value() );
     EXPECT_EQ( runtime.error().code, grab::ErrorCode::ProviderFailed );
