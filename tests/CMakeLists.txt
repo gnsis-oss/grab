@@ -111,6 +111,7 @@ add_executable(grab_kernel_tests
     kernel/test_ui.cpp
     kernel/test_overlay_animation.cpp
     kernel/test_overlay_delegate_contract.cpp
+    kernel/test_overlay_draw.cpp
     kernel/test_overlay_edit.cpp
     kernel/test_overlay_edit_session.cpp
     kernel/test_overlay_raster.cpp
