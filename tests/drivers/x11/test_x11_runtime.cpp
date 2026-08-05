@@ -51,11 +51,18 @@ TEST( X11Runtime,
         .deadline = grab::Deadline::unbounded(),
     };
 
-    ASSERT_TRUE( runtime.start( context ).has_value() );
-    ASSERT_TRUE( runtime.stop().has_value() );
-    ASSERT_TRUE( runtime.start( context ).has_value() );
+    // Keep each Result: `ASSERT_TRUE(x.has_value())` on a temporary throws the
+    // diagnostic away, and this test has an intermittent failure whose whole
+    // content was "Actual: false" for as long as it has been known.
+    const auto first_start = runtime.start( context );
+    ASSERT_TRUE( first_start.has_value() ) << first_start.error().message;
+    const auto first_stop = runtime.stop();
+    ASSERT_TRUE( first_stop.has_value() ) << first_stop.error().message;
+    const auto second_start = runtime.start( context );
+    ASSERT_TRUE( second_start.has_value() ) << second_start.error().message;
     EXPECT_EQ( runtime.generation(), initial_generation + generation_increment );
-    EXPECT_TRUE( runtime.stop().has_value() );
+    const auto second_stop = runtime.stop();
+    EXPECT_TRUE( second_stop.has_value() ) << second_stop.error().message;
 }
 
 TEST( X11Runtime,
