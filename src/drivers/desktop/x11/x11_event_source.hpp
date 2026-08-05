@@ -52,7 +52,7 @@ namespace grab::drivers::desktop::x11
 
         private:
 
-            static constexpr std::size_t inputDemandCount = 4U;
+            static constexpr std::size_t inputDemandCount = 6U;
 
             X11EventSource( xcb_connection_t*          connection,
                             xcb_window_t               root,

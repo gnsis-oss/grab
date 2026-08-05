@@ -175,6 +175,67 @@ namespace grab::transport
             return {};
         }
 
+        void
+        encode_mouse_button( eventgrab::v1::Event&    wire,
+                             const grab::MouseButton& payload )
+        {
+            auto* const mouse_button = wire.mutable_mouse_button();
+            mouse_button->set_button( payload.button );
+            mouse_button->set_name( payload.name );
+            if( !payload.position.has_value() )
+            {
+                return;
+            }
+
+            mouse_button->set_position_x( payload.position->x );
+            mouse_button->set_position_y( payload.position->y );
+            mouse_button->set_space( payload.position->space.value );
+        }
+
+        [[nodiscard]]
+        grab::Result<grab::MouseButton>
+        decode_mouse_button( const eventgrab::v1::Event& wire )
+        {
+            if( !wire.has_mouse_button() )
+            {
+                return protocol_error( "missing mouse_button payload" );
+            }
+
+            const auto&       mouse_button = wire.mouse_button();
+            grab::MouseButton payload{
+                .button   = mouse_button.button(),
+                .name     = mouse_button.name(),
+                .position = {},
+            };
+
+            const bool has_x     = mouse_button.has_position_x();
+            const bool has_y     = mouse_button.has_position_y();
+            const bool has_space = mouse_button.has_space();
+            if( !has_x && !has_y && !has_space )
+            {
+                return payload;
+            }
+            if( !has_x || !has_y || !has_space )
+            {
+                return protocol_error(
+                    "mouse_button position requires position_x, position_y, and space"
+                );
+            }
+            if( mouse_button.space() > std::numeric_limits<std::uint32_t>::max() )
+            {
+                return protocol_error( "mouse_button space is out of range" );
+            }
+
+            payload.position = grab::SpacePoint{
+                .x     = mouse_button.position_x(),
+                .y     = mouse_button.position_y(),
+                .space = grab::CoordinateSpaceId{
+                                                 static_cast<std::uint32_t>( mouse_button.space() ),
+                                                 },
+            };
+            return payload;
+        }
+
         [[nodiscard]]
         grab::Result<void>
         validate_size( const eventgrab::v1::Event& wire )
@@ -237,6 +298,9 @@ namespace grab::transport
 
             switch( kind )
             {
+                case grab::EventKind::MouseButtonDown :
+                case grab::EventKind::MouseButtonUp :
+                    return decode_mouse_button( wire );
                 case grab::EventKind::StateSnapshot :
                     return decode_state_snapshot( wire );
                 case grab::EventKind::NodeAdded :
@@ -328,6 +392,11 @@ namespace grab::transport
                                                                event.payload );
                 encode_mouse_move_position( wire,
                                             std::get<grab::MouseMove>( event.payload ) );
+                break;
+            case grab::EventKind::MouseButtonDown :
+            case grab::EventKind::MouseButtonUp :
+                encode_mouse_button( wire,
+                                     std::get<grab::MouseButton>( event.payload ) );
                 break;
             case grab::EventKind::StateSnapshot :
                 encode_state_snapshot( wire,

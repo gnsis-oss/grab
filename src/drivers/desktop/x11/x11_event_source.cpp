@@ -55,6 +55,8 @@ namespace grab::drivers::desktop::x11
         constexpr std::size_t   keyUpDemandSlot           = 1U;
         constexpr std::size_t   mouseClickDemandSlot      = 2U;
         constexpr std::size_t   mouseMoveDemandSlot       = 3U;
+        constexpr std::size_t   mouseButtonDownDemandSlot = 4U;
+        constexpr std::size_t   mouseButtonUpDemandSlot   = 5U;
         constexpr std::size_t   noDemand                  = 0U;
         constexpr std::uint32_t firstMaskBit              = 1U;
         constexpr std::uint64_t initialSequence           = 0U;
@@ -227,6 +229,24 @@ namespace grab::drivers::desktop::x11
 
         [[nodiscard]]
         grab::Event
+        make_button_event( grab::EventKind                           kind,
+                           const xcb_input_raw_button_press_event_t& raw )
+        {
+            return grab::Event{
+                .timestamp = grab::kernel::now_timestamp_s(),
+                .sequence  = initialSequence,
+                .kind      = kind,
+                .category  = grab::EventCategory::Input,
+                .payload   = grab::Payload{ grab::MouseButton{
+                    .button   = static_cast<std::uint32_t>( raw.detail ),
+                    .name     = std::string{},
+                    .position = std::nullopt,
+                } }
+            };
+        }
+
+        [[nodiscard]]
+        grab::Event
         make_motion_event( double           timestamp,
                            std::string_view axis,
                            double           delta )
@@ -376,6 +396,9 @@ namespace grab::drivers::desktop::x11
                                 event_storage
                             );
                         events.push_back( make_button_event( *raw ) );
+                        events.push_back(
+                            make_button_event( grab::EventKind::MouseButtonDown, *raw )
+                        );
                         identity.sourceid = raw->sourceid;
                         identity.deviceid = raw->deviceid;
                         identity.kind     = InjectionKind::ButtonPress;
@@ -383,7 +406,20 @@ namespace grab::drivers::desktop::x11
                         break;
                     }
                 case XCB_INPUT_RAW_BUTTON_RELEASE :
-                    break;
+                    {
+                        const auto* raw =
+                            static_cast<const xcb_input_raw_button_release_event_t*>(
+                                event_storage
+                            );
+                        events.push_back(
+                            make_button_event( grab::EventKind::MouseButtonUp, *raw )
+                        );
+                        identity.sourceid = raw->sourceid;
+                        identity.deviceid = raw->deviceid;
+                        identity.kind     = InjectionKind::ButtonRelease;
+                        identity.detail   = static_cast<std::uint32_t>( raw->detail );
+                        break;
+                    }
                 case XCB_INPUT_RAW_MOTION :
                     {
                         const auto* raw =
@@ -419,6 +455,10 @@ namespace grab::drivers::desktop::x11
                     return mouseClickDemandSlot;
                 case grab::EventKind::MouseMove :
                     return mouseMoveDemandSlot;
+                case grab::EventKind::MouseButtonDown :
+                    return mouseButtonDownDemandSlot;
+                case grab::EventKind::MouseButtonUp :
+                    return mouseButtonUpDemandSlot;
                 default :
                     return std::nullopt;
             }
@@ -532,7 +572,11 @@ namespace grab::drivers::desktop::x11
                                                  std::vector<grab::Event>& events,
                                                  std::size_t               first_event )
     {
-        if( kind != InjectionKind::Motion )
+        if( kind !=
+            InjectionKind::Motion &&
+            kind !=
+            InjectionKind::ButtonPress &&
+            kind != InjectionKind::ButtonRelease )
         {
             return;
         }
@@ -576,6 +620,13 @@ namespace grab::drivers::desktop::x11
             if( motion != nullptr )
             {
                 motion->position = position;
+            }
+
+            auto* const button =
+                std::get_if<grab::MouseButton>( &events.at( event_index ).payload );
+            if( button != nullptr )
+            {
+                button->position = position;
             }
         }
     }
@@ -661,10 +712,17 @@ namespace grab::drivers::desktop::x11
             mask |=
                 static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_KEY_RELEASE );
         }
-        if( demand_refcounts_[mouseClickDemandSlot] > noDemand )
+        if( demand_refcounts_[mouseClickDemandSlot] >
+            noDemand ||
+            demand_refcounts_[mouseButtonDownDemandSlot] > noDemand )
         {
             mask |=
                 static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_BUTTON_PRESS );
+        }
+        if( demand_refcounts_[mouseButtonUpDemandSlot] > noDemand )
+        {
+            mask |=
+                static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_BUTTON_RELEASE );
         }
         if( demand_refcounts_[mouseMoveDemandSlot] > noDemand )
         {

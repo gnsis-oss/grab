@@ -23,6 +23,8 @@ enum EventKind {
   INPUT_MOUSE_MOVE            = 104;
   INPUT_IDLE_START            = 105;
   INPUT_IDLE_END              = 106;
+  INPUT_MOUSE_BUTTON_DOWN     = 107;
+  INPUT_MOUSE_BUTTON_UP       = 108;
   // Window (tier 1)
   WINDOW_FOCUS_CHANGED        = 200;
   WINDOW_TITLE_CHANGED        = 201;
@@ -80,6 +82,14 @@ message MouseMove {
   optional uint64 space        = 3;  // grab::CoordinateSpaceId::value
 }
 
+message MouseButton {
+  uint32 button                = 1;
+  string name                  = 2;
+  optional double position_x   = 3;
+  optional double position_y   = 4;
+  optional uint64 space        = 5;
+}
+
 message Event {
   EventKind kind              = 1;
   EventCategory category      = 2;
@@ -92,6 +102,7 @@ message Event {
   optional uint64 after_revision = 9;
   GraphChange graph_change     = 10;
   MouseMove mouse_move         = 11;
+  MouseButton mouse_button     = 12;
 }
 
 message EventFilter {

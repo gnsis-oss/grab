@@ -36,6 +36,8 @@ namespace grab
         MouseMove          = 104U,
         IdleStart          = 105U,
         IdleEnd            = 106U,
+        MouseButtonDown    = 107U,
+        MouseButtonUp      = 108U,
         WindowFocusChanged = 200U,
         WindowTitleChanged = 201U,
         WindowCreated      = 202U,
@@ -72,6 +74,14 @@ namespace grab
     {
             std::uint32_t button = 0U;
             std::string   name;
+    };
+
+    struct MouseButton
+    {
+            std::uint32_t button = 0U;
+            std::string   name;
+            std::optional<SpacePoint>
+                position{};    // NOLINT(readability-redundant-member-init)
     };
 
     struct MouseMove
@@ -128,6 +138,7 @@ namespace grab
     using Payload = std::variant<InputKey,
                                  KeyCombo,
                                  MouseClick,
+                                 MouseButton,
                                  MouseMove,
                                  Idle,
                                  WindowChange,

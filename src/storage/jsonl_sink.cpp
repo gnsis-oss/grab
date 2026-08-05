@@ -181,6 +181,45 @@ namespace grab::storage
         [[nodiscard]]
         grab::Result<OrderedJson>
         serialize_payload( grab::EventKind,
+                           const grab::MouseButton& payload )
+        {
+            OrderedJson result{
+                {    std::string{ grab::field_name( grab::PayloadField::Button ) },
+                 payload.button},
+                {std::string{ grab::field_name( grab::PayloadField::ButtonName ) },
+                 payload.name  },
+            };
+            if( !payload.position.has_value() )
+            {
+                return result;
+            }
+
+            auto numeric_status = ensure_json_number( payload.position->x );
+            if( numeric_status.has_value() )
+            {
+                numeric_status = ensure_json_number( payload.position->y );
+            }
+            if( !numeric_status.has_value() )
+            {
+                return std::unexpected( std::move( numeric_status.error() ) );
+            }
+
+            result.emplace(
+                std::string{ grab::field_name( grab::PayloadField::PositionX ) },
+                payload.position->x
+            );
+            result.emplace(
+                std::string{ grab::field_name( grab::PayloadField::PositionY ) },
+                payload.position->y
+            );
+            result.emplace( std::string{ grab::field_name( grab::PayloadField::Space ) },
+                            payload.position->space.value );
+            return result;
+        }
+
+        [[nodiscard]]
+        grab::Result<OrderedJson>
+        serialize_payload( grab::EventKind,
                            const grab::MouseMove& payload )
         {
             auto numeric_status = ensure_json_number( payload.delta );

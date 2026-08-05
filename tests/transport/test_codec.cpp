@@ -137,6 +137,21 @@ namespace
     }
 
     [[nodiscard]]
+    grab::MouseButton
+    mouse_button()
+    {
+        return grab::MouseButton{
+            .button   = mouseButton,
+            .name     = "left",
+            .position = grab::SpacePoint{
+                                         .x     = mousePositionX,
+                                         .y     = mousePositionY,
+                                         .space = grab::CoordinateSpaceId{ mouseSpace },
+                                         },
+        };
+    }
+
+    [[nodiscard]]
     grab::MouseMove
     mouse_move()
     {
@@ -241,6 +256,10 @@ namespace
             make_event( grab::EventKind::MouseMove, inputCategory, mouse_move() ),
             make_event( grab::EventKind::IdleStart, inputCategory, idle() ),
             make_event( grab::EventKind::IdleEnd, inputCategory, idle() ),
+            make_event( grab::EventKind::MouseButtonDown,
+                        inputCategory,
+                        mouse_button() ),
+            make_event( grab::EventKind::MouseButtonUp, inputCategory, mouse_button() ),
             make_event( grab::EventKind::WindowFocusChanged,
                         windowCategory,
                         window_change() ),
@@ -300,6 +319,24 @@ namespace
     {
         EXPECT_EQ( actual.button, expected.button );
         EXPECT_EQ( actual.name, expected.name );
+    }
+
+    void
+    expect_payload_value_eq( const grab::MouseButton& expected,
+                             const grab::MouseButton& actual )
+    {
+        EXPECT_EQ( actual.button, expected.button );
+        EXPECT_EQ( actual.name, expected.name );
+        ASSERT_EQ( actual.position.has_value(), expected.position.has_value() );
+        if( !expected.position.has_value() || !actual.position.has_value() )
+        {
+            return;
+        }
+        const auto& expected_position = *expected.position;
+        const auto& actual_position   = *actual.position;
+        EXPECT_DOUBLE_EQ( actual_position.x, expected_position.x );
+        EXPECT_DOUBLE_EQ( actual_position.y, expected_position.y );
+        EXPECT_EQ( actual_position.space, expected_position.space );
     }
 
     void

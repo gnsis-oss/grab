@@ -28,19 +28,23 @@
 namespace
 {
 
-    constexpr std::uint8_t  test_keycode            = 38U;
-    constexpr std::uint8_t  test_button             = 1U;
-    constexpr std::int16_t  test_pointer_x          = 64;
-    constexpr std::int16_t  test_pointer_y          = 72;
-    constexpr std::size_t   no_subscriptions        = 0U;
-    constexpr std::size_t   one_subscription        = 1U;
-    constexpr std::size_t   maximum_pump_iterations = 10U;
-    constexpr std::uint64_t initial_generation      = 0U;
-    constexpr std::size_t   no_refreshes            = 0U;
-    constexpr double        timestampSlackSeconds   = 60.0;
-    constexpr auto          event_wait_budget       = std::chrono::seconds{ 5 };
-    constexpr auto          short_context_budget    = std::chrono::milliseconds{ 400 };
-    constexpr auto          short_wait_budget       = std::chrono::milliseconds{ 250 };
+    constexpr std::uint8_t     test_keycode            = 38U;
+    constexpr std::uint8_t     test_button             = 1U;
+    constexpr std::int16_t     test_pointer_x          = 64;
+    constexpr std::int16_t     test_pointer_y          = 72;
+    constexpr std::size_t      no_subscriptions        = 0U;
+    constexpr std::size_t      one_subscription        = 1U;
+    constexpr std::size_t      maximum_pump_iterations = 10U;
+    constexpr std::uint64_t    initial_generation      = 0U;
+    constexpr std::size_t      no_refreshes            = 0U;
+    constexpr double           timestampSlackSeconds   = 60.0;
+    constexpr std::string_view mouseButtonDownWireName{ "input.mouse_button_down" };
+    constexpr std::string_view mouseButtonUpWireName{ "input.mouse_button_up" };
+    constexpr std::string_view mouseClickWireName{ "input.mouse_click" };
+    constexpr std::string_view emptyButtonName{};
+    constexpr auto             event_wait_budget    = std::chrono::seconds{ 5 };
+    constexpr auto             short_context_budget = std::chrono::milliseconds{ 400 };
+    constexpr auto             short_wait_budget    = std::chrono::milliseconds{ 250 };
 
 }    // namespace
 
@@ -186,6 +190,231 @@ TEST( X11EventSource,
     }
     EXPECT_TRUE( saw_motion );
 
+    ASSERT_TRUE( runtime.stop().has_value() );
+}
+
+// GoogleTest assertion macros inflate the reported cognitive complexity.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+TEST( X11EventSource,
+      SyntheticButtonPressAndReleaseYieldDownAndUp )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    grab::drivers::desktop::x11::X11Runtime runtime;
+    const grab::OperationContext            start_context{
+        .deadline = grab::Deadline::unbounded(),
+    };
+    ASSERT_TRUE( runtime.start( start_context ).has_value() );
+
+    std::vector<grab::Event> events;
+    runtime.set_event_sink(
+        [&events]( grab::Event&& event )
+        {
+            events.push_back( std::move( event ) );
+        }
+    );
+
+    auto* const event_source = runtime.event_source();
+    ASSERT_NE( event_source, nullptr );
+    const grab::spi::EventSpec down_spec{ std::string{ mouseButtonDownWireName } };
+    const grab::spi::EventSpec up_spec{ std::string{ mouseButtonUpWireName } };
+    ASSERT_TRUE( event_source->enable( down_spec ).has_value() );
+    ASSERT_TRUE( event_source->enable( up_spec ).has_value() );
+
+    auto* const seat = runtime.native_seat();
+    ASSERT_NE( seat, nullptr );
+    ASSERT_TRUE( seat->button( test_button, true ).has_value() );
+    ASSERT_TRUE( seat->flush().has_value() );
+
+    const grab::OperationContext down_wait_context{
+        .deadline = grab::Deadline::after( event_wait_budget ),
+    };
+    ASSERT_TRUE( event_source
+                     ->wait_for_event( down_spec, down_wait_context, event_wait_budget )
+                     .has_value() );
+
+    ASSERT_TRUE( seat->button( test_button, false ).has_value() );
+    ASSERT_TRUE( seat->flush().has_value() );
+
+    const grab::OperationContext up_wait_context{
+        .deadline = grab::Deadline::after( event_wait_budget ),
+    };
+    ASSERT_TRUE( event_source
+                     ->wait_for_event( up_spec, up_wait_context, event_wait_budget )
+                     .has_value() );
+
+    const auto button_down =
+        std::ranges::find_if( events,
+                              []( const grab::Event& event )
+                              {
+                                  return event.kind == grab::EventKind::MouseButtonDown;
+                              } );
+    ASSERT_NE( button_down, events.end() );
+    EXPECT_EQ( button_down->origin, grab::EventOrigin::InjectedSelf );
+    EXPECT_EQ( std::get<grab::MouseButton>( button_down->payload ).button, test_button );
+
+    const auto button_up =
+        std::ranges::find_if( events,
+                              []( const grab::Event& event )
+                              {
+                                  return event.kind == grab::EventKind::MouseButtonUp;
+                              } );
+    ASSERT_NE( button_up, events.end() );
+    EXPECT_EQ( button_up->origin, grab::EventOrigin::InjectedSelf );
+    EXPECT_EQ( std::get<grab::MouseButton>( button_up->payload ).button, test_button );
+
+    ASSERT_TRUE( runtime.stop().has_value() );
+}
+
+// GoogleTest assertion macros inflate the reported cognitive complexity.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+TEST( X11EventSource,
+      ButtonDownAndUpCarryQueriedPositionInGlobalSpace )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    grab::drivers::desktop::x11::X11Runtime runtime;
+    const grab::OperationContext            start_context{
+        .deadline = grab::Deadline::unbounded(),
+    };
+    ASSERT_TRUE( runtime.start( start_context ).has_value() );
+    const auto* const capture_route = runtime.capture_route();
+    ASSERT_NE( capture_route, nullptr );
+
+    std::vector<grab::Event> events;
+    runtime.set_event_sink(
+        [&events]( grab::Event&& event )
+        {
+            events.push_back( std::move( event ) );
+        }
+    );
+
+    auto* const event_source = runtime.event_source();
+    ASSERT_NE( event_source, nullptr );
+    const grab::spi::EventSpec down_spec{ std::string{ mouseButtonDownWireName } };
+    const grab::spi::EventSpec up_spec{ std::string{ mouseButtonUpWireName } };
+    ASSERT_TRUE( event_source->enable( down_spec ).has_value() );
+    ASSERT_TRUE( event_source->enable( up_spec ).has_value() );
+
+    auto* const seat = runtime.native_seat();
+    ASSERT_NE( seat, nullptr );
+    ASSERT_TRUE(
+        seat->move_pointer_absolute( test_pointer_x, test_pointer_y ).has_value()
+    );
+    ASSERT_TRUE( seat->flush().has_value() );
+
+    ASSERT_TRUE( seat->button( test_button, true ).has_value() );
+    ASSERT_TRUE( seat->flush().has_value() );
+    const grab::OperationContext down_wait_context{
+        .deadline = grab::Deadline::after( event_wait_budget ),
+    };
+    ASSERT_TRUE( event_source
+                     ->wait_for_event( down_spec, down_wait_context, event_wait_budget )
+                     .has_value() );
+
+    ASSERT_TRUE( seat->button( test_button, false ).has_value() );
+    ASSERT_TRUE( seat->flush().has_value() );
+    const grab::OperationContext up_wait_context{
+        .deadline = grab::Deadline::after( event_wait_budget ),
+    };
+    ASSERT_TRUE( event_source
+                     ->wait_for_event( up_spec, up_wait_context, event_wait_budget )
+                     .has_value() );
+
+    const auto expect_position = [capture_route]( const grab::Event& event )
+    {
+        const auto& payload = std::get<grab::MouseButton>( event.payload );
+        ASSERT_TRUE( payload.position.has_value() );
+        EXPECT_DOUBLE_EQ( payload.position->x, static_cast<double>( test_pointer_x ) );
+        EXPECT_DOUBLE_EQ( payload.position->y, static_cast<double>( test_pointer_y ) );
+        EXPECT_EQ( payload.position->space, capture_route->global_space() );
+    };
+
+    const auto button_down =
+        std::ranges::find_if( events,
+                              []( const grab::Event& event )
+                              {
+                                  return event.kind == grab::EventKind::MouseButtonDown;
+                              } );
+    ASSERT_NE( button_down, events.end() );
+    expect_position( *button_down );
+
+    const auto button_up =
+        std::ranges::find_if( events,
+                              []( const grab::Event& event )
+                              {
+                                  return event.kind == grab::EventKind::MouseButtonUp;
+                              } );
+    ASSERT_NE( button_up, events.end() );
+    expect_position( *button_up );
+
+    ASSERT_TRUE( runtime.stop().has_value() );
+}
+
+// GoogleTest assertion macros inflate the reported cognitive complexity.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+TEST( X11EventSource,
+      ButtonPressPreservesLegacyMouseClickPayload )
+{
+    const char* const display = std::getenv( "DISPLAY" );
+    if( display == nullptr || std::string_view{ display }.empty() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    grab::drivers::desktop::x11::X11Runtime runtime;
+    const grab::OperationContext            start_context{
+        .deadline = grab::Deadline::unbounded(),
+    };
+    ASSERT_TRUE( runtime.start( start_context ).has_value() );
+
+    std::vector<grab::Event> events;
+    runtime.set_event_sink(
+        [&events]( grab::Event&& event )
+        {
+            events.push_back( std::move( event ) );
+        }
+    );
+
+    auto* const event_source = runtime.event_source();
+    ASSERT_NE( event_source, nullptr );
+    const grab::spi::EventSpec click_spec{ std::string{ mouseClickWireName } };
+    ASSERT_TRUE( event_source->enable( click_spec ).has_value() );
+
+    auto* const seat = runtime.native_seat();
+    ASSERT_NE( seat, nullptr );
+    ASSERT_TRUE( seat->button( test_button, true ).has_value() );
+    ASSERT_TRUE( seat->flush().has_value() );
+
+    const grab::OperationContext wait_context{
+        .deadline = grab::Deadline::after( event_wait_budget ),
+    };
+    ASSERT_TRUE( event_source
+                     ->wait_for_event( click_spec, wait_context, event_wait_budget )
+                     .has_value() );
+
+    const auto click =
+        std::ranges::find_if( events,
+                              []( const grab::Event& event )
+                              {
+                                  return event.kind == grab::EventKind::MouseClick;
+                              } );
+    ASSERT_NE( click, events.end() );
+    ASSERT_TRUE( std::holds_alternative<grab::MouseClick>( click->payload ) );
+    const auto& payload = std::get<grab::MouseClick>( click->payload );
+    EXPECT_EQ( payload.button, test_button );
+    EXPECT_EQ( payload.name, emptyButtonName );
+
+    ASSERT_TRUE( seat->button( test_button, false ).has_value() );
+    ASSERT_TRUE( seat->flush().has_value() );
     ASSERT_TRUE( runtime.stop().has_value() );
 }
 
