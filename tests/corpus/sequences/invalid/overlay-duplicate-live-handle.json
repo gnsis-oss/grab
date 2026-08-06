@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-duplicate-live-handle",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "add-marker", "op": "overlay.add", "handle": "marker",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "fill": { "color": "#4ecea933" } } },
+    { "id": "add-marker-again", "op": "overlay.add", "handle": "marker",
+      "shape": { "ellipse": { "center": [300, 200], "radius": 48 },
+                 "fill":    { "color": "#ed5a4933" } } }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-negative-rect-extent",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "negative-x-is-fine", "op": "overlay.add",
+      "shape": { "rect": { "x": -100, "y": -100, "w": 90, "h": 90 } } },
+    { "id": "negative-w-is-not", "op": "overlay.add",
+      "shape": { "rect":   { "x": 100, "y": 100, "w": -90, "h": 90 },
+                 "stroke": { "color": "#ed5a49", "width": 2 } } }
+  ]
+}

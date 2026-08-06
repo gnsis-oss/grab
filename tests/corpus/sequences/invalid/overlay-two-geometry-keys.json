@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-two-geometry-keys",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "fine", "op": "overlay.add",
+      "shape": { "rect": { "x": 0, "y": 0, "w": 20, "h": 20 } } },
+    { "id": "ambiguous", "op": "overlay.add",
+      "shape": { "rect":    { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "ellipse": { "center": [300, 200], "radius": 48 },
+                 "stroke":  { "color": "#4ecea9", "width": 3 } } }
+  ]
+}

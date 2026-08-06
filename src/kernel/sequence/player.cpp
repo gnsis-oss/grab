@@ -279,6 +279,54 @@ namespace grab::kernel::sequence
     }
 
     void
+    Player::record_neutralization( grab::NeutralizationOutcome outcome ) noexcept
+    {
+        switch( outcome )
+        {
+            case grab::NeutralizationOutcome::Failed :
+                neutralization_ = grab::NeutralizationOutcome::Failed;
+                return;
+            case grab::NeutralizationOutcome::Released :
+                if( neutralization_ != grab::NeutralizationOutcome::Failed )
+                {
+                    neutralization_ = grab::NeutralizationOutcome::Released;
+                }
+                return;
+            case grab::NeutralizationOutcome::NothingHeld :
+                if( neutralization_ == grab::NeutralizationOutcome::NotAttempted )
+                {
+                    neutralization_ = grab::NeutralizationOutcome::NothingHeld;
+                }
+                return;
+            case grab::NeutralizationOutcome::NotAttempted :
+                // No information: the step held nothing to begin with, which
+                // must not turn a clean run's report into a neutralization.
+                return;
+        }
+    }
+
+    void
+    Player::reap_holds( grab::sequence::StepId id )
+    {
+        const auto* const step = program_->find( id );
+        if( step == nullptr )
+        {
+            return;
+        }
+        const auto outcome = runner_->release_holds( *step );
+        record_neutralization( outcome );
+
+        log::verbose(
+            [&step, outcome]( auto& event )
+            {
+                event.tag( log::tags::player )
+                    .value( "reaped", step->id.index() )
+                    .value( "outcome", outcome );
+            }
+        );
+    }
+
+    void
     Player::admit_successors( grab::sequence::StepId id,
                               TimePoint              now )
     {
@@ -497,8 +545,20 @@ namespace grab::kernel::sequence
             {
                 continue;
             }
-            if( !runs_[index].entered || runs_[index].exited )
+            if( !runs_[index].entered )
             {
+                continue;
+            }
+            if( runs_[index].exited )
+            {
+                // succeed() exits a cleanly-completed step, so neutralize()
+                // can never revisit it — and an EXPLICIT, document-owned hold
+                // is still down, waiting for a later step this unwind has just
+                // cancelled. release_holds is the seam that lifts it, and it
+                // is deliberately not a second exit(): that contract is
+                // exactly-once, and calling it twice would double-release the
+                // implicit case.
+                reap_holds( id );
                 continue;
             }
             runs_[index].call_duration = now - runs_[index].entered_at;

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-handles",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "fire-and-forget-one", "op": "overlay.add",
+      "shape": { "rect": { "x": 0, "y": 0, "w": 30, "h": 30 },
+                 "fill": { "color": "#4ecea9" } } },
+
+    { "id": "fire-and-forget-two", "op": "overlay.add",
+      "shape": { "rect": { "x": 40, "y": 0, "w": 30, "h": 30 },
+                 "fill": { "color": "#4ecea9" } } },
+
+    { "id": "add-alpha", "op": "overlay.add", "handle": "alpha",
+      "shape": { "rect": { "x": 80, "y": 0, "w": 30, "h": 30 },
+                 "fill": { "color": "#ed5a49" } } },
+
+    { "id": "add-beta", "op": "overlay.add", "handle": "beta",
+      "shape": { "rect": { "x": 120, "y": 0, "w": 30, "h": 30 },
+                 "fill": { "color": "#edce59" } } },
+
+    { "id": "update-alpha", "op": "overlay.update", "handle": "alpha",
+      "shape": { "rect": { "x": 80, "y": 40, "w": 30, "h": 30 },
+                 "fill": { "color": "#ed5a49" } } },
+
+    { "id": "update-beta", "op": "overlay.update", "handle": "beta",
+      "shape": { "ellipse": { "center": [135, 55], "radius": 15 },
+                 "fill":    { "color": "#edce59" } } },
+
+    { "id": "remove-alpha", "op": "overlay.remove", "handle": "alpha" },
+
+    { "id": "reuse-alpha-after-remove", "op": "overlay.add", "handle": "alpha",
+      "shape": { "polygon": [[80, 80], [110, 80], [95, 105]],
+                 "fill":    { "color": "#4ecea9" } } },
+
+    { "id": "update-the-reused-alpha", "op": "overlay.update", "handle": "alpha",
+      "shape": { "polygon": [[80, 90], [110, 90], [95, 115]],
+                 "fill":    { "color": "#4ecea9" } } },
+
+    { "id": "remove-alpha-again", "op": "overlay.remove", "handle": "alpha" },
+
+    { "id": "remove-beta", "op": "overlay.remove", "handle": "beta" }
+  ]
+}

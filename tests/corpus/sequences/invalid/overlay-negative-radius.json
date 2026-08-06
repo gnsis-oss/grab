@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-negative-radius",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "inverted-circle", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [300, 200], "radius": -48 },
+                 "fill":    { "color": "#4ecea933" } } }
+  ]
+}

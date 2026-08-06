@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-bezier-no-controls",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "curve-to-nowhere", "op": "overlay.add",
+      "shape": { "path": [ { "move": [0, 0] },
+                           { "line": [10, 10] },
+                           { "bezier": [] },
+                           "close" ] } }
+  ]
+}

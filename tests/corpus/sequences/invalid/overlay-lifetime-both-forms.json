@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-lifetime-both-forms",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "expire-and-fade", "op": "overlay.add",
+      "shape": { "rect":     { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "fill":     { "color": "#4ecea933" },
+                 "lifetime": { "ttl_ms": 500, "fade_ms": 750 } } }
+  ]
+}

@@ -10,6 +10,7 @@
 #include "grab/command.hpp"
 #include "grab/command_descriptor.hpp"
 #include "grab/geometry/point.hpp"
+#include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
 #include "grab/trace.hpp"
@@ -83,12 +84,16 @@ namespace
     constexpr std::size_t               firstStep           = 0U;
     constexpr std::size_t               secondStep          = 1U;
     constexpr std::size_t               chordKeyEventCount  = 4U;
+    // Seat calls, counted rather than drawn: a capture with no matching
+    // release is what freezes a desktop.
+    constexpr std::size_t               noCalls       = 0U;
+    constexpr std::size_t               oneCall       = 1U;
 
-    constexpr std::string_view          playVerb            = "play";
-    constexpr std::string_view          sequenceLine        = "sequence: test-flow";
-    constexpr std::string_view          stepsLine           = "steps: 2";
-    constexpr std::string_view          orderLine           = "order: 0 1";
-    constexpr std::string_view          planPrefix          = "plan: >= ";
+    constexpr std::string_view          playVerb      = "play";
+    constexpr std::string_view          sequenceLine  = "sequence: test-flow";
+    constexpr std::string_view          stepsLine     = "steps: 2";
+    constexpr std::string_view          orderLine     = "order: 0 1";
+    constexpr std::string_view          planPrefix    = "plan: >= ";
     constexpr std::string_view          clickStepLine = "step 0 '' input.click after=[]";
     constexpr std::string_view          waitStepLine  = "step 1 '' time.wait after=[0]";
     constexpr std::string_view strictPlanLine  = "plan: >= 250 ms, 1 steps unestimated";
@@ -272,10 +277,107 @@ namespace
                 return {};
             }
 
+            // ── OverlaySeat ──────────────────────────────────
+            //
+            // Only the two calls the runner has to account for are counted.
+            // What freezes a desktop is a capture_pointer with no matching
+            // release_pointer after it, so the assertion is a number, not a
+            // drawing.
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_add( std::string_view,
+                         const grab::overlay::Shape& )
+            {
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_update( std::string_view,
+                            const grab::overlay::Shape& )
+            {
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_remove( std::string_view )
+            {
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_clear()
+            {
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_grab()
+            {
+                ++grabs_;
+                if( refuse_grab_ )
+                {
+                    return grab::fail( grab::ErrorCode::ProviderFailed,
+                                       "the seat refuses to capture the pointer" );
+                }
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_release()
+            {
+                ++ungrabs_;
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_attach( std::string_view,
+                            std::optional<grab::geometry::Point> )
+            {
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_detach( std::string_view )
+            {
+                return {};
+            }
+
             void
             refuse_text() noexcept
             {
                 refuse_text_ = true;
+            }
+
+            // A grab that FAILS may still have been granted: the server can
+            // hand the pointer over whatever the round trip reports, which is
+            // why the flag is set before the call and why the failure path has
+            // to release anyway.
+            void
+            refuse_grab() noexcept
+            {
+                refuse_grab_ = true;
+            }
+
+            [[nodiscard]]
+            std::size_t
+            grabs() const noexcept
+            {
+                return grabs_;
+            }
+
+            [[nodiscard]]
+            std::size_t
+            ungrabs() const noexcept
+            {
+                return ungrabs_;
             }
 
             [[nodiscard]]
@@ -305,8 +407,13 @@ namespace
             std::vector<ButtonEvent>           buttons_{};
             std::vector<KeyEvent>              keys_{};
             std::vector<std::string>           typed_{};
+            std::size_t                        grabs_{ 0U };
+            std::size_t                        ungrabs_{ 0U };
             bool                               refuse_text_{ false };
+            bool                               refuse_grab_{ false };
     };
+
+    static_assert( grab::kernel::sequence::OverlaySeat<ChordSeat> );
 
     // Answers one status for every step, so the failure-to-exit-code mapping
     // is assertable without a seat at all.
@@ -836,10 +943,13 @@ TEST( PlayCommand,
 }
 
 // Player::unwind skips a step it has already exited, and a SUCCESSFUL
-// input.press was exited by succeed(). Its hold therefore survives the abort,
-// which is exactly what release_outstanding() is for.
+// input.press was exited by succeed(). Its hold used to survive the abort
+// entirely and be lifted only by release_outstanding(), on the way out of the
+// process. release_holds() closes that: the unwind itself reaches back into
+// the completed step and lifts what the document left down, because the
+// input.release that was supposed to lift it has just been cancelled.
 TEST( PlayCommand,
-      AnAbortAfterASuccessfulPressStillReleasesTheButton )
+      AnAbortAfterASuccessfulPressReleasesTheButtonDuringTheUnwind )
 {
     std::vector<Step> steps;
     steps.push_back( Step{
@@ -861,11 +971,234 @@ TEST( PlayCommand,
     ASSERT_FALSE( outcome.has_value() );
     EXPECT_EQ( player.state(), grab::sequence::PlayState::Interrupted );
     ASSERT_EQ( seat.typed().size(), oneStep );
+
+    // The unwind lifted it, so nothing is outstanding by the time the process
+    // gets its turn.
+    ASSERT_EQ( seat.buttons().size(), twoSteps );
+    EXPECT_EQ( seat.buttons()[1U].code, primaryButton );
+    EXPECT_FALSE( seat.buttons()[1U].pressed );
+    EXPECT_EQ( runner.outstanding_holds(), noOutstandingHolds );
+    EXPECT_EQ( player.neutralization(), grab::NeutralizationOutcome::Released );
+
+    // And the backstop must not press it up a SECOND time: a duplicate release
+    // is a duplicate event the application sees.
+    EXPECT_EQ( runner.release_outstanding(), grab::NeutralizationOutcome::NothingHeld );
+    EXPECT_EQ( seat.buttons().size(), twoSteps );
+}
+
+// The mirror hazard, and the one the live run caught. `state.document_hold`
+// says a step TOOK an explicit hold; nothing on the success path clears it,
+// because exit() must not break a chord. So a COMPLETED press/release pair
+// still carries the flag, and an unwind that trusted it alone would press the
+// button up a second time -- a spurious event the application sees, from a
+// button that has been up for seconds.
+TEST( PlayCommand,
+      AnAbortDoesNotReReleaseAPressTheDocumentAlreadyReleased )
+{
+    std::vector<Step> steps;
+    steps.push_back( Step{
+        .command = grab::sequence::PressCommand{ .button = primaryButton },
+    } );
+    steps.push_back( Step{
+        .command = grab::sequence::ReleaseCommand{ .button = primaryButton },
+        .after   = { step_id( firstStep ) },
+    } );
+    steps.push_back( Step{
+        .command = grab::sequence::TypeCommand{ .text = std::string{ typedText } },
+        .after   = { step_id( secondStep ) },
+    } );
+    const auto program = build_or_die( std::move( steps ), PacingOptions{} );
+
+    ChordSeat  seat;
+    seat.refuse_text();
+    grab::cli::SeatRunner<ChordSeat> runner{ seat };
+    Player                           player{ program, runner };
+
+    const auto                       outcome = grab::cli::drive( player );
+
+    ASSERT_FALSE( outcome.has_value() );
+    EXPECT_EQ( player.state(), grab::sequence::PlayState::Interrupted );
+    // Exactly the down and the up the document asked for, and nothing else.
+    ASSERT_EQ( seat.buttons().size(), twoSteps );
+    EXPECT_TRUE( seat.buttons()[0U].pressed );
+    EXPECT_FALSE( seat.buttons()[1U].pressed );
+    EXPECT_EQ( runner.outstanding_holds(), noOutstandingHolds );
+    EXPECT_EQ( runner.release_outstanding(), grab::NeutralizationOutcome::NothingHeld );
+    EXPECT_EQ( seat.buttons().size(), twoSteps );
+}
+
+// The same for a chord: key_down / key / key_up completed, so the unwind must
+// not lift the modifier again.
+TEST( PlayCommand,
+      AnAbortDoesNotReReleaseACompletedChordsModifier )
+{
+    constexpr std::size_t thirdStep = 2U;
+
+    std::vector<Step>     steps;
+    steps.push_back( Step{
+        .command = grab::sequence::KeyDownCommand{ .key = std::string{ controlKey } },
+    } );
+    steps.push_back( Step{
+        .command = grab::sequence::KeyCommand{ .key = std::string{ copyKey } },
+        .after   = { step_id( firstStep ) },
+    } );
+    steps.push_back( Step{
+        .command = grab::sequence::KeyUpCommand{ .key = std::string{ controlKey } },
+        .after   = { step_id( secondStep ) },
+    } );
+    steps.push_back( Step{
+        .command = grab::sequence::TypeCommand{ .text = std::string{ typedText } },
+        .after   = { step_id( thirdStep ) },
+    } );
+    const auto program = build_or_die( std::move( steps ), PacingOptions{} );
+
+    ChordSeat  seat;
+    seat.refuse_text();
+    grab::cli::SeatRunner<ChordSeat> runner{ seat };
+    Player                           player{ program, runner };
+
+    const auto                       outcome = grab::cli::drive( player );
+
+    ASSERT_FALSE( outcome.has_value() );
+    EXPECT_EQ( seat.keys().size(), chordKeyEventCount );
+    EXPECT_EQ( seat.keys()[3U].name, controlKey );
+    EXPECT_FALSE( seat.keys()[3U].pressed );
+    EXPECT_EQ( runner.outstanding_holds(), noOutstandingHolds );
+    EXPECT_EQ( runner.release_outstanding(), grab::NeutralizationOutcome::NothingHeld );
+    EXPECT_EQ( seat.keys().size(), chordKeyEventCount );
+}
+
+// MECHANISM 2 of design §3.2. overlay.grab is Instant, so it always succeeds,
+// so succeed() always exits it, so the Player's unwind never revisits it --
+// and a run that simply REACHES THE END with the capture still taken is not
+// unwound at all. Nothing but the runner's own tracking lifts it, and a
+// pointer grab that outlives its owner freezes the whole desktop.
+TEST( PlayCommand,
+      AGrabWithNoReleaseIsLiftedWhenTheRunEnds )
+{
+    std::vector<Step> steps;
+    steps.push_back( Step{
+        .command = grab::sequence::OverlayGrabCommand{},
+    } );
+    const auto program = build_or_die( std::move( steps ), PacingOptions{} );
+
+    ChordSeat  seat;
+    grab::cli::SeatRunner<ChordSeat> runner{ seat };
+    Player                           player{ program, runner };
+
+    const auto                       outcome = grab::cli::drive( player );
+
+    ASSERT_TRUE( outcome.has_value() ) << outcome.error().message;
+    // Done, not Interrupted: this is the path no unwind reaches.
+    EXPECT_EQ( player.state(), grab::sequence::PlayState::Done );
+    EXPECT_EQ( seat.grabs(), oneCall );
+    EXPECT_EQ( seat.ungrabs(), noCalls );
+    EXPECT_TRUE( runner.capture_outstanding() );
     EXPECT_EQ( runner.outstanding_holds(), oneOutstandingHold );
 
     EXPECT_EQ( runner.release_outstanding(), grab::NeutralizationOutcome::Released );
-    ASSERT_EQ( seat.buttons().size(), twoSteps );
-    EXPECT_FALSE( seat.buttons()[1U].pressed );
+    EXPECT_EQ( seat.ungrabs(), oneCall );
+    EXPECT_FALSE( runner.capture_outstanding() );
+}
+
+// MECHANISM 1. The capture is taken, a later step aborts, and the
+// overlay.release that was going to lift it never runs. release_holds() has to
+// reach the already-exited grab step during the unwind -- while the run is
+// still tearing down, not after the report has been written.
+TEST( PlayCommand,
+      AnAbortAfterASuccessfulGrabReleasesThePointerCapture )
+{
+    std::vector<Step> steps;
+    steps.push_back( Step{
+        .command = grab::sequence::OverlayGrabCommand{},
+    } );
+    steps.push_back( Step{
+        .command = grab::sequence::TypeCommand{ .text = std::string{ typedText } },
+        .after   = { step_id( firstStep ) },
+    } );
+    const auto program = build_or_die( std::move( steps ), PacingOptions{} );
+
+    ChordSeat  seat;
+    seat.refuse_text();
+    grab::cli::SeatRunner<ChordSeat> runner{ seat };
+    Player                           player{ program, runner };
+
+    const auto                       outcome = grab::cli::drive( player );
+
+    ASSERT_FALSE( outcome.has_value() );
+    EXPECT_EQ( player.state(), grab::sequence::PlayState::Interrupted );
+    EXPECT_EQ( seat.grabs(), oneCall );
+    EXPECT_EQ( seat.ungrabs(), oneCall );
+    EXPECT_FALSE( runner.capture_outstanding() );
+    EXPECT_EQ( runner.outstanding_holds(), noOutstandingHolds );
+    EXPECT_EQ( player.neutralization(), grab::NeutralizationOutcome::Released );
+
+    EXPECT_EQ( runner.release_outstanding(), grab::NeutralizationOutcome::NothingHeld );
+    EXPECT_EQ( seat.ungrabs(), oneCall );
+}
+
+// A capture that WAS released must not report NothingHeld. The server can hand
+// this process the pointer whatever the round trip answers, so overlay.grab
+// marks itself held before the call and exit() releases it on the unwind --
+// and exit() has to count that flag when it decides what it neutralized, or
+// the run reports it held nothing while it was in fact holding the desktop.
+TEST( PlayCommand,
+      AFailedGrabReportsThePointerCaptureAsReleased )
+{
+    std::vector<Step> steps;
+    steps.push_back( Step{
+        .command = grab::sequence::OverlayGrabCommand{},
+    } );
+    const auto program = build_or_die( std::move( steps ), PacingOptions{} );
+
+    ChordSeat  seat;
+    seat.refuse_grab();
+    grab::cli::SeatRunner<ChordSeat> runner{ seat };
+    Player                           player{ program, runner };
+
+    const auto                       outcome = grab::cli::drive( player );
+
+    ASSERT_FALSE( outcome.has_value() );
+    EXPECT_EQ( seat.grabs(), oneCall );
+    EXPECT_EQ( seat.ungrabs(), oneCall );
+    EXPECT_EQ( player.neutralization(), grab::NeutralizationOutcome::Released );
+    // A grab commits no input, so it is NOT PossiblyCommitted -- that verdict
+    // belongs to a half-finished button press.
+    EXPECT_EQ( runner.last_error( program.steps()[firstStep] ),
+               grab::ErrorCode::ProviderFailed );
+    EXPECT_FALSE( runner.capture_outstanding() );
+}
+
+// The pair, run through cleanly: the document lifts its own capture and
+// nothing is outstanding afterwards. Without this the two tests above would be
+// satisfied by a runner that released the pointer on every path, which would
+// break every carry.
+TEST( PlayCommand,
+      AGrabFollowedByItsReleaseLeavesNothingOutstanding )
+{
+    std::vector<Step> steps;
+    steps.push_back( Step{
+        .command = grab::sequence::OverlayGrabCommand{},
+    } );
+    steps.push_back( Step{
+        .command = grab::sequence::OverlayReleaseCommand{},
+        .after   = { step_id( firstStep ) },
+    } );
+    const auto program = build_or_die( std::move( steps ), PacingOptions{} );
+
+    ChordSeat  seat;
+    grab::cli::SeatRunner<ChordSeat> runner{ seat };
+    Player                           player{ program, runner };
+
+    const auto                       outcome = grab::cli::drive( player );
+
+    ASSERT_TRUE( outcome.has_value() ) << outcome.error().message;
+    EXPECT_EQ( player.state(), grab::sequence::PlayState::Done );
+    EXPECT_EQ( seat.grabs(), oneCall );
+    EXPECT_EQ( seat.ungrabs(), oneCall );
+    EXPECT_FALSE( runner.capture_outstanding() );
+    EXPECT_EQ( runner.release_outstanding(), grab::NeutralizationOutcome::NothingHeld );
+    EXPECT_EQ( seat.ungrabs(), oneCall );
 }
 
 // A seat missing the capability a step needs is a configuration fault, not a

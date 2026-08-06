@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-polygon-two-points",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "triangle-is-fine", "op": "overlay.add",
+      "shape": { "polygon": [[0, 0], [10, 0], [10, 10]] } },
+    { "id": "a-line-is-not-a-polygon", "op": "overlay.add",
+      "shape": { "polygon": [[0, 0], [10, 0]],
+                 "stroke":  { "color": "#4ecea9", "width": 2 } } }
+  ]
+}

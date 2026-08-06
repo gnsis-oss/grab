@@ -181,13 +181,26 @@ namespace grab::cli
     //    Success completed and is exited normally; anything else (Running when
     //    the frontier was torn down, or Failure) is an unwind, and
     //    interrupt() sets state.interrupted before exit().
-    //  - Player::unwind skips steps it has already exited (player.cpp:500),
-    //    and a SUCCESSFUL input.press was already exited by succeed()
-    //    (player.cpp:353). Its hold therefore survives the unwind. That is
-    //    what release_outstanding() closes: the runner tracks explicit holds
-    //    itself and lifts whatever is still down when the process is done.
-    //    Without it a `grab play` that aborts after an input.press leaves a
-    //    mouse button down for the next application, silently.
+    //  - Player::unwind skips steps it has already exited, and a SUCCESSFUL
+    //    input.press was already exited by succeed(). Its hold therefore
+    //    survives the unwind, so TWO mechanisms lift it and neither is
+    //    redundant:
+    //
+    //      1. release_holds(), which the Player's unwind calls for exactly
+    //         those already-exited steps. It runs while the document is being
+    //         torn down, which is as early as the hold can honestly be
+    //         released.
+    //      2. release_outstanding(), which the CLI calls on every exit path.
+    //         It is the backstop for the paths no unwind reaches at all — a
+    //         run that reaches Done with a press or an overlay.grab still
+    //         outstanding, because the document simply never released it.
+    //
+    //    Without (1) an aborted run holds the pointer for the whole of its
+    //    report-writing; without (2) a COMPLETED run holds it forever. A
+    //    stranded button reaches the next application; a stranded pointer
+    //    capture freezes the whole desktop, and recovery needs another X
+    //    client or a VT switch. That asymmetry is why the capture is tracked
+    //    beside the buttons and keys rather than trusted to the executor.
     template<typename SeatT>
     class SeatRunner final : public grab::kernel::sequence::CommandRunner
     {
@@ -224,6 +237,15 @@ namespace grab::cli
                 if( status == grab::sequence::Status::Success )
                 {
                     remember_hold( step.command );
+                }
+                // The capture is remembered WHATEVER the round trip reported.
+                // overlay.grab sets its flag before the seat call because past
+                // that point the server may have handed this process the
+                // pointer however the call answers, and a capture that MIGHT
+                // be held has to be released like one that is.
+                if( entry.state.overlay_grab_held )
+                {
+                    capture_held_ = true;
                 }
                 return status;
             }
@@ -265,9 +287,18 @@ namespace grab::cli
                 {
                     return grab::NeutralizationOutcome::NotAttempted;
                 }
-                entry->exited          = true;
+                entry->exited = true;
 
-                const bool held_before = entry->state.held || entry->state.document_hold;
+                // The pointer capture is OR'd into both halves of this
+                // question on purpose. Leave it out of `held_before` and a
+                // capture that was really released reports NothingHeld, which
+                // is a false report about the one hold whose escape freezes
+                // the desktop; leave it out of the re-check and a capture the
+                // document still owns reports Released, which is a false
+                // report in the other direction.
+                const bool held_before = entry->state.held ||
+                                         entry->state.document_hold ||
+                                         entry->state.overlay_grab_held;
                 const bool unwinding =
                     entry->last_status != grab::sequence::Status::Success;
 
@@ -287,7 +318,9 @@ namespace grab::cli
                 {
                     return grab::NeutralizationOutcome::NothingHeld;
                 }
-                if( entry->state.held || entry->state.document_hold )
+                if( entry->state.held ||
+                    entry->state.document_hold ||
+                    entry->state.overlay_grab_held )
                 {
                     // Still down on purpose: the document owns it and a later
                     // step is supposed to lift it. release_outstanding() is
@@ -334,14 +367,85 @@ namespace grab::cli
                 );
             }
 
-            // Lift anything the document left down. The process is the last
-            // step: after it exits nothing can release a held button or key,
-            // so an outstanding hold here is by definition one no later step
-            // will lift.
+            // Mechanism 1 of design §3.2: the Player's unwind reaches back
+            // into a step that already succeeded and lifts what the document
+            // deliberately left down, because the later step that was supposed
+            // to lift it is never going to run.
+            //
+            // Only the EXPLICIT holds are touched. An implicit one — the
+            // button a drag presses for its own walk — was already released by
+            // the body, and pressing it up a second time is a second event the
+            // application sees.
+            //
+            // TWO CONDITIONS, AND BOTH ARE NECESSARY. `state.document_hold`
+            // says this step TOOK an explicit hold; it never says the hold is
+            // still down, because nothing on the success path clears it —
+            // exit_command returns early when the run is not unwinding, which
+            // is what makes a chord and a press/release pair expressible at
+            // all. So a completed `input.press` → `input.release` pair would
+            // be released a SECOND time here on the strength of that flag
+            // alone. The runner's own buttons_/keys_/capture_held_ is the half
+            // that knows whether anything is still outstanding, because the
+            // matching release retires it there. Ask both.
+            grab::NeutralizationOutcome
+            release_holds( const grab::sequence::Step& step ) override
+            {
+                auto* const entry = find( step.id );
+                if( entry == nullptr || !entry->state.entered )
+                {
+                    return grab::NeutralizationOutcome::NotAttempted;
+                }
+                const bool button_or_key =
+                    entry->state.document_hold && still_outstanding( step.command );
+                const bool capture = entry->state.overlay_grab_held && capture_held_;
+                if( !button_or_key && !capture )
+                {
+                    return grab::NeutralizationOutcome::NotAttempted;
+                }
+
+                bool released = true;
+                if( button_or_key )
+                {
+                    // Cleared before the attempt, like exit()'s own releases: a
+                    // failing seat must not turn this into an unbounded retry.
+                    entry->state.document_hold = false;
+                    released = lift_document_hold( step.command ) && released;
+                }
+                if( capture )
+                {
+                    entry->state.overlay_grab_held = false;
+                    released                       = lift_capture() && released;
+                }
+                // release_outstanding() must not lift it a second time.
+                forget_hold( step.command );
+
+                // Nominal, not verbose: a failed release here is the single
+                // worst thing this layer can report, and the question "did the
+                // unwind strand anything" is asked after the fact.
+                log::nominal(
+                    [&step, capture, released]( auto& event )
+                    {
+                        event.tag( log::tags::player )
+                            .value( "reaped",
+                                    grab::command_name(
+                                        grab::sequence::kind_of( step.command )
+                                    ) )
+                            .value( "capture", capture )
+                            .value( "ok", released );
+                    }
+                );
+                return released ? grab::NeutralizationOutcome::Released
+                                : grab::NeutralizationOutcome::Failed;
+            }
+
+            // Mechanism 2: lift anything the document left down. The process
+            // is the last step: after it exits nothing can release a held
+            // button, key or pointer capture, so an outstanding hold here is
+            // by definition one no later step will lift.
             grab::NeutralizationOutcome
             release_outstanding()
             {
-                if( buttons_.empty() && keys_.empty() )
+                if( buttons_.empty() && keys_.empty() && !capture_held_ )
                 {
                     return grab::NeutralizationOutcome::NothingHeld;
                 }
@@ -366,6 +470,10 @@ namespace grab::cli
                 {
                     released = seat_->flush().has_value() && released;
                 }
+                if( capture_held_ )
+                {
+                    released = lift_capture() && released;
+                }
                 buttons_.clear();
                 keys_.clear();
                 return released ? grab::NeutralizationOutcome::Released
@@ -376,7 +484,20 @@ namespace grab::cli
             std::size_t
             outstanding_holds() const noexcept
             {
-                return buttons_.size() + keys_.size();
+                return buttons_.size() +
+                       keys_.size() +
+                       static_cast<std::size_t>( capture_held_ ? 1U : 0U );
+            }
+
+            // Whether the pointer is still captured as far as this runner
+            // knows. Separate from outstanding_holds() because the two failures
+            // are an order of magnitude apart: a stranded button reaches the
+            // next application, a stranded capture freezes the desktop.
+            [[nodiscard]]
+            bool
+            capture_outstanding() const noexcept
+            {
+                return capture_held_;
             }
 
         private:
@@ -455,6 +576,7 @@ namespace grab::cli
                 constexpr bool keyboard = grab::kernel::sequence::KeyboardSeat<SeatT>;
                 constexpr bool text     = grab::kernel::sequence::TextSeat<SeatT>;
                 constexpr bool capture  = grab::kernel::sequence::CapturingSeat<SeatT>;
+                constexpr bool overlay  = grab::kernel::sequence::OverlaySeat<SeatT>;
                 switch( kind )
                 {
                     case grab::CommandKind::Warp :
@@ -475,6 +597,15 @@ namespace grab::cli
                         return keyboard;
                     case grab::CommandKind::Capture :
                         return capture;
+                    case grab::CommandKind::OverlayAdd :
+                    case grab::CommandKind::OverlayUpdate :
+                    case grab::CommandKind::OverlayRemove :
+                    case grab::CommandKind::OverlayClear :
+                    case grab::CommandKind::OverlayGrab :
+                    case grab::CommandKind::OverlayRelease :
+                    case grab::CommandKind::OverlayAttach :
+                    case grab::CommandKind::OverlayDetach :
+                        return overlay;
                     case grab::CommandKind::Wait :
                         return true;
                     default :
@@ -537,6 +668,20 @@ namespace grab::cli
                     up != nullptr )
                 {
                     std::erase( keys_, up->key );
+                    return;
+                }
+                // A SUCCEEDING overlay.release is the one thing that clears the
+                // capture from the outside. Its counterpart is not here: the
+                // grab is remembered in enter() whatever it reported, because
+                // a failed grab may still hold the pointer. The capture is one
+                // flag rather than a list — the server grants the pointer once,
+                // and a second overlay.grab over a live one is the same
+                // capture, not a second.
+                if( std::holds_alternative<grab::sequence::OverlayReleaseCommand>(
+                        command
+                    ) )
+                {
+                    capture_held_ = false;
                 }
             }
 
@@ -557,6 +702,87 @@ namespace grab::cli
                     down != nullptr )
                 {
                     std::erase( keys_, down->key );
+                    return;
+                }
+                if( std::holds_alternative<grab::sequence::OverlayGrabCommand>(
+                        command
+                    ) )
+                {
+                    capture_held_ = false;
+                }
+            }
+
+            // Is the explicit hold this step took STILL DOWN? The document's
+            // own input.release / input.key_up retires it from these lists as
+            // it runs, so a completed pair answers false and the unwind leaves
+            // it alone.
+            [[nodiscard]]
+            bool
+            still_outstanding( const grab::sequence::Command& command ) const
+            {
+                if( const auto* const press =
+                        std::get_if<grab::sequence::PressCommand>( &command );
+                    press != nullptr )
+                {
+                    return std::ranges::find( buttons_, press->button ) !=
+                           buttons_.end();
+                }
+                if( const auto* const down =
+                        std::get_if<grab::sequence::KeyDownCommand>( &command );
+                    down != nullptr )
+                {
+                    return std::ranges::find( keys_, down->key ) != keys_.end();
+                }
+                return false;
+            }
+
+            // The seat calls behind release_holds(), spelled once so the
+            // unwind path and the process-exit backstop cannot disagree about
+            // what "release" means.
+            [[nodiscard]]
+            bool
+            lift_document_hold( const grab::sequence::Command& command )
+            {
+                if constexpr( grab::kernel::sequence::PointerSeat<SeatT> )
+                {
+                    if( const auto* const press =
+                            std::get_if<grab::sequence::PressCommand>( &command );
+                        press != nullptr )
+                    {
+                        const bool up =
+                            seat_->button( press->button, false ).has_value();
+                        return seat_->flush().has_value() && up;
+                    }
+                }
+                if constexpr( grab::kernel::sequence::KeyboardSeat<SeatT> )
+                {
+                    if( const auto* const down =
+                            std::get_if<grab::sequence::KeyDownCommand>( &command );
+                        down != nullptr )
+                    {
+                        return seat_->key_by_name( down->key, false ).has_value();
+                    }
+                }
+                // A document_hold on anything else is a hold this runner does
+                // not know how to lift, which is a defect rather than a
+                // success to report.
+                return false;
+            }
+
+            [[nodiscard]]
+            bool
+            lift_capture()
+            {
+                capture_held_ = false;
+                if constexpr( grab::kernel::sequence::OverlaySeat<SeatT> )
+                {
+                    return seat_->overlay_release().has_value();
+                }
+                else
+                {
+                    // A seat with no overlay cannot have taken the pointer, so
+                    // there is nothing to fail at.
+                    return true;
                 }
             }
 
@@ -622,6 +848,7 @@ namespace grab::cli
             std::vector<Entry>        entries_{};
             std::vector<std::uint8_t> buttons_{};
             std::vector<std::string>  keys_{};
+            bool                      capture_held_{ false };
     };
 
 }    // namespace grab::cli

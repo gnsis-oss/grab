@@ -6,9 +6,12 @@
 #include "grab/geometry/point.hpp"
 #include "grab/image.hpp"
 #include "grab/input.hpp"
+#include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/screen.hpp"
 #include "grab/sequence_types.hpp"
+#include "grab/session.hpp"
+#include "grab/space.hpp"
 #include "grab/trace.hpp"
 #include "kernel/scheduling/timer_thread.hpp"
 #include "kernel/sequence/interpreter.hpp"
@@ -22,6 +25,7 @@
 #include <cerrno>
 #include <charconv>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -30,6 +34,7 @@
 #include <fstream>
 #include <ios>
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>    // IWYU pragma: keep
 #include <optional>
 #include <poll.h>
@@ -37,7 +42,9 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace grab::cli
@@ -153,6 +160,136 @@ namespace grab::cli
             return {};
         }
 
+        // ── Overlay geometry, walked generically ──────────────
+        //
+        // Two jobs need every point of a Shape and nothing else: STAMPING the
+        // delegate's coordinate space onto a document that could not name one,
+        // and TRANSLATING a shape that rides the pointer. Both are spelled
+        // once, over a visitor, so a new Geometry alternative fails to compile
+        // here rather than silently going unstamped or refusing to move.
+        //
+        // A document is written before any session exists, so every SpacePoint
+        // it carries has the default space id — and the default is not a
+        // registered space. The transform lookup would refuse it, so the stamp
+        // is not cosmetic: without it every overlay.add fails.
+        template<typename Visit>
+        void
+        for_each_point( grab::overlay::Geometry& geometry,
+                        Visit&&                  visit )
+        {
+            std::visit(
+                [&visit]( auto& figure )
+                {
+                    using Figure = std::remove_cvref_t<decltype( figure )>;
+                    if constexpr( std::is_same_v<Figure, grab::overlay::Rect> )
+                    {
+                        visit( figure.bounds.x, figure.bounds.y, figure.bounds.space );
+                    }
+                    else if constexpr( std::is_same_v<Figure, grab::overlay::Ellipse> )
+                    {
+                        visit( figure.center.x, figure.center.y, figure.center.space );
+                    }
+                    else if constexpr( std::is_same_v<Figure, grab::overlay::Polygon> )
+                    {
+                        for( auto& point : figure.points )
+                        {
+                            visit( point.x, point.y, point.space );
+                        }
+                    }
+                    else
+                    {
+                        for( auto& command : figure.commands )
+                        {
+                            std::visit(
+                                [&visit]( auto& element )
+                                {
+                                    using Element =
+                                        std::remove_cvref_t<decltype( element )>;
+                                    if constexpr( std::is_same_v<
+                                                      Element,
+                                                      grab::overlay::MoveTo> ||
+                                                  std::is_same_v<Element,
+                                                                 grab::overlay::LineTo> )
+                                    {
+                                        visit( element.point.x,
+                                               element.point.y,
+                                               element.point.space );
+                                    }
+                                    else if constexpr( std::is_same_v<
+                                                           Element,
+                                                           grab::overlay::BezierTo> )
+                                    {
+                                        for( auto& control : element.control )
+                                        {
+                                            visit( control.x, control.y, control.space );
+                                        }
+                                    }
+                                },
+                                command
+                            );
+                        }
+                    }
+                },
+                geometry
+            );
+        }
+
+        void
+        stamp_space( grab::overlay::Geometry& geometry,
+                     grab::CoordinateSpaceId  space )
+        {
+            for_each_point( geometry,
+                            [space]( double&, double&, grab::CoordinateSpaceId& stamp )
+                            {
+                                stamp = space;
+                            } );
+        }
+
+        void
+        translate_geometry( grab::overlay::Geometry& geometry,
+                            double                   dx,
+                            double                   dy )
+        {
+            for_each_point( geometry,
+                            [dx, dy]( double& x, double& y, grab::CoordinateSpaceId& )
+                            {
+                                x += dx;
+                                y += dy;
+                            } );
+        }
+
+        // Where a shape "is": a rect's origin, an ellipse's centre, the first
+        // named point of a polygon or path. It is the reference the carry
+        // offset is measured from, so it only has to be STABLE under
+        // translation, which every alternative's first point is.
+        struct Anchor
+        {
+                double x{ 0.0 };
+                double y{ 0.0 };
+        };
+
+        [[nodiscard]]
+        Anchor
+        anchor_of( const grab::overlay::Geometry& geometry )
+        {
+            auto   copy = geometry;
+            Anchor found{};
+            bool   seen = false;
+            for_each_point( copy,
+                            [&found,
+                             &seen]( double& x, double& y, grab::CoordinateSpaceId& )
+                            {
+                                if( seen )
+                                {
+                                    return;
+                                }
+                                seen    = true;
+                                found.x = x;
+                                found.y = y;
+                            } );
+            return found;
+        }
+
         // The seat `grab play` actually drives: grab::Input, widened to the
         // concepts in execute.hpp.
         //
@@ -185,12 +322,22 @@ namespace grab::cli
                     };
                 }
 
+                // Every waypoint of every motion command arrives here, once
+                // per waypoint -- which is exactly why ATTACHMENT LIVES IN THE
+                // SEAT. A shape that rides the pointer has to be repositioned
+                // on each of those ticks; hang it off the command layer and it
+                // teleports at the end of the move instead of being carried.
                 [[nodiscard]]
                 grab::Result<void>
                 move_pointer_absolute( std::int16_t x,
                                        std::int16_t y )
                 {
-                    return input_.move( x, y );
+                    auto moved = input_.move( x, y );
+                    if( !moved.has_value() )
+                    {
+                        return moved;
+                    }
+                    return carry_attached( x, y );
                 }
 
                 [[nodiscard]]
@@ -269,7 +416,328 @@ namespace grab::cli
                     return done;
                 }
 
+                // ── OverlaySeat ──────────────────────────────────
+                //
+                // THE HANDLE-TO-ShapeId MAP IS RUN STATE AND LIVES HERE. A
+                // document names a shape before any scene exists, so nothing
+                // in it can carry a ShapeId; the seat is the first place that
+                // knows both.
+                //
+                // The session is opened LAZILY, on the first overlay step. A
+                // document that draws nothing must not pay for a session, and
+                // `grab click` -- which routes through this same seat as a
+                // one-step document -- must not start failing on a display
+                // with no compositing manager.
+
+                [[nodiscard]]
+                grab::Result<void>
+                overlay_add( std::string_view            handle,
+                             const grab::overlay::Shape& shape )
+                {
+                    auto surface = ensure_overlay();
+                    if( !surface.has_value() )
+                    {
+                        return std::unexpected( std::move( surface.error() ) );
+                    }
+
+                    grab::overlay::Shape placed = shape;
+                    stamp_space( placed.geometry, space_ );
+                    auto id = ( *surface )->add( placed );
+                    if( !id.has_value() )
+                    {
+                        return std::unexpected( std::move( id.error() ) );
+                    }
+                    if( handle.empty() )
+                    {
+                        // Fire-and-forget: drawable, never referenced again.
+                        // Storing it under a name nothing can spell would only
+                        // grow the map for the life of the run.
+                        return {};
+                    }
+                    std::erase_if( shapes_,
+                                   [handle]( const Placed& entry )
+                                   {
+                                       return entry.handle == handle;
+                                   } );
+                    shapes_.push_back( Placed{
+                        .handle   = std::string{ handle },
+                        .id       = *id,
+                        .shape    = std::move( placed ),
+                        .offset   = Anchor{},
+                        .attached = false,
+                    } );
+                    return {};
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                overlay_update( std::string_view            handle,
+                                const grab::overlay::Shape& shape )
+                {
+                    auto* const entry = find_shape( handle );
+                    if( entry == nullptr )
+                    {
+                        return unknown_handle( handle );
+                    }
+                    grab::overlay::Shape placed = shape;
+                    stamp_space( placed.geometry, space_ );
+                    auto updated = overlay_->update( entry->id, placed );
+                    if( !updated.has_value() )
+                    {
+                        return updated;
+                    }
+                    // The document's geometry becomes the new truth, carry or
+                    // no carry: the next waypoint re-derives the shape's
+                    // position from it, so a recolour mid-carry keeps riding
+                    // rather than snapping back to where it was added.
+                    entry->shape = std::move( placed );
+                    return {};
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                overlay_remove( std::string_view handle )
+                {
+                    auto* const entry = find_shape( handle );
+                    if( entry == nullptr )
+                    {
+                        return unknown_handle( handle );
+                    }
+                    const auto id = entry->id;
+                    std::erase_if( shapes_,
+                                   [handle]( const Placed& candidate )
+                                   {
+                                       return candidate.handle == handle;
+                                   } );
+                    auto removed = overlay_->remove( id );
+                    if( !removed.has_value() &&
+                        removed.error().code == grab::ErrorCode::StaleShape )
+                    {
+                        // A ttl or fade lifetime expires a shape from the
+                        // scene ITSELF, so a remove may legitimately find
+                        // nothing. Design §3.2 makes that a no-op rather than
+                        // an error, because the alternative makes a fading
+                        // flash plus explicit cleanup unwritable.
+                        return {};
+                    }
+                    return removed;
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                overlay_clear()
+                {
+                    if( overlay_ == nullptr )
+                    {
+                        // Nothing was ever drawn, so there is nothing to clear
+                        // and no reason to open a session in order to say so.
+                        shapes_.clear();
+                        return {};
+                    }
+                    overlay_->clear();
+                    shapes_.clear();
+                    return {};
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                overlay_grab()
+                {
+                    auto surface = ensure_overlay();
+                    if( !surface.has_value() )
+                    {
+                        return std::unexpected( std::move( surface.error() ) );
+                    }
+                    return ( *surface )->capture_pointer();
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                overlay_release()
+                {
+                    if( overlay_ == nullptr )
+                    {
+                        // No session was ever opened, so this process cannot
+                        // be holding the pointer. Opening one HERE would be
+                        // the wrong answer twice over: it is the unwind path,
+                        // and it would fail on a display with no compositor.
+                        return {};
+                    }
+                    return overlay_->release_pointer();
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                overlay_attach( std::string_view                     handle,
+                                std::optional<grab::geometry::Point> offset )
+                {
+                    auto* const entry = find_shape( handle );
+                    if( entry == nullptr )
+                    {
+                        return unknown_handle( handle );
+                    }
+                    if( offset.has_value() )
+                    {
+                        entry->offset = Anchor{
+                            .x = static_cast<double>( offset->x ),
+                            .y = static_cast<double>( offset->y ),
+                        };
+                    }
+                    else
+                    {
+                        // The default is the gap the shape ALREADY HAS: its
+                        // position minus the pointer's, right now. That is what
+                        // makes a square picked up by its corner stay held by
+                        // that corner instead of snapping its origin onto the
+                        // cursor.
+                        auto pointer = input_.position();
+                        if( !pointer.has_value() )
+                        {
+                            return std::unexpected( std::move( pointer.error() ) );
+                        }
+                        const auto anchor = anchor_of( entry->shape.geometry );
+                        entry->offset     = Anchor{
+                            .x = anchor.x - static_cast<double>( pointer->x ),
+                            .y = anchor.y - static_cast<double>( pointer->y ),
+                        };
+                    }
+                    entry->attached = true;
+                    return {};
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                overlay_detach( std::string_view handle )
+                {
+                    auto* const entry = find_shape( handle );
+                    if( entry == nullptr )
+                    {
+                        return unknown_handle( handle );
+                    }
+                    entry->attached = false;
+                    return {};
+                }
+
             private:
+
+                // One placed shape: the name the document spells, the id the
+                // scene answered with, and the geometry as it currently
+                // stands. The shape is kept because a carry translates it, and
+                // translating it needs the absolute coordinates it last had.
+                struct Placed
+                {
+                        std::string            handle{};
+                        grab::overlay::ShapeId id{};
+                        grab::overlay::Shape   shape{};
+                        Anchor                 offset{};
+                        bool                   attached{ false };
+                };
+
+                [[nodiscard]]
+                Placed*
+                find_shape( std::string_view handle )
+                {
+                    const auto found =
+                        std::ranges::find( shapes_, handle, &Placed::handle );
+                    return found == shapes_.end() ? nullptr : &*found;
+                }
+
+                [[nodiscard]]
+                static grab::Result<void>
+                unknown_handle( std::string_view handle )
+                {
+                    std::string message{ "overlay handle '" };
+                    message.append( handle );
+                    message.append( "' names no shape this run has added" );
+                    return grab::fail( grab::ErrorCode::NoMatch, std::move( message ) );
+                }
+
+                // Opened on demand, and kept for the life of the seat. The
+                // overlay facade is non-owning and stays valid for the
+                // session's lifetime, so the raw pointer is the session's to
+                // invalidate, not ours.
+                [[nodiscard]]
+                grab::Result<grab::Overlay*>
+                ensure_overlay()
+                {
+                    if( overlay_ != nullptr )
+                    {
+                        return overlay_;
+                    }
+                    grab::SessionOptions options;
+                    if( !display_.empty() )
+                    {
+                        // Honouring the display is not cosmetic: a session that
+                        // silently connects elsewhere draws its overlay on a
+                        // display the caller never named.
+                        options.display = display_;
+                    }
+                    auto session = grab::Session::open( options );
+                    if( !session.has_value() )
+                    {
+                        return std::unexpected( std::move( session.error() ) );
+                    }
+                    auto facade = ( *session )->overlay();
+                    if( !facade.has_value() )
+                    {
+                        return std::unexpected( std::move( facade.error() ) );
+                    }
+                    auto space = ( *facade )->space();
+                    if( !space.has_value() )
+                    {
+                        return std::unexpected( std::move( space.error() ) );
+                    }
+                    session_ = std::move( *session );
+                    overlay_ = *facade;
+                    space_   = *space;
+
+                    log::nominal(
+                        [this]( auto& event )
+                        {
+                            event.tag( log::tags::player )
+                                .value( "overlay", "opened" )
+                                .value( "display",
+                                        display_.empty() ? "default"
+                                                         : display_.c_str() );
+                        }
+                    );
+                    return overlay_;
+                }
+
+                // Move every attached shape so it keeps the gap it was picked
+                // up with. Called once per waypoint, which is what makes a
+                // carry look like a carry.
+                [[nodiscard]]
+                grab::Result<void>
+                carry_attached( std::int16_t x,
+                                std::int16_t y )
+                {
+                    if( overlay_ == nullptr )
+                    {
+                        return {};
+                    }
+                    for( auto& entry : shapes_ )
+                    {
+                        if( !entry.attached )
+                        {
+                            continue;
+                        }
+                        const auto   current = anchor_of( entry.shape.geometry );
+                        const double target_x =
+                            static_cast<double>( x ) + entry.offset.x;
+                        const double target_y =
+                            static_cast<double>( y ) + entry.offset.y;
+                        translate_geometry( entry.shape.geometry,
+                                            target_x - current.x,
+                                            target_y - current.y );
+                        auto moved = overlay_->update( entry.id, entry.shape );
+                        if( !moved.has_value() )
+                        {
+                            return moved;
+                        }
+                    }
+                    return {};
+                }
 
                 InputSeat( grab::Input input,
                            std::string display ) noexcept :
@@ -305,6 +773,10 @@ namespace grab::cli
                 grab::Input                       input_;
                 std::string                       display_;
                 std::optional<grab::Result<void>> capture_{};
+                std::unique_ptr<grab::Session>    session_{};
+                grab::Overlay*                    overlay_{ nullptr };
+                grab::CoordinateSpaceId           space_{};
+                std::vector<Placed>               shapes_{};
         };
 
         static_assert( grab::kernel::sequence::PointerSeat<InputSeat> );
@@ -312,6 +784,7 @@ namespace grab::cli
         static_assert( grab::kernel::sequence::KeyboardSeat<InputSeat> );
         static_assert( grab::kernel::sequence::TextSeat<InputSeat> );
         static_assert( grab::kernel::sequence::CapturingSeat<InputSeat> );
+        static_assert( grab::kernel::sequence::OverlaySeat<InputSeat> );
 
         [[nodiscard]]
         grab::Result<std::uint64_t>
@@ -335,6 +808,124 @@ namespace grab::cli
             }
             return value;
         }
+
+        // ── The interrupt path ────────────────────────────────
+        //
+        // SIGINT and SIGTERM during a run, turned into an ordinary unwind
+        // rather than a dead process. This matters most for overlay.grab. The
+        // X server does drop a pointer grab when the grabbing client's
+        // connection closes, so a KILLED process is not left holding it -- but
+        // a process that merely stops pumping and goes on to write its report
+        // would be, and so would any embedder that outlives the run. Turning
+        // the signal into player.interrupt() runs the same unwind an abort
+        // does, so the capture and every held button come up first.
+        volatile std::sig_atomic_t interruptRequested = 0;    // NOLINT(cert-err58-cpp)
+
+        extern "C" void
+        note_interrupt( int )
+        {
+            interruptRequested = 1;
+        }
+
+        using SignalHandler = void ( * )( int );
+
+        class InterruptTrap
+        {
+            public:
+
+                InterruptTrap() noexcept
+                {
+                    interruptRequested = 0;
+                    previous_int_      = std::signal( SIGINT, note_interrupt );
+                    previous_term_     = std::signal( SIGTERM, note_interrupt );
+                }
+
+                ~InterruptTrap()
+                {
+                    // Restored, not left installed: this is a library entry
+                    // point as well as a CLI verb, and a process-wide
+                    // disposition it never gives back is a side effect nobody
+                    // asked for.
+                    if( previous_int_ != SIG_ERR )
+                    {
+                        ( void )std::signal( SIGINT, previous_int_ );
+                    }
+                    if( previous_term_ != SIG_ERR )
+                    {
+                        ( void )std::signal( SIGTERM, previous_term_ );
+                    }
+                    interruptRequested = 0;
+                }
+
+                InterruptTrap( const InterruptTrap& ) = delete;
+                InterruptTrap&
+                operator=( const InterruptTrap& ) = delete;
+                InterruptTrap( InterruptTrap&& )  = delete;
+                InterruptTrap&
+                operator=( InterruptTrap&& ) = delete;
+
+            private:
+
+                SignalHandler previous_int_{ SIG_ERR };
+                SignalHandler previous_term_{ SIG_ERR };
+        };
+
+        // Neutralization that survives a return statement, an error return AND
+        // an exception. A destructor is the only thing a throw between here and
+        // the end of the function will still run, and what it lifts may be the
+        // pointer capture -- which, left down, freezes the whole desktop rather
+        // than merely reaching the next application.
+        template<typename SeatT>
+        class OutstandingHolds
+        {
+            public:
+
+                explicit OutstandingHolds(
+                    grab::cli::SeatRunner<SeatT>& runner
+                ) noexcept :
+                    runner_( &runner )
+                {
+                }
+
+                ~OutstandingHolds()
+                {
+                    release();
+                }
+
+                OutstandingHolds( const OutstandingHolds& ) = delete;
+                OutstandingHolds&
+                operator=( const OutstandingHolds& )   = delete;
+                OutstandingHolds( OutstandingHolds&& ) = delete;
+                OutstandingHolds&
+                operator=( OutstandingHolds&& ) = delete;
+
+                grab::NeutralizationOutcome
+                release() noexcept
+                {
+                    if( released_ )
+                    {
+                        return outcome_;
+                    }
+                    released_ = true;
+                    try
+                    {
+                        outcome_ = runner_->release_outstanding();
+                    }
+                    catch( ... )    // NOLINT(bugprone-empty-catch)
+                    {
+                        outcome_ = grab::NeutralizationOutcome::Failed;
+                    }
+                    return outcome_;
+                }
+
+            private:
+
+                grab::cli::SeatRunner<SeatT>* runner_;
+                grab::NeutralizationOutcome   outcome_{
+                    grab::NeutralizationOutcome::NothingHeld
+                };
+                bool released_{ false };
+        };
 
         // poll() rather than a sleep: the wait is owned by the timer thread's
         // eventfd, and the timeout is only a bound on how long a lost wake can
@@ -671,6 +1262,18 @@ namespace grab::cli
             {
                 break;
             }
+            // A signal is an unwind, not a stop: interrupt() exits every
+            // entered step in reverse and reaps the holds the completed ones
+            // left down, which is the only thing that lifts a pointer capture
+            // taken between overlay.grab and an overlay.release that is now
+            // never going to run.
+            if( interruptRequested != 0 )
+            {
+                ( void )player.interrupt();
+                outcome = grab::fail( grab::ErrorCode::Cancelled,
+                                      "the run was interrupted by a signal" );
+                break;
+            }
 
             const auto now      = Clock::now();
             const auto deadline = player.next_deadline();
@@ -771,15 +1374,17 @@ namespace grab::cli
             return std::unexpected( std::move( seat.error() ) );
         }
 
+        const InterruptTrap            trap;
         SeatRunner<InputSeat>          runner{ *seat };
+        OutstandingHolds<InputSeat>    holds{ runner };
         grab::kernel::sequence::Player player{ *program, runner };
         auto                           outcome  = drive( player );
-        const auto                     released = runner.release_outstanding();
+        const auto                     released = holds.release();
         if( outcome.has_value() && released == grab::NeutralizationOutcome::Failed )
         {
             return grab::fail( grab::ErrorCode::ProviderFailed,
-                               "the command left a button or key down and it "
-                               "could not be released" );
+                               "the command left a button, key or pointer "
+                               "capture down and it could not be released" );
         }
         return outcome;
     }
@@ -831,9 +1436,14 @@ namespace grab::cli
             return runtimeExitCode;
         }
 
-        SeatRunner<InputSeat> runner{ *seat };
-        const int             code     = play_program( *paced, runner, *options );
-        const auto            released = runner.release_outstanding();
+        // The trap is armed before the runner and disarmed after the holds are
+        // lifted, so there is no window in which a signal can reach a run that
+        // has already stopped tracking what it is holding.
+        const InterruptTrap         trap;
+        SeatRunner<InputSeat>       runner{ *seat };
+        OutstandingHolds<InputSeat> holds{ runner };
+        const int                   code     = play_program( *paced, runner, *options );
+        const auto                  released = holds.release();
 
         log::nominal(
             [&paced, released]( auto& event )
@@ -846,8 +1456,8 @@ namespace grab::cli
 
         if( released == grab::NeutralizationOutcome::Failed )
         {
-            print_error( "the document left a button or key down and it could not "
-                         "be released" );
+            print_error( "the document left a button, key or pointer capture down "
+                         "and it could not be released" );
             return runtimeExitCode;
         }
         return code;

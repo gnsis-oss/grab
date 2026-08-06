@@ -104,6 +104,9 @@ namespace
                 Release,
                 Join,
                 Exit,
+                // release_holds(): the seam that reaches back into a step the
+                // unwind has already exited.
+                Reap,
                 Count,
             };
 
@@ -126,6 +129,15 @@ namespace
             std::size_t          waypoints{ 0U };
             Nanos                dwell{ Nanos::zero() };
             bool                 holds_button{ false };
+            // An IMPLICIT hold: the body takes it and the body gives it back,
+            // so exit() finds nothing left to do on the success path.
+            //
+            // An EXPLICIT one is different in kind. input.press, input.key_down
+            // and overlay.grab leave something down ON PURPOSE for a LATER step
+            // to lift, so the body must NOT give it back and exit() must not
+            // either -- releasing it would make a chord unspellable. Only
+            // release_holds() lifts it, and only when the run is being unwound.
+            bool                 document_hold{ false };
             bool                 fails{ false };
             // Which attempt succeeds; 0 means every attempt fails.
             std::size_t          succeeds_on_attempt{ 0U };
@@ -139,6 +151,7 @@ namespace
             std::size_t attempts{ 0U };
             bool        pressed{ false };
             bool        released{ false };
+            bool        document_held{ false };
     };
 
     [[nodiscard]]
@@ -218,6 +231,15 @@ namespace
                         .at   = now
                     } );
                 }
+                if( scripts_[step.id.index()].document_hold )
+                {
+                    body.document_held = true;
+                    log_.push_back( RunnerEvent{
+                        .kind = RunnerEvent::Kind::Press,
+                        .step = step.id,
+                        .at   = now
+                    } );
+                }
                 return progress( step, now );
             }
 
@@ -263,6 +285,31 @@ namespace
                     .step = step.id,
                     .at   = last_now_
                 } );
+            }
+
+            // The seam under test. It lifts ONLY the explicit hold, and it is
+            // reached only for steps the unwind has already exited -- which is
+            // every step that completed cleanly.
+            grab::NeutralizationOutcome
+            release_holds( const Step& step ) override
+            {
+                log_.push_back( RunnerEvent{
+                    .kind = RunnerEvent::Kind::Reap,
+                    .step = step.id,
+                    .at   = last_now_
+                } );
+                auto& body = bodies_[step.id.index()];
+                if( !body.document_held )
+                {
+                    return grab::NeutralizationOutcome::NotAttempted;
+                }
+                body.document_held = false;
+                log_.push_back( RunnerEvent{
+                    .kind = RunnerEvent::Kind::Release,
+                    .step = step.id,
+                    .at   = last_now_
+                } );
+                return grab::NeutralizationOutcome::Released;
             }
 
             [[nodiscard]]
@@ -1444,6 +1491,115 @@ namespace
         // nullopt means UNKNOWN, SO MEASURE IT — never zero.
         EXPECT_FALSE( player.timing_of( click ).declared.has_value() );
         EXPECT_EQ( player.overrun_of( click ), Nanos::zero() );
+    }
+
+    // ---- the explicit hold, and the seam that lifts it ----------------------
+
+    // THE DEFECT THIS CLOSES. succeed() exits a cleanly-completed step and
+    // marks it exited; unwind() skips every step it has already exited. That is
+    // right for an implicit hold, which exit() released, and WRONG for an
+    // explicit one -- a sequence that presses, succeeds, and then aborts on a
+    // later step used to leave the button physically down, silently, because no
+    // code path could ever reach it again.
+    TEST( Player,
+          UnwindReleasesAHoldLeftByAStepThatALREADYSucceeded )
+    {
+        const auto held     = positional_id( 0U );
+        const auto doomed   = positional_id( 1U );
+        auto       document = build_or_die( {
+            make_step( a_click(), {} ),
+            make_step( a_click(), { held } ),
+        } );
+
+        FakeRunner runner{ document };
+        runner.script( held ).document_hold         = true;
+        runner.script( doomed ).fails               = true;
+        runner.script( doomed ).succeeds_on_attempt = 0U;
+
+        Player player{ document, runner };
+        ASSERT_TRUE( player.play().has_value() );
+        EXPECT_FALSE( player.pump( origin ).has_value() );
+
+        EXPECT_EQ( player.status_of( held ), StepStatus::Succeeded );
+        EXPECT_EQ( player.state(), PlayState::Interrupted );
+
+        // exit() ran once, on the success path, and did NOT lift the hold --
+        // lifting it there would make a chord unspellable.
+        EXPECT_EQ( events_of_kind( runner, RunnerEvent::Kind::Exit, held ).size(),
+                   oneEvent );
+        // release_holds() reached it during the unwind, and lifted it exactly
+        // once. This is a DISTINCT seam, not a second exit(): calling exit()
+        // twice would double-release the implicit case.
+        EXPECT_EQ( events_of_kind( runner, RunnerEvent::Kind::Reap, held ).size(),
+                   oneEvent );
+        EXPECT_EQ( events_of_kind( runner, RunnerEvent::Kind::Release, held ).size(),
+                   oneEvent );
+        EXPECT_EQ( player.neutralization(), grab::NeutralizationOutcome::Released );
+
+        const auto exited = position_of( runner, RunnerEvent::Kind::Exit, held );
+        const auto reaped = position_of( runner, RunnerEvent::Kind::Reap, held );
+        ASSERT_TRUE( exited.has_value() );
+        ASSERT_TRUE( reaped.has_value() );
+        EXPECT_LT( *exited, *reaped );
+    }
+
+    // The other half of the contract: a run that ends cleanly is not unwound,
+    // so nothing is reaped and the report still says nothing was neutralized.
+    // Without this, a release_holds() called on every completion would look
+    // just as green while releasing a chord's modifier mid-chord.
+    TEST( Player,
+          ACleanRunReapsNothing )
+    {
+        const auto first    = positional_id( 0U );
+        const auto second   = positional_id( 1U );
+        auto       document = build_or_die( {
+            make_step( a_click(), {} ),
+            make_step( a_click(), { first } ),
+        } );
+
+        FakeRunner runner{ document };
+        runner.script( first ).document_hold = true;
+
+        Player player{ document, runner };
+        ASSERT_TRUE( player.play().has_value() );
+        ASSERT_TRUE( player.pump( origin ).has_value() );
+
+        EXPECT_EQ( player.state(), PlayState::Done );
+        EXPECT_EQ( events_of_kind( runner, RunnerEvent::Kind::Reap, first ).size(),
+                   zeroEvents );
+        EXPECT_EQ( events_of_kind( runner, RunnerEvent::Kind::Reap, second ).size(),
+                   zeroEvents );
+        EXPECT_EQ( events_of_kind( runner, RunnerEvent::Kind::Release, first ).size(),
+                   zeroEvents );
+        EXPECT_EQ( player.neutralization(), grab::NeutralizationOutcome::NotAttempted );
+    }
+
+    // interrupt() is the same unwind, so the hold comes up there too -- and
+    // that is the path a SIGINT mid-carry takes.
+    TEST( Player,
+          InterruptReapsAHoldLeftByAStepThatALREADYSucceeded )
+    {
+        const auto held     = positional_id( 0U );
+        auto       document = build_or_die( {
+            make_step( a_click(), {} ),
+            make_step( a_wait( longWait ), { held } ),
+        } );
+
+        FakeRunner runner{ document };
+        runner.script( held ).document_hold = true;
+
+        Player player{ document, runner };
+        ASSERT_TRUE( player.play().has_value() );
+        ASSERT_TRUE( player.pump( origin ).has_value() );
+        ASSERT_EQ( player.status_of( held ), StepStatus::Succeeded );
+        EXPECT_EQ( events_of_kind( runner, RunnerEvent::Kind::Reap, held ).size(),
+                   zeroEvents );
+
+        ASSERT_TRUE( player.interrupt().has_value() );
+
+        EXPECT_EQ( events_of_kind( runner, RunnerEvent::Kind::Release, held ).size(),
+                   oneEvent );
+        EXPECT_EQ( player.neutralization(), grab::NeutralizationOutcome::Released );
     }
 
     TEST( Player,

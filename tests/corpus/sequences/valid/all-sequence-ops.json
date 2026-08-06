@@ -18,6 +18,20 @@
     { "id": "key_down", "op": "input.key_down", "key": "Shift_L" },
     { "id": "key_up",   "op": "input.key_up",   "key": "Shift_L" },
     { "id": "wait",     "op": "time.wait",      "ms": 50 },
-    { "id": "capture",  "op": "screen.capture", "out": "all-ops.png" }
+    { "id": "capture",  "op": "screen.capture", "out": "all-ops.png" },
+
+    { "id": "overlay_add",     "op": "overlay.add",    "handle": "marker",
+      "shape": { "rect":   { "x": 400, "y": 240, "w": 160, "h": 80 },
+                 "stroke": { "color": "#4ecea9", "width": 3 } } },
+    { "id": "overlay_update",  "op": "overlay.update", "handle": "marker",
+      "shape": { "rect":   { "x": 560, "y": 320, "w": 160, "h": 80 },
+                 "stroke": { "color": "#4ecea9", "width": 3 },
+                 "fill":   { "color": "#4ecea933" } } },
+    { "id": "overlay_grab",    "op": "overlay.grab" },
+    { "id": "overlay_attach",  "op": "overlay.attach",  "handle": "marker" },
+    { "id": "overlay_detach",  "op": "overlay.detach",  "handle": "marker" },
+    { "id": "overlay_release", "op": "overlay.release" },
+    { "id": "overlay_remove",  "op": "overlay.remove",  "handle": "marker" },
+    { "id": "overlay_clear",   "op": "overlay.clear" }
   ]
 }

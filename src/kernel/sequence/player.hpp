@@ -88,6 +88,38 @@ namespace grab::kernel::sequence
                 ( void )step;
             }
 
+            // Lift what a step LEFT DOWN ON PURPOSE, after that step has
+            // already completed and already been exited.
+            //
+            // THIS EXISTS BECAUSE exit() CANNOT DO IT. succeed() exits a
+            // cleanly-completed step and marks it exited; unwind() skips every
+            // step it has already exited. That is right for an IMPLICIT hold —
+            // a drag's own button, which the body put back up itself — and
+            // wrong for an EXPLICIT, document-owned one. input.press,
+            // input.key_down and overlay.grab exist precisely to leave
+            // something down for a LATER step to lift, and an abort is the
+            // proof that step will never run. Without this seam a sequence
+            // that presses, succeeds, and then aborts leaves the button
+            // physically down, silently — and an overlay.grab left that way
+            // holds the pointer, which freezes the whole desktop rather than
+            // merely confusing the next application.
+            //
+            // IT IS NOT A SECOND exit(). exit() is exactly-once by contract,
+            // and calling it again would double-release the implicit case: a
+            // second button-up is a second event the application sees.
+            //
+            // Called by unwind() for every entered step that is already
+            // exited, in reverse entry order, so a hold taken on top of
+            // another is lifted first. NotAttempted — the default — means the
+            // step holds nothing, and a runner that owns no holds needs no
+            // override.
+            virtual grab::NeutralizationOutcome
+            release_holds( const grab::sequence::Step& step )
+            {
+                ( void )step;
+                return grab::NeutralizationOutcome::NotAttempted;
+            }
+
             // Why the last enter()/tick() answered Failure. Read rather than
             // guessed, because ErrorCode::PossiblyCommitted is never retried
             // regardless of the descriptor's RetryClass.
@@ -325,6 +357,18 @@ namespace grab::kernel::sequence
             void
             neutralize( grab::sequence::StepId                id,
                         std::chrono::steady_clock::time_point now );
+
+            // The other half of neutralize(), for the steps neutralize() can
+            // never reach: the ones that finished cleanly and were exited by
+            // succeed(). See CommandRunner::release_holds.
+            void
+            reap_holds( grab::sequence::StepId id );
+
+            // One place that folds a released/failed/nothing-held report into
+            // the run's verdict, so neutralize() and reap_holds() cannot drift
+            // apart. NotAttempted carries no information and changes nothing.
+            void
+            record_neutralization( grab::NeutralizationOutcome outcome ) noexcept;
 
             void
             admit_successors( grab::sequence::StepId                id,
