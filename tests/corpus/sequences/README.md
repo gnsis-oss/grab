@@ -11,8 +11,43 @@ adversarial corpus earns its place precisely by pushing the parser. A file under
 is a pass. A segfault, an abort, an ASan/UBSan report, or an unbounded run is a
 failure whichever directory the file sits in.
 
-Data files only. The harness that runs them is a separate unit
-(`tests/corpus/run_sequence_corpus.sh`, label `sequence_corpus`).
+`valid/` and `invalid/` hold data files only; the harness that runs them is
+`tests/corpus/run_sequence_corpus.sh`, label `sequence_corpus`. Adding a `.json`
+file to either directory registers a test with no CMake edit — the `add_test`
+glob at `tests/CMakeLists.txt:355-386` is deliberate — so re-run `cmake` after
+adding one.
+
+## The harness, and what it actually asserts
+
+`run_sequence_corpus.sh <grab-binary> <document.json> expect-valid|expect-rejected`
+runs `grab play <document> --dry-run`, which opens no seat, needs no display and
+executes nothing. It prints diagnostics and then exactly one verdict token as
+the last line, and ctest matches on that token with `PASS_REGULAR_EXPRESSION` —
+**so the exit status is advisory and the token is the verdict.**
+
+It prints **no token at all** for any of these, which is how "no crash" becomes
+an assertion rather than a hope:
+
+| Condition | Why it is not a verdict |
+|---|---|
+| death by signal (exit ≥ 128) | a crash fails whichever directory the file is in |
+| exceeding the 60 s timeout | an unbounded run is a failure, per the rule above |
+| `AddressSanitizer` / `ThreadSanitizer` / `runtime error:` / `SUMMARY: …Sanitizer` in either stream | **ASan's default exit code is 1, exactly grab's "document refused"** — without a separate scan for the report text, every ASan trip on an `invalid/` file would read as a clean rejection and pass |
+| exit 2 | a command-line error is a harness bug, not a verdict on the document |
+| exit 0 with no `sequence:`/`steps: N`/`order:`/`plan:` line | the `--dry-run` plan contract changed underneath the corpus |
+| exit 1 with an empty stderr, or with no JSON pointer in the message | a refusal carrying no diagnostic is indistinguishable from a silent death |
+
+For an accepted document it additionally replays the file under `--pacing
+strict`, `grace` and `precise` and asserts the `order:` line is **byte-identical
+across all three** while `plan:` never decreases. That is design §4.10's
+invariant — the mode governs timing and nothing else — and it is the assertion
+that proves `extra-grace-under-strict.json` is *ignored* rather than rejected:
+the same document plans 10 ms under `strict` and 66 745 ms under `precise`.
+
+**Never write either verdict token into a diagnostic line of that script.** The
+`invalid/` tests pass on seeing `[REJECTED]` anywhere in the output, so a
+diagnostic that quoted the token would turn a real failure green. The script
+emits tokens through exactly one function, `print_verdict`, for that reason.
 
 ---
 
@@ -21,7 +56,11 @@ Data files only. The harness that runs them is a separate unit
 | Directory | Files | Expected verdict |
 |---|---|---|
 | `valid/` | 7 | `[VALID]` — every one must load |
-| `invalid/` | 16 | `[REJECTED]` — every one must be refused |
+| `invalid/` | 15 | `[REJECTED]` — every one must be refused |
+
+22 files, 22 registered tests. The count was written as 16 before the harness
+existed and counted the withdrawn `too-many-steps.json`, which is described
+below but deliberately not vendored.
 
 ---
 
@@ -77,6 +116,14 @@ CLAUDE.md §6.1 step 3 requires comparing against a canonical tool and
 investigating every disagreement. Two are known and are **not bugs**; the
 harness must not treat either as one.
 
+The full 22-file matrix — every file's verdict from both tools, the reasoning
+for every disagreement, the ASan run, and what round-tripping is and is not
+covered — is recorded in
+`workspace/findings/2026-08-06-sequence-corpus-comparison.md`. The short version:
+the only direction that would be a bug is *`jq` rejects and grab accepts*, and
+it never occurs; the harness makes that direction a hard failure and reports the
+reverse.
+
 **1. `jq empty` exits 0 on a zero-length file.** `jq` reads zero inputs and
 therefore has nothing to complain about:
 
@@ -116,13 +163,13 @@ for f in invalid/*.json; do jq -e . "$f" >/dev/null 2>&1 || echo "not-json: $f";
 
 ## The grammar these files assume
 
-The document shape is pinned by design §3. The **payload field names of ops the
-spec does not show are inferred** from the payload struct members in
-`include/grab/command.hpp` plus the spec's own conventions (`snake_case`, an
-`_ms` suffix on durations, a point as a two-element array). Where a name is
-inferred rather than quoted from the spec it is marked below. If the interpreter
-chose differently, the mismatch surfaces as a `valid/` file being rejected —
-which is a corpus/interpreter reconciliation, not a corpus bug.
+The document shape is pinned by design §3, and every payload key by design
+§3.1. **Nothing here is inferred any more.** This section previously marked
+seven ops as guesses from the payload struct members in
+`include/grab/command.hpp`; §3.1 subsequently pinned all of them — member name
+verbatim, with one exception — and the interpreter implements exactly that
+(`src/kernel/sequence/interpreter.cpp:74-100` is the key table). All 22 files
+load or reject as intended, so the reconciliation is closed.
 
 Document level:
 
@@ -149,28 +196,30 @@ Payloads:
 |---|---|---|
 | `input.move` | `to: [x, y]` | spec §3 |
 | `time.wait` | `ms` | spec §3 |
-| `input.click` | `button` (string, spec example only) or omitted for the default | spec §3 |
+| `input.click` | `button` (`"left"` \| `"middle"` \| `"right"`, or an integer 1–7) or omitted for the default | spec §3, §3.1 |
 | `screen.capture` | `out` | spec §3 |
 | `input.type` | `text` | spec §3 |
-| `input.warp` | `to: [x, y]` | **inferred** — member `to` |
-| `input.click_at` | `at: [x, y]` | **inferred** — member `at` |
-| `input.press` / `input.release` | none (default button) | **inferred** |
-| `input.scroll` | `dx`, `dy` (notches; +dy down, +dx right) | **inferred** — members `dx`/`dy` |
-| `input.drag` | `from: [x, y]`, `to: [x, y]` | **inferred** — members `from`/`to` |
-| `input.key` / `input.key_down` / `input.key_up` | `key` | **inferred** — member `key` |
-| `input.follow` | `path: [[x, y], ...]` — the curve's control points | **inferred, highest risk** — `FollowCommand::path` is a `geometry::Curve` whose member is `control`, so `{"control": [...]}` is an equally defensible spelling and the spec pins neither |
+| `input.warp` | `to: [x, y]` | spec §3.1 — member name verbatim |
+| `input.click_at` | `at: [x, y]` | spec §3.1 — member name verbatim |
+| `input.press` / `input.release` | none here (default button); `button` is accepted | spec §3.1 |
+| `input.scroll` | `dx`, `dy` (notches; +dy down, +dx right) | spec §3.1 — member names verbatim |
+| `input.drag` | `from: [x, y]`, `to: [x, y]` | spec §3.1 — member names verbatim |
+| `input.key` / `input.key_down` / `input.key_up` | `key` | spec §3.1 — member name verbatim |
+| `input.follow` | `curve: [[x, y], ...]` — the control points, degree implied by length | spec §3.1, **and this is the one exception to the member-name rule**: the member is `path`, but `path` is already `DragOptions::path`, the curve *kind* (`"linear"` / `"cubic"`) inside `options`. One key cannot be both an array of points and a kind string, so the point list is `curve`. `all-sequence-ops.json` uses `curve` and loads. |
 
-Deliberately **not** exercised, because the spec pins no spelling and a guess
-would make a `valid/` file fail for the wrong reason:
+Still **not** exercised here — but no longer for want of a spelling. Design §3.1
+listed these as unpinned; the interpreter has since pinned every one of them
+(`src/kernel/sequence/interpreter.cpp:74-100`), and unit ⑦'s inline
+`everyOpDocument` covers them in C++. They remain corpus gaps only because no
+`.json` file exercises them, and each is now a cheap file to add:
 
-- `on_error` (`"abort"` / `"continue"` / `"goto:<label>"`) and `on_error_target`.
-- `screen.capture`'s `locator` alternative to `out`.
-- `input.drag` / `input.move` / `input.follow` `DragOptions` overrides
-  (`interpolation_steps`, `step_dwell`, `path` kind) — all defaulted here.
-- Button names beyond `"left"`. `PointerButton` spells them
-  `Primary`/`Middle`/`Secondary`, so whether JSON says `"right"` or
-  `"secondary"` or `3` is unpinned; only `spec-example.json` names a button, and
-  it does so verbatim from the spec.
+| Gap | Spelling the interpreter accepts |
+|---|---|
+| error policy | `"on_error": "abort" \| "continue" \| "goto:<label>"`. There is **no `on_error_target` key** — the target rides inside the `goto:` string. |
+| capture by locator | `"locator": …` as the alternative to `"out"` |
+| drag/move/follow option overrides | `"options": { "steps": N, "step_dwell_ms": N, "path": "linear"\|"cubic" }` — note `steps` and `step_dwell_ms`, not `interpolation_steps`/`step_dwell` |
+| non-default buttons | `"button": "middle"` / `"right"` / an integer 1–7 |
+| sub-millisecond waits | `"ns"` alongside `"ms"` on `time.wait` |
 
-These are corpus gaps, not design gaps. Fill them once the interpreter fixes the
-spelling.
+Adding a file to either directory registers a test with no CMake edit, so
+filling a row costs one file and one `cmake` re-run.
