@@ -1,8 +1,24 @@
 # ── Tidy ─────────────────────────────────────────────────────
 # Runs clang-tidy on every compiled source via CMAKE_CXX_CLANG_TIDY.
-# Hard abort if clang-tidy is not installed.
+#
+#   -DGRAB_TIDY=ON    analyse every TU as it compiles
+#   -DGRAB_TIDY=OFF   no analysis                        (default)
+#
+# OFF by default: clang-tidy roughly doubles compile time, and grab's config
+# emits a steady stream of advisory pragma-once/magic-number warnings that
+# never fail the build. The `dev` preset turns it on; the sanitizer,
+# coverage and release configurations do not, so a triage rebuild is not
+# taxed by analysis it does not need.
+#
 # Requires CMAKE_EXPORT_COMPILE_COMMANDS=ON in the root CMakeLists.
 # ─────────────────────────────────────────────────────────────
+
+option(GRAB_TIDY "Run clang-tidy on every translation unit" OFF)
+
+if(NOT GRAB_TIDY)
+    message(STATUS "Tidy: off")
+    return()
+endif()
 
 find_program(CLANG_TIDY clang-tidy)
 if(NOT CLANG_TIDY)
@@ -11,7 +27,7 @@ if(NOT CLANG_TIDY)
     else()
         set(_hint "Install it: apt install clang-tidy")
     endif()
-    message(FATAL_ERROR "clang-tidy not found.\n${_hint}")
+    message(FATAL_ERROR "GRAB_TIDY=ON but clang-tidy not found.\n${_hint}")
 endif()
 message(STATUS "Tidy: ${CLANG_TIDY}")
 

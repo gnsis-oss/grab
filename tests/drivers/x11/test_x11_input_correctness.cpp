@@ -207,12 +207,12 @@ TEST( ScratchKeycodePool,
     auto* const                                     backend_view = backend.get();
     grab::drivers::desktop::x11::ScratchKeycodePool pool{ std::move( backend ) };
 
-    auto                                            first = pool.loan( keysym );
+    auto                                            first = pool.acquire( keysym );
     ASSERT_TRUE( first.has_value() );
     EXPECT_EQ( first->keycode(), scratch_keycode );
     ASSERT_EQ( backend_view->replacements.size(), 1U );
 
-    auto second = pool.loan( keysym );
+    auto second = pool.acquire( keysym );
     ASSERT_TRUE( second.has_value() );
     EXPECT_EQ( second->keycode(), scratch_keycode );
     EXPECT_EQ( backend_view->replacements.size(), 1U );

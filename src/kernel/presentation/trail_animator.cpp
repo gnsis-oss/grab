@@ -6,6 +6,8 @@
 #include "kernel/presentation/overlay_scene.hpp"
 #include "kernel/presentation/trail_animator.hpp"
 
+#include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -20,6 +22,31 @@ namespace grab::kernel::presentation
 
         constexpr std::uint64_t failureIncrement = 1U;
         constexpr std::size_t   pathCommandCount = 2U;
+
+        [[nodiscard]]
+        constexpr bool
+        is_injected_origin( EventOrigin origin ) noexcept
+        {
+            return origin ==
+                   EventOrigin::InjectedSelf ||
+                   origin == EventOrigin::InjectedOther;
+        }
+
+        [[nodiscard]]
+        constexpr bool
+        is_trail_origin( EventOrigin origin ) noexcept
+        {
+            return origin == EventOrigin::Physical || is_injected_origin( origin );
+        }
+
+        [[nodiscard]]
+        constexpr bool
+        is_same_origin_class( EventOrigin left,
+                              EventOrigin right ) noexcept
+        {
+            return ( left == EventOrigin::Physical && right == EventOrigin::Physical ) ||
+                   ( is_injected_origin( left ) && is_injected_origin( right ) );
+        }
 
         [[nodiscard]]
         overlay::Shape
@@ -80,23 +107,38 @@ namespace grab::kernel::presentation
             return;
         }
 
-        if( event.origin !=
-            EventOrigin::Physical &&
-            event.origin != EventOrigin::InjectedSelf )
+        if( !is_trail_origin( event.origin ) )
         {
             break_path();
             return;
         }
 
         const Sample current{
-            .position = *motion->position,
-            .origin   = event.origin,
+            .position  = *motion->position,
+            .origin    = event.origin,
+            .timestamp = event.timestamp,
         };
         const auto previous = previous_.value_or( current );
         if( !previous_.has_value() ||
-            previous.origin !=
-            current.origin ||
+            !is_same_origin_class( previous.origin, current.origin ) ||
             previous.position.space != current.position.space )
+        {
+            previous_ = current;
+            return;
+        }
+
+        const auto timestamp_gap = std::chrono::duration<double>{
+            current.timestamp - previous.timestamp,
+        };
+        const auto distance = std::hypot( current.position.x - previous.position.x,
+                                          current.position.y - previous.position.y );
+        if( timestamp_gap > trailBreakInterval || distance > trailBreakDistancePx )
+        {
+            previous_ = current;
+            return;
+        }
+
+        if( distance == 0.0 )
         {
             previous_ = current;
             return;

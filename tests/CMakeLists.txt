@@ -4,13 +4,20 @@ add_test(NAME grab_invariant_checks
 add_test(NAME grab_public_header_allowlist
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_headers.sh)
 
+target_sources(grab_kernel PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/kernel/presentation/overlay_animation.cpp)
+
 add_executable(grab_core_tests
+    ${CMAKE_SOURCE_DIR}/src/frontends/cli/feedback_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/input_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/overlay_command.cpp
+    ${CMAKE_SOURCE_DIR}/src/frontends/cli/sketch_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/watch_daemon.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/windows_command.cpp
+    cli/feedback_command_test.cpp
     cli/input_command_test.cpp
     cli/overlay_command_test.cpp
+    cli/sketch_command_test.cpp
     cli/watch_daemon_test.cpp
     cli/windows_command_test.cpp
     cli/command_table_test.cpp
@@ -26,6 +33,7 @@ add_executable(grab_core_tests
     core/test_capture.cpp
     core/test_context.cpp
     core/test_enum_table.cpp
+    core/test_diag.cpp
     core/test_log.cpp
     core/test_cli_doctor.cpp
     geometry/test_point.cpp
@@ -50,8 +58,8 @@ add_executable(grab_core_tests
     core/test_result_taxonomy.cpp
     core/test_session.cpp
     core/test_space_graph.cpp
+    core/test_adjacency_graph.cpp
     core/test_trace_enums.cpp
-    core/test_vendor_l0.cpp
     core/test_version.cpp
     codec/test_image.cpp
     codec/test_png.cpp
@@ -71,7 +79,7 @@ add_executable(grab_core_tests
     transport/test_service.cpp
     transport/test_service_hardening.cpp
 )
-target_link_libraries(grab_core_tests PRIVATE grab_core grab_kernel grab_vendor_l0 grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
+target_link_libraries(grab_core_tests PRIVATE grab_core grab_kernel grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
 target_compile_definitions(grab_core_tests PRIVATE
@@ -101,8 +109,14 @@ add_executable(grab_kernel_tests
     kernel/lifecycle/test_session_verbs.cpp
     kernel/graph/test_state_manager.cpp
     kernel/graph/test_state_snapshot_provider.cpp
+    kernel/test_gesture_classifier.cpp
+    kernel/test_cursor_feedback.cpp
     kernel/test_ui.cpp
+    kernel/test_overlay_animation.cpp
     kernel/test_overlay_delegate_contract.cpp
+    kernel/test_overlay_draw.cpp
+    kernel/test_overlay_edit.cpp
+    kernel/test_overlay_edit_session.cpp
     kernel/test_overlay_raster.cpp
     kernel/test_overlay_scene.cpp
     kernel/test_overlay_service.cpp
@@ -114,7 +128,6 @@ add_executable(grab_kernel_tests
 )
 target_link_libraries(grab_kernel_tests PRIVATE
     grab_kernel
-    grab_vendor_l0
     grab_codec
     GTest::gtest_main)
 target_include_directories(grab_kernel_tests PRIVATE
@@ -143,7 +156,6 @@ add_executable(grab_driver_x11_tests
 )
 target_link_libraries(grab_driver_x11_tests PRIVATE
     grab_driver_x11
-    grab_vendor_l0
     grab_notify
     ${GRAB_LIBAV_TARGETS}
     GTest::gtest_main
@@ -192,7 +204,6 @@ add_executable(grab_driver_atspi_tests
 target_link_libraries(grab_driver_atspi_tests PRIVATE
     grab_driver_atspi
     grab_driver_x11
-    grab_vendor_l0
     GTest::gtest_main
 )
 target_include_directories(grab_driver_atspi_tests PRIVATE

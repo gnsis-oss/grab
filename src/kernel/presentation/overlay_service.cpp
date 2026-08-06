@@ -1,10 +1,15 @@
 #include "grab/capability.hpp"
 #include "grab/overlay.hpp"
+#include "grab/overlay_edit.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/presentation/overlay_animation.hpp"
+#include "kernel/presentation/overlay_edit_session.hpp"
 #include "kernel/presentation/overlay_scene.hpp"
 #include "kernel/presentation/overlay_service.hpp"
 #include "kernel/presentation/space_graph.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/log_tags.hpp"
 #include "spi/overlay_delegate.hpp"
 #include "spi/runtime.hpp"
 
@@ -12,10 +17,14 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <expected>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -27,12 +36,13 @@ namespace grab::kernel::presentation
     namespace
     {
 
-        constexpr std::size_t rectangleCornerCount = 4U;
-        constexpr std::size_t cubicControlCount    = 3U;
-        constexpr std::size_t closingCommandCount  = 1U;
-        constexpr std::size_t firstPointOffset     = 1U;
-        constexpr std::size_t ellipseCommandCount  = 6U;
-        constexpr double      ellipseControlFactor = 0.55228474983079339840;
+        constexpr std::size_t  rectangleCornerCount = 4U;
+        constexpr std::size_t  cubicControlCount    = 3U;
+        constexpr std::size_t  closingCommandCount  = 1U;
+        constexpr std::size_t  firstPointOffset     = 1U;
+        constexpr std::size_t  ellipseCommandCount  = 6U;
+        constexpr double       ellipseControlFactor = 0.55228474983079339840;
+        constexpr std::uint8_t primaryPointerButton = 1U;
 
         [[nodiscard]]
         bool
@@ -366,11 +376,83 @@ namespace grab::kernel::presentation
         }
 
         [[nodiscard]]
+        bool
+        path_is_in_space( const overlay::Path& path,
+                          CoordinateSpaceId    space ) noexcept
+        {
+            return std::ranges::all_of(
+                path.commands,
+                [space]( const overlay::PathCommand& command )
+                {
+                    if( const auto* move = std::get_if<overlay::MoveTo>( &command ) )
+                    {
+                        return move->point.space == space;
+                    }
+                    if( const auto* line = std::get_if<overlay::LineTo>( &command ) )
+                    {
+                        return line->point.space == space;
+                    }
+                    if( const auto* bezier = std::get_if<overlay::BezierTo>( &command ) )
+                    {
+                        return std::ranges::all_of( bezier->control,
+                                                    [space]( SpacePoint point )
+                                                    {
+                                                        return point.space == space;
+                                                    } );
+                    }
+                    return true;
+                }
+            );
+        }
+
+        [[nodiscard]]
+        bool
+        geometry_is_in_space( const overlay::Geometry& geometry,
+                              CoordinateSpaceId        space ) noexcept
+        {
+            if( const auto* path = std::get_if<overlay::Path>( &geometry ) )
+            {
+                return path_is_in_space( *path, space );
+            }
+            if( const auto* rect = std::get_if<overlay::Rect>( &geometry ) )
+            {
+                return rect->bounds.space == space;
+            }
+            if( const auto* ellipse = std::get_if<overlay::Ellipse>( &geometry ) )
+            {
+                return ellipse->center.space == space;
+            }
+            const auto* polygon = std::get_if<overlay::Polygon>( &geometry );
+            return polygon !=
+                   nullptr &&
+                   std::ranges::all_of( polygon->points,
+                                        [space]( SpacePoint point )
+                                        {
+                                            return point.space == space;
+                                        } );
+        }
+
+        [[nodiscard]]
         Result<overlay::Shape>
         transform_shape( const detail::SpaceGraph& graph,
                          CoordinateSpaceId         destination,
                          const overlay::Shape&     source )
         {
+            if( source.animation.has_value() )
+            {
+                if( !valid_animation( *source.animation ) )
+                {
+                    return fail( ErrorCode::InvalidArgument,
+                                 "overlay animation specification is invalid" );
+                }
+                if( !geometry_is_in_space( source.geometry, destination ) )
+                {
+                    return fail(
+                        ErrorCode::InvalidArgument,
+                        "animated overlay geometry must already be in delegate space"
+                    );
+                }
+            }
             auto geometry = transform_geometry( graph, destination, source.geometry );
             if( !geometry.has_value() )
             {
@@ -426,6 +508,53 @@ namespace grab::kernel::presentation
                 result.shapes.push_back( std::move( transformed_record ) );
             }
             return result;
+        }
+
+        [[nodiscard]]
+        Error
+        callback_exception( const std::exception& exception )
+        {
+            return Error{
+                .code    = ErrorCode::InternalFault,
+                .message = std::string{ "overlay edit callback: " } + exception.what(),
+                .capability = {},
+                .target     = {},
+                .attempts   = {},
+            };
+        }
+
+        [[nodiscard]]
+        Error
+        unknown_callback_exception()
+        {
+            return Error{
+                .code       = ErrorCode::InternalFault,
+                .message    = "overlay edit callback failed",
+                .capability = {},
+                .target     = {},
+                .attempts   = {},
+            };
+        }
+
+        void
+        stop_edit_session_noexcept(
+            const std::shared_ptr<OverlayEditSession>& session
+        ) noexcept
+        {
+            if( session == nullptr )
+            {
+                return;
+            }
+            try
+            {
+                [[maybe_unused]]
+                auto stopped = session->stop();
+            }
+            catch( ... )
+            {
+                // A delegate exception cannot escape an error cleanup path.
+                return;
+            }
         }
 
     }    // namespace
@@ -488,132 +617,823 @@ namespace grab::kernel::presentation
 
     OverlayService::~OverlayService()
     {
-        const std::scoped_lock lock{ mutex_ };
-        scene_.set_delta_sink( {} );
-        if( opened_ )
+        std::optional<EditNotification>     notification;
+        std::shared_ptr<OverlayEditSession> terminal_session;
         {
-            try
+            const std::scoped_lock lock{ mutex_ };
+            if( edit_session_ != nullptr )
             {
-                delegate_->close();
+                terminal_session = edit_session_;
+                try
+                {
+                    notification = cancel_drag_locked( terminal_session, true );
+                    [[maybe_unused]]
+                    auto stopped = terminate_edit_locked( terminal_session );
+                }
+                catch( ... )
+                {
+                    stop_edit_session_noexcept( terminal_session );
+                }
             }
-            catch( ... )
+            scene_.set_delta_sink( {} );
+            if( opened_ )
             {
-                // Teardown cannot surface an error through this destructor.
+                try
+                {
+                    delegate_->close();
+                }
+                catch( ... )
+                {
+                    // Teardown cannot surface an error through this destructor.
+                    opened_ = false;
+                }
                 opened_ = false;
-                return;
             }
-            opened_ = false;
+            if( terminal_session != nullptr )
+            {
+                // close() is the terminal provider fallback (the X11 delegate
+                // destroys its window and releases any surviving server grab).
+                // Detach even when checked cleanup or close reported failure so
+                // a public EditSession may safely outlive this service/runtime.
+                terminal_session->detach_delegate();
+            }
+            edit_session_.reset();
         }
+        invoke_notification( std::move( notification ) );
     }
 
     Result<overlay::ShapeId>
     OverlayService::add( overlay::Shape shape )
     {
-        const std::scoped_lock lock{ mutex_ };
-        recover_best_effort();
-        auto preflight = transform_shape( *graph_, delegate_space_, shape );
-        if( !preflight.has_value() )
+        Result<overlay::ShapeId>        result;
+        std::optional<EditNotification> notification;
         {
-            return std::unexpected( std::move( preflight.error() ) );
+            const std::scoped_lock lock{ mutex_ };
+            recover_best_effort();
+            auto preflight = transform_shape( *graph_, delegate_space_, shape );
+            if( !preflight.has_value() )
+            {
+                result = std::unexpected( std::move( preflight.error() ) );
+            }
+            else
+            {
+                result = scene_.add( std::move( shape ) );
+            }
+            notification = refresh_edit_locked();
         }
-        return scene_.add( std::move( shape ) );
+        invoke_notification( std::move( notification ) );
+        return result;
     }
 
     Result<std::vector<overlay::ShapeId>>
     OverlayService::add_many( std::span<overlay::Shape> shapes )
     {
-        const std::scoped_lock lock{ mutex_ };
-        recover_best_effort();
-
-        // Preflight EVERY shape before adding ANY. A batch that fails halfway
-        // would leave the scene holding a prefix the caller never asked to
-        // stand alone, and it has no ids for what did land.
-        for( overlay::Shape& shape : shapes )
+        Result<std::vector<overlay::ShapeId>> result;
+        std::optional<EditNotification>       notification;
         {
-            auto preflight = transform_shape( *graph_, delegate_space_, shape );
-            if( !preflight.has_value() )
-            {
-                return std::unexpected( std::move( preflight.error() ) );
-            }
-        }
+            const std::scoped_lock lock{ mutex_ };
+            recover_best_effort();
 
-        std::vector<overlay::ShapeId> ids;
-        ids.reserve( shapes.size() );
-        for( overlay::Shape& shape : shapes )
-        {
-            auto added = scene_.add( std::move( shape ) );
-            if( !added.has_value() )
+            std::optional<Error> preflight_error;
+            // Preflight EVERY shape before adding ANY. A batch that fails halfway
+            // would leave the scene holding a prefix the caller never asked to
+            // stand alone, and it has no ids for what did land.
+            for( overlay::Shape& shape : shapes )
             {
-                return std::unexpected( std::move( added.error() ) );
+                auto preflight = transform_shape( *graph_, delegate_space_, shape );
+                if( !preflight.has_value() )
+                {
+                    preflight_error = std::move( preflight.error() );
+                    break;
+                }
             }
-            ids.push_back( *added );
+
+            if( preflight_error.has_value() )
+            {
+                result = std::unexpected( std::move( *preflight_error ) );
+            }
+            else
+            {
+                std::vector<overlay::ShapeId> ids;
+                ids.reserve( shapes.size() );
+                for( overlay::Shape& shape : shapes )
+                {
+                    auto added = scene_.add( std::move( shape ) );
+                    if( !added.has_value() )
+                    {
+                        result = std::unexpected( std::move( added.error() ) );
+                        break;
+                    }
+                    ids.push_back( *added );
+                }
+                if( ids.size() == shapes.size() )
+                {
+                    result = std::move( ids );
+                }
+            }
+            notification = refresh_edit_locked();
         }
-        return ids;
+        invoke_notification( std::move( notification ) );
+        return result;
     }
 
     Result<void>
     OverlayService::update( overlay::ShapeId id,
                             overlay::Shape   shape )
     {
-        const std::scoped_lock lock{ mutex_ };
-        recover_best_effort();
-        auto preflight = transform_shape( *graph_, delegate_space_, shape );
-        if( !preflight.has_value() )
+        Result<void>                    result;
+        std::optional<EditNotification> notification;
         {
-            return std::unexpected( std::move( preflight.error() ) );
+            const std::scoped_lock lock{ mutex_ };
+            recover_best_effort();
+            auto preflight = transform_shape( *graph_, delegate_space_, shape );
+            if( !preflight.has_value() )
+            {
+                result = std::unexpected( std::move( preflight.error() ) );
+            }
+            else
+            {
+                result = scene_.update( id, std::move( shape ) );
+                if( result.has_value() &&
+                    edit_session_ !=
+                    nullptr &&
+                    edit_session_->dragging() &&
+                    edit_session_->target() == id )
+                {
+                    notification = cancel_drag_locked( edit_session_, false );
+                }
+            }
+            auto refreshed = refresh_edit_locked();
+            if( !notification.has_value() )
+            {
+                notification = std::move( refreshed );
+            }
         }
-        return scene_.update( id, std::move( shape ) );
+        invoke_notification( std::move( notification ) );
+        return result;
     }
 
     Result<void>
     OverlayService::remove( overlay::ShapeId id )
     {
-        const std::scoped_lock lock{ mutex_ };
-        recover_best_effort();
-        return scene_.remove( id );
+        Result<void>                    result;
+        std::optional<EditNotification> notification;
+        {
+            const std::scoped_lock lock{ mutex_ };
+            recover_best_effort();
+            result = scene_.remove( id );
+            if( result.has_value() &&
+                edit_session_ !=
+                nullptr &&
+                edit_session_->dragging() &&
+                edit_session_->target() == id )
+            {
+                notification = cancel_drag_locked( edit_session_, false );
+            }
+            auto refreshed = refresh_edit_locked();
+            if( !notification.has_value() )
+            {
+                notification = std::move( refreshed );
+            }
+        }
+        invoke_notification( std::move( notification ) );
+        return result;
     }
 
     void
     OverlayService::clear()
     {
-        const std::scoped_lock lock{ mutex_ };
-        recover_best_effort();
-        scene_.clear();
+        std::optional<EditNotification> notification;
+        {
+            const std::scoped_lock lock{ mutex_ };
+            recover_best_effort();
+            scene_.clear();
+            if( edit_session_ != nullptr && edit_session_->dragging() )
+            {
+                notification = cancel_drag_locked( edit_session_, false );
+            }
+            auto refreshed = refresh_edit_locked();
+            if( !notification.has_value() )
+            {
+                notification = std::move( refreshed );
+            }
+        }
+        invoke_notification( std::move( notification ) );
     }
 
     Result<void>
     OverlayService::flush()
     {
+        Result<void>                    result;
+        std::optional<EditNotification> notification;
+        {
+            const std::scoped_lock lock{ mutex_ };
+            notification        = refresh_edit_locked();
+            const auto snapshot = scene_.snapshot();
+            if( desynchronized_ )
+            {
+                result = recover( snapshot );
+            }
+            if( result.has_value() )
+            {
+                result = delegate_->flush( snapshot.through_revision );
+                if( !result.has_value() )
+                {
+                    // A failed fence may leave the delegate desynchronized
+                    // (topology change, compositor churn). Recover and retry the
+                    // fence ONCE — flush is idempotent — so one call heals.
+                    desynchronized_ = true;
+                    auto recovered  = recover( snapshot );
+                    if( recovered.has_value() )
+                    {
+                        result = delegate_->flush( snapshot.through_revision );
+                        if( !result.has_value() )
+                        {
+                            desynchronized_ = true;
+                        }
+                    }
+                    else
+                    {
+                        result = std::unexpected( std::move( recovered.error() ) );
+                    }
+                }
+            }
+        }
+        invoke_notification( std::move( notification ) );
+        return result;
+    }
+
+    Result<std::shared_ptr<OverlayEditSession>>
+    OverlayService::start_edit( std::span<const overlay::ShapeId> editable,
+                                EditCallbacks                     callbacks )
+    {
         const std::scoped_lock lock{ mutex_ };
-        const auto             snapshot = scene_.snapshot();
-        if( desynchronized_ )
+        if( edit_session_ != nullptr && edit_session_->live() )
         {
-            auto recovered = recover( snapshot );
-            if( !recovered.has_value() )
+            return fail( ErrorCode::SessionExists,
+                         "an overlay edit session is already active" );
+        }
+        if( edit_session_ != nullptr )
+        {
+            auto pending = edit_session_;
+            auto cleaned = terminate_edit_locked( pending );
+            if( !cleaned.has_value() )
             {
-                return std::unexpected( std::move( recovered.error() ) );
+                return std::unexpected( std::move( cleaned.error() ) );
             }
         }
-        auto flushed = delegate_->flush( snapshot.through_revision );
-        if( !flushed.has_value() )
+
+        recover_best_effort();
+        const auto snapshot = scene_.snapshot();
+        for( const auto id : editable )
         {
-            // A failed fence may leave the delegate desynchronized (topology
-            // change, compositor churn). Recover and retry the fence ONCE —
-            // flush is idempotent — so a single call heals instead of
-            // returning ResyncRequired to the caller.
-            desynchronized_ = true;
-            auto recovered  = recover( snapshot );
-            if( !recovered.has_value() )
+            const auto record =
+                std::ranges::find( snapshot.shapes, id, &overlay::ShapeRecord::id );
+            if( record == snapshot.shapes.end() )
             {
-                return std::unexpected( std::move( recovered.error() ) );
+                return fail( ErrorCode::StaleShape, "overlay edit shape id is stale" );
             }
-            flushed = delegate_->flush( snapshot.through_revision );
-            if( !flushed.has_value() )
+            if( record->shape.animation.has_value() )
             {
-                desynchronized_ = true;
+                return fail( ErrorCode::InvalidArgument,
+                             "animated overlay shapes are not editable" );
+            }
+            if( !geometry_is_in_space( record->shape.geometry, delegate_space_ ) )
+            {
+                return fail( ErrorCode::InvalidArgument,
+                             "overlay edit geometry must already be in delegate space" );
             }
         }
-        return flushed;
+
+        auto session = OverlayEditSession::start(
+            *delegate_,
+            delegate_space_,
+            snapshot.shapes,
+            std::vector<overlay::ShapeId>{ editable.begin(), editable.end() },
+            std::move( callbacks ),
+            [this]( std::shared_ptr<OverlayEditSession> active,
+                    const spi::OverlayEditEvent&        event )
+            {
+                handle_edit_event( std::move( active ), event );
+            }
+        );
+        if( !session.has_value() )
+        {
+            return std::unexpected( std::move( session.error() ) );
+        }
+        edit_session_ = *session;
+        return *session;
+    }
+
+    Result<void>
+    OverlayService::stop_edit( const std::shared_ptr<OverlayEditSession>& session )
+    {
+        if( session == nullptr )
+        {
+            return {};
+        }
+
+        Result<void>                    result;
+        std::optional<EditNotification> notification;
+        {
+            const std::scoped_lock lock{ mutex_ };
+            if( edit_session_ != session )
+            {
+                return {};
+            }
+            notification = cancel_drag_locked( session, true );
+            if( edit_session_ == session )
+            {
+                result = terminate_edit_locked( session );
+            }
+        }
+        invoke_notification( std::move( notification ) );
+        return result;
+    }
+
+    Result<void>
+    OverlayService::capture_pointer()
+    {
+        const std::scoped_lock lock{ mutex_ };
+        if( delegate_ == nullptr )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "overlay has no delegate to capture the pointer with" );
+        }
+        if( pointer_captured_ )
+        {
+            return {};
+        }
+
+        // A zero-sized surface means the delegate cannot report its extent.
+        // Installing an empty region would be click-through, i.e. silently the
+        // opposite of a capture, so refuse instead.
+        const auto bounds = delegate_->surface_bounds();
+        if( bounds.width == 0U || bounds.height == 0U )
+        {
+            return fail( ErrorCode::CapabilityUnavailable,
+                         "overlay delegate does not report a surface extent" );
+        }
+
+        const std::array<geometry::Rectangle, 1> region{ bounds };
+        auto installed = delegate_->set_input_region( region );
+        if( !installed.has_value() )
+        {
+            return installed;
+        }
+
+        // Treat a failed grab as possibly installed: the teardown path must
+        // still issue the ungrab, because a pointer grab left behind freezes
+        // the user's whole desktop. This mirrors OverlayEditSession.
+        pointer_captured_ = true;
+        auto grabbed      = delegate_->grab_pointer();
+        if( !grabbed.has_value() )
+        {
+            [[maybe_unused]]
+            auto reverted = release_pointer_locked();
+            return grabbed;
+        }
+
+        log::nominal(
+            [&bounds]( auto& event )
+            {
+                event.tag( log::tags::overlay )
+                    .value( "pointer", "captured" )
+                    .value( "w", bounds.width )
+                    .value( "h", bounds.height );
+            }
+        );
+        return {};
+    }
+
+    Result<void>
+    OverlayService::release_pointer()
+    {
+        const std::scoped_lock lock{ mutex_ };
+        return release_pointer_locked();
+    }
+
+    Result<void>
+    OverlayService::release_pointer_locked()
+    {
+        if( !pointer_captured_ )
+        {
+            return {};
+        }
+        if( delegate_ == nullptr )
+        {
+            pointer_captured_ = false;
+            return {};
+        }
+
+        auto released = delegate_->ungrab_pointer();
+        // Restore click-through even when the ungrab reported failure. Leaving
+        // a full-surface input region installed would swallow every click on
+        // the display, which is worse than the failure being reported.
+        auto emptied =
+            delegate_->set_input_region( std::span<const geometry::Rectangle>{} );
+        pointer_captured_ = false;
+
+        log::nominal(
+            []( auto& event )
+            {
+                event.tag( log::tags::overlay ).value( "pointer", "released" );
+            }
+        );
+
+        if( !released.has_value() )
+        {
+            return released;
+        }
+        return emptied;
+    }
+
+    bool
+    OverlayService::pointer_captured() const noexcept
+    {
+        return pointer_captured_;
+    }
+
+    void
+    OverlayService::handle_edit_event( std::shared_ptr<OverlayEditSession> session,
+                                       const spi::OverlayEditEvent& event ) noexcept
+    {
+        std::optional<EditNotification> notification;
+        try
+        {
+            {
+                const std::scoped_lock lock{ mutex_ };
+                if( session == nullptr || edit_session_ != session || !session->live() )
+                {
+                    return;
+                }
+
+                notification = refresh_edit_locked();
+                if( edit_session_ != session || !session->live() )
+                {
+                    // A refresh failure terminates the session transactionally.
+                }
+                else if( event.kind == spi::OverlayEditEventKind::ButtonPress )
+                {
+                    if( !notification.has_value() &&
+                        !session->dragging() &&
+                        event.button == primaryPointerButton )
+                    {
+                        const auto snapshot = scene_.snapshot();
+                        if( session->begin( snapshot.shapes,
+                                            event.position,
+                                            event.button ) )
+                        {
+                            auto grabbed = session->grab_pointer();
+                            if( !grabbed.has_value() )
+                            {
+                                auto error = std::move( grabbed.error() );
+                                session->remember_error( error );
+                                notification = cancel_drag_locked( session, false );
+                                [[maybe_unused]]
+                                auto stopped = terminate_edit_locked( session );
+                            }
+                        }
+                    }
+                }
+                else if( event.kind == spi::OverlayEditEventKind::PointerMotion )
+                {
+                    if( !notification.has_value() && session->dragging() )
+                    {
+                        const auto target  = session->target();
+                        auto       preview = session->update( event.position );
+                        if( preview.has_value() )
+                        {
+                            auto applied = scene_.update( target, *preview );
+                            if( !applied.has_value() )
+                            {
+                                const bool restore =
+                                    applied.error().code != ErrorCode::StaleShape;
+                                auto error   = std::move( applied.error() );
+                                notification = cancel_drag_locked( session, restore );
+                                if( error.code != ErrorCode::StaleShape )
+                                {
+                                    session->remember_error( error );
+                                    [[maybe_unused]]
+                                    auto stopped = terminate_edit_locked( session );
+                                }
+                            }
+                            else
+                            {
+                                notification = refresh_edit_locked();
+                            }
+                        }
+                    }
+                }
+                else if( event.kind == spi::OverlayEditEventKind::ButtonRelease )
+                {
+                    if( !notification.has_value() &&
+                        session->dragging() &&
+                        event.button == session->button() )
+                    {
+                        const auto target = session->target();
+                        auto       final  = session->update( event.position );
+                        if( final.has_value() )
+                        {
+                            auto applied = scene_.update( target, *final );
+                            if( !applied.has_value() )
+                            {
+                                const bool restore =
+                                    applied.error().code != ErrorCode::StaleShape;
+                                auto error   = std::move( applied.error() );
+                                notification = cancel_drag_locked( session, restore );
+                                if( error.code != ErrorCode::StaleShape )
+                                {
+                                    session->remember_error( error );
+                                    [[maybe_unused]]
+                                    auto stopped = terminate_edit_locked( session );
+                                }
+                            }
+                            else
+                            {
+                                notification = refresh_edit_locked();
+                                if( edit_session_ == session && session->dragging() )
+                                {
+                                    auto released = session->release_pointer();
+                                    if( !released.has_value() )
+                                    {
+                                        notification =
+                                            cancel_drag_locked( session, true );
+                                        [[maybe_unused]]
+                                        auto stopped = terminate_edit_locked( session );
+                                    }
+                                    else
+                                    {
+                                        auto committed =
+                                            session->commit( event.position );
+                                        if( committed.has_value() )
+                                        {
+                                            session->finish_drag();
+                                            notification = EditNotification{
+                                                .session = session,
+                                                .id      = target,
+                                                .shape   = std::move( *committed ),
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                else if( event.kind == spi::OverlayEditEventKind::NotifyUngrab )
+                {
+                    session->pointer_was_ungrabbed();
+                    if( session->dragging() )
+                    {
+                        notification   = cancel_drag_locked( session, true );
+                        auto refreshed = refresh_edit_locked();
+                        if( !notification.has_value() )
+                        {
+                            notification = std::move( refreshed );
+                        }
+                    }
+                }
+            }
+            invoke_notification( std::move( notification ) );
+        }
+        catch( const std::exception& exception )
+        {
+            try
+            {
+                abort_edit_after_exception( session, callback_exception( exception ) );
+            }
+            catch( ... )
+            {
+                stop_edit_session_noexcept( session );
+            }
+        }
+        catch( ... )
+        {
+            try
+            {
+                abort_edit_after_exception( session, unknown_callback_exception() );
+            }
+            catch( ... )
+            {
+                stop_edit_session_noexcept( session );
+            }
+        }
+    }
+
+    void
+    OverlayService::abort_edit_after_exception(
+        std::shared_ptr<OverlayEditSession> session,
+        Error                               error
+    ) noexcept
+    {
+        if( session == nullptr )
+        {
+            return;
+        }
+        session->remember_error( std::move( error ) );
+
+        std::optional<EditNotification> notification;
+        try
+        {
+            {
+                const std::scoped_lock lock{ mutex_ };
+                if( edit_session_ == session )
+                {
+                    notification = cancel_drag_locked( session, true );
+                    [[maybe_unused]]
+                    auto stopped = terminate_edit_locked( session );
+                }
+            }
+            invoke_notification( std::move( notification ) );
+        }
+        catch( ... )
+        {
+            stop_edit_session_noexcept( session );
+        }
+    }
+
+    std::optional<OverlayService::EditNotification>
+    OverlayService::cancel_drag_locked( std::shared_ptr<OverlayEditSession> session,
+                                        bool restore_original )
+    {
+        if( session == nullptr || !session->dragging() )
+        {
+            return std::nullopt;
+        }
+
+        const auto id = session->target();
+        if( restore_original && session->original_shape().has_value() )
+        {
+            auto restored = scene_.update( id, *session->original_shape() );
+            if( !restored.has_value() && restored.error().code != ErrorCode::StaleShape )
+            {
+                session->remember_error( std::move( restored.error() ) );
+            }
+        }
+        session->cancel_interaction();
+        auto released = session->release_pointer();
+        if( !released.has_value() )
+        {
+            [[maybe_unused]]
+            auto stopped = terminate_edit_locked( session );
+        }
+        return EditNotification{
+            .session = session,
+            .id      = id,
+            .shape   = std::nullopt,
+        };
+    }
+
+    std::optional<OverlayService::EditNotification>
+    OverlayService::refresh_edit_locked()
+    {
+        auto session = edit_session_;
+        if( session == nullptr )
+        {
+            return std::nullopt;
+        }
+        if( !session->live() )
+        {
+            [[maybe_unused]]
+            auto stopped = terminate_edit_locked( session );
+            return std::nullopt;
+        }
+
+        auto                            snapshot = scene_.snapshot();
+        std::optional<EditNotification> notification;
+        if( session->dragging() )
+        {
+            const auto record = std::ranges::find( snapshot.shapes,
+                                                   session->target(),
+                                                   &overlay::ShapeRecord::id );
+            if( record == snapshot.shapes.end() )
+            {
+                notification = cancel_drag_locked( session, false );
+                snapshot     = scene_.snapshot();
+            }
+        }
+        if( edit_session_ != session )
+        {
+            return notification;
+        }
+
+        const auto editable          = session->editable();
+        const auto became_ineligible = std::ranges::find_if(
+            snapshot.shapes,
+            [this, editable]( const overlay::ShapeRecord& record )
+            {
+                const bool selected =
+                    std::ranges::find( editable, record.id ) != editable.end();
+                return selected && ( record.shape.animation.has_value() ||
+                                     !geometry_is_in_space( record.shape.geometry,
+                                                            delegate_space_ ) );
+            }
+        );
+        if( became_ineligible != snapshot.shapes.end() )
+        {
+            if( !notification.has_value() && session->dragging() )
+            {
+                notification = cancel_drag_locked( session, true );
+            }
+            session->remember_error( Error{
+                .code       = ErrorCode::InvalidArgument,
+                .message    = "an editable overlay shape became ineligible",
+                .capability = {},
+                .target     = {},
+                .attempts   = {},
+            } );
+            [[maybe_unused]]
+            auto stopped = terminate_edit_locked( session );
+            return notification;
+        }
+
+        auto refreshed = session->refresh_region( snapshot.shapes );
+        if( !refreshed.has_value() )
+        {
+            auto error = std::move( refreshed.error() );
+            if( !notification.has_value() && session->dragging() )
+            {
+                notification = cancel_drag_locked( session, true );
+            }
+            session->remember_error( error );
+            [[maybe_unused]]
+            auto stopped = terminate_edit_locked( session );
+        }
+        return notification;
+    }
+
+    Result<void>
+    OverlayService::terminate_edit_locked(
+        const std::shared_ptr<OverlayEditSession>& session
+    )
+    {
+        if( session == nullptr )
+        {
+            return {};
+        }
+
+        auto stopped = session->stop();
+        if( !stopped.has_value() )
+        {
+            // A checked X request or fake failure may be transient.  Complete
+            // RAII teardown in this same reactor turn when one retry suffices;
+            // remember_error() still preserves the first failure for status().
+            auto retried = session->stop();
+            if( !retried.has_value() )
+            {
+                // Keep service ownership while delegate cleanup is incomplete.
+                // A later verb/start can retry on the reactor thread; resetting
+                // here would either leak X state or make the public session's
+                // eventual destruction dereference a dead runtime.
+                return std::unexpected( std::move( retried.error() ) );
+            }
+        }
+
+        session->detach_delegate();
+        if( edit_session_ == session )
+        {
+            edit_session_.reset();
+        }
+        return {};
+    }
+
+    void
+    OverlayService::invoke_notification(
+        std::optional<EditNotification> notification
+    ) noexcept
+    {
+        if( !notification.has_value() || notification->session == nullptr )
+        {
+            return;
+        }
+        try
+        {
+            if( notification->shape.has_value() )
+            {
+                auto callback = notification->session->on_edit();
+                if( callback )
+                {
+                    callback( notification->id, *notification->shape );
+                }
+            }
+            else
+            {
+                auto callback = notification->session->on_cancelled();
+                if( callback )
+                {
+                    callback( notification->id );
+                }
+            }
+        }
+        catch( const std::exception& exception )
+        {
+            notification->session->remember_error( callback_exception( exception ) );
+        }
+        catch( ... )
+        {
+            notification->session->remember_error( unknown_callback_exception() );
+        }
     }
 
     void

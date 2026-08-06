@@ -372,4 +372,10 @@ namespace grab::drivers::desktop::x11
         return input_seat_.get();
     }
 
+    void
+    X11Runtime::bind_reactor( grab::core::Reactor* reactor )
+    {
+        reactor_ = reactor;
+    }
+
 }    // namespace grab::drivers::desktop::x11

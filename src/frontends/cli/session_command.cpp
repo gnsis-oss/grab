@@ -142,10 +142,10 @@ namespace grab::cli
         int
         start_session( std::span<const std::string_view> args )
         {
-            auto desc = parse_session_start_args( args );
-            if( !desc.has_value() )
+            auto descriptor = parse_session_start_args( args );
+            if( !descriptor.has_value() )
             {
-                print_error( desc.error().message );
+                print_error( descriptor.error().message );
                 return error_exit_code;
             }
 
@@ -159,7 +159,7 @@ namespace grab::cli
             const auto providers = session::builtin_session_providers();
             const auto env       = probe_cli_environment();
             const auto chosen =
-                session::select_session_provider( providers, env, desc->mode );
+                session::select_session_provider( providers, env, descriptor->mode );
             if( !chosen.has_value() )
             {
                 print_error( chosen.error().message );
@@ -167,7 +167,7 @@ namespace grab::cli
             }
 
             session::SessionManager manager{ *registry, **chosen };
-            auto                    record = manager.start( *desc );
+            auto                    record = manager.start( *descriptor );
             if( !record.has_value() )
             {
                 print_error( record.error().message );
@@ -285,7 +285,7 @@ namespace grab::cli
 
     }    // namespace
 
-    grab::Result<grab::WorkspaceDesc>
+    grab::Result<grab::WorkspaceDescriptor>
     parse_session_start_args( std::span<const std::string_view> args )
     {
         if( args.size() <= name_position || args.front() != start_command )
@@ -300,9 +300,9 @@ namespace grab::cli
                                "session name is required" );
         }
 
-        WorkspaceDesc desc;
-        desc.name    = std::string{ name };
-        desc.mode    = WorkspaceMode::Offscreen;
+        WorkspaceDescriptor descriptor;
+        descriptor.name = std::string{ name };
+        descriptor.mode = WorkspaceMode::Offscreen;
 
         auto current = std::next( args.begin(),
                                   static_cast<std::ptrdiff_t>( first_option_position ) );
@@ -325,7 +325,7 @@ namespace grab::cli
                     return grab::fail( grab::ErrorCode::InvalidArgument,
                                        "unknown session mode: " + std::string{ value } );
                 }
-                desc.mode = *mode;
+                descriptor.mode = *mode;
             }
             else if( flag == geometry_flag )
             {
@@ -334,11 +334,11 @@ namespace grab::cli
                 {
                     return grab::fail( geometry.error().code, geometry.error().message );
                 }
-                desc.geometry = *geometry;
+                descriptor.geometry = *geometry;
             }
             else if( flag == app_flag )
             {
-                desc.app_command = value;
+                descriptor.app_command = value;
             }
             else
             {
@@ -349,7 +349,7 @@ namespace grab::cli
             current = std::next( value_position );
         }
 
-        return desc;
+        return descriptor;
     }
 
     bool

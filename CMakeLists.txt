@@ -9,9 +9,25 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
+# An unset CMAKE_BUILD_TYPE on a single-config generator means no optimization
+# flags AND no -g: every binary is -O0 and stripped of line information, with
+# no diagnostic. That was grab's effective default for its whole life. Presets
+# all set one explicitly; this catches a bare `cmake -B ...` that does not.
+get_property(_grab_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(PROJECT_IS_TOP_LEVEL AND NOT _grab_multi_config AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
+        "Build type: Debug | Release | RelWithDebInfo | MinSizeRel" FORCE)
+    message(STATUS "Build type: RelWithDebInfo (defaulted — none was requested)")
+elseif(PROJECT_IS_TOP_LEVEL AND NOT _grab_multi_config)
+    message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+endif()
+
 # Dev tooling is for grab's OWN top-level builds only. As an add_subdirectory
 # dependency the `format ALL` target collides with the consumer's, so guard the
-# whole group on PROJECT_IS_TOP_LEVEL (mirrors every l0 library).
+# whole group on PROJECT_IS_TOP_LEVEL.
+#
+# Order matters: Coverage reads GRAB_SANITIZER, Logging is read by every
+# target below.
 if(PROJECT_IS_TOP_LEVEL)
     include(Cache)
     include(Warnings)
@@ -21,6 +37,19 @@ if(PROJECT_IS_TOP_LEVEL)
     include(Tidy)
     include(IWYU)
     include(Profile)
+endif()
+include(Logging)
+
+# Build directories moved under build/<config>, where clangd does not look.
+# The `dev` preset — and only it, so several configurations never fight over
+# the link — points the editor at its compile database.
+option(GRAB_COMPILE_COMMANDS_LINK
+       "Symlink compile_commands.json into the source root for clangd" OFF)
+if(PROJECT_IS_TOP_LEVEL AND GRAB_COMPILE_COMMANDS_LINK)
+    file(CREATE_LINK
+        ${CMAKE_BINARY_DIR}/compile_commands.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
+        SYMBOLIC)
 endif()
 
 # Build-essential modules define find/helper functions grab_core's build calls.
@@ -41,9 +70,6 @@ grab_proto_library(grab_proto
     proto/eventgrab/v1/service.proto
 )
 
-add_library(grab_vendor_l0 INTERFACE)
-target_include_directories(grab_vendor_l0 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/vendor/l0)
-
 add_library(grab_core STATIC
     src/config/batch_manifest.cpp
     src/config/environment.cpp
@@ -54,6 +80,8 @@ add_library(grab_core STATIC
     src/spi/monitor.cpp
     src/kernel/lifecycle/context.cpp
     src/kernel/routing/doctor.cpp
+    src/kernel/support/log.cpp
+    src/kernel/support/diag.cpp
     src/kernel/events/event_bus.cpp
     src/kernel/identity/id_factory.cpp
     src/kernel/support/posix_open.c
@@ -69,7 +97,10 @@ add_library(grab_core STATIC
     src/kernel/lifecycle/observation_pump.cpp
 )
 target_link_libraries(grab_core PUBLIC nlohmann_json::nlohmann_json)
-target_link_libraries(grab_core PRIVATE grab_vendor_l0)
+# The generated log ceiling must reach every TU that includes
+# kernel/support/log.hpp, which is any of them. PUBLIC on grab_core carries it
+# to every other grab target and to the tests.
+target_link_libraries(grab_core PUBLIC grab_log_config)
 # Composition root: SessionCore (grab_core) composes the X11 and AT-SPI driver stacks.
 # The static-library cycles through grab_kernel and both drivers are intentional; CMake supports cycles among STATIC libraries.
 target_link_libraries(grab_core PRIVATE grab_driver_x11)
@@ -98,6 +129,11 @@ add_library(grab_kernel STATIC
     src/kernel/graph/target_registry.cpp
     src/kernel/graph/state_manager.cpp
     src/kernel/graph/state_snapshot_provider.cpp
+    src/kernel/input/gesture_classifier.cpp
+    src/kernel/presentation/cursor_feedback.cpp
+    src/kernel/presentation/overlay_draw.cpp
+    src/kernel/presentation/overlay_edit.cpp
+    src/kernel/presentation/overlay_edit_session.cpp
     src/kernel/presentation/overlay_raster.cpp
     src/kernel/presentation/overlay_scene.cpp
     src/kernel/presentation/overlay_service.cpp
@@ -106,7 +142,7 @@ add_library(grab_kernel STATIC
     src/kernel/query/locator.cpp
     src/kernel/query/snapshot_tree_nav.cpp
 )
-target_link_libraries(grab_kernel PUBLIC grab_core PRIVATE grab_vendor_l0)
+target_link_libraries(grab_kernel PUBLIC grab_core)
 target_include_directories(grab_kernel PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_kernel PUBLIC cxx_std_23)
 
@@ -225,7 +261,6 @@ target_link_libraries(grab_driver_x11
         grab_kernel
         grab_platform_x11
     PRIVATE
-        grab_vendor_l0
         grab_screen
         grab_input_x11
         ${GRAB_LIBAV_TARGETS}
@@ -257,8 +292,6 @@ target_link_libraries(grab_driver_atspi
         # atspi_monitor.hpp exposes <dbus/dbus.h> types, so consumers of the
         # driver header need the D-Bus include path.
         PkgConfig::GRAB_DBUS_1
-    PRIVATE
-        grab_vendor_l0
 )
 target_include_directories(grab_driver_atspi PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_driver_atspi PUBLIC cxx_std_23)
@@ -306,9 +339,12 @@ target_compile_features(grab_service PUBLIC cxx_std_23)
 
 add_executable(grab_cli
     src/frontends/cli/main.cpp
+    src/frontends/cli/feedback_command.cpp
     src/frontends/cli/input_command.cpp
+    src/frontends/cli/log_options.cpp
     src/frontends/cli/overlay_command.cpp
     src/frontends/cli/session_command.cpp
+    src/frontends/cli/sketch_command.cpp
     src/frontends/cli/watch_daemon.cpp
     src/frontends/cli/windows_command.cpp
 )
@@ -318,12 +354,36 @@ target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_ima
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)
 
+# Until now there was no install rule of any kind, so the only way to run the
+# CLI was by path into a build directory -- and the obvious such path held a
+# months-old binary that predated half the verbs. Installing is what makes
+# `grab` a command rather than an artifact you have to go find.
+#
+#   cmake --install build/dev --prefix ~/.local
+#
+# The headers go with it so an add_subdirectory consumer is not the only way to
+# build against the library. The static archives are deliberately NOT exported:
+# that needs an export set covering every internal target and a config package
+# to go with it, and shipping half of one would be worse than shipping none.
+if(PROJECT_IS_TOP_LEVEL)
+    include(GNUInstallDirs)
+    install(TARGETS grab_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/include/grab
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.hpp")
+endif()
+
 # grab's own examples and tests build only for grab's top-level builds. As an
 # add_subdirectory dependency (spider's SPIDER_ENABLE_GRAB path) a consumer only
 # wants grab_core, and BUILD_TESTING is the consumer's flag for ITS tests.
 option(GRAB_BUILD_EXAMPLES "Build example programs" ON)
 if(PROJECT_IS_TOP_LEVEL AND GRAB_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+option(GRAB_BUILD_BENCHMARKS "Build benchmark programs" ON)
+if(PROJECT_IS_TOP_LEVEL AND GRAB_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
 
 if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)

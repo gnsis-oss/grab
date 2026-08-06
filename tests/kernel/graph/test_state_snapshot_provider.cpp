@@ -6,8 +6,10 @@
 
 // clang-format off
 #include <gtest/gtest.h>
+#include <atomic>
 #include <optional>
 #include <string>
+#include <thread>
 #include <variant>
 #include <vector>
 // clang-format on
@@ -20,6 +22,11 @@ namespace
     constexpr double timestamp            = 12.5;
     constexpr auto   unsetSequence        = 0U;
     constexpr auto   subscriptionCapacity = 32U;
+    constexpr auto   editorPid            = grab::Pid{ 1'001 };
+    constexpr auto   contendedPid         = grab::Pid{ 1'002 };
+    constexpr int    teardownRounds       = 200;
+    constexpr auto   subscriberThreads    = 2U;
+    constexpr int    noSubscribes         = 0;
 
     [[nodiscard]]
     grab::Event
@@ -63,7 +70,7 @@ TEST( StateSnapshotProvider,
     grab::EventBus                     bus;
     grab::event::StateSnapshotProvider provider{ bus };
     bus.publish(
-        make_window_event( windowCreatedKind, "editor", grab::Pid{ 1'001 }, "main.cpp" )
+        make_window_event( windowCreatedKind, "editor", editorPid, "main.cpp" )
     );
 
     grab::EventFilter filter;
@@ -103,7 +110,7 @@ TEST( StateSnapshotProvider,
 {
     grab::EventBus bus;
     bus.publish(
-        make_window_event( windowCreatedKind, "editor", grab::Pid{ 1'001 }, "main.cpp" )
+        make_window_event( windowCreatedKind, "editor", editorPid, "main.cpp" )
     );
 
     {
@@ -125,4 +132,60 @@ TEST( StateSnapshotProvider,
     }
 
     EXPECT_FALSE( has_state_snapshot );
+}
+
+// EventBusState::add invokes a registered snapshot provider WHILE HOLDING the
+// bus lock, so the bus takes (bus -> provider). If ~StateSnapshotProvider
+// holds the provider lock while ~Subscription unsubscribes, it takes
+// (provider -> bus) — an ABBA inversion that ThreadSanitizer reports as a
+// potential deadlock.
+//
+// This drives both orders concurrently. If the inversion is reintroduced the
+// two threads deadlock and the test hangs until its CTest timeout, which is
+// the intended signal; under TSan it also reports the inversion directly.
+TEST( StateSnapshotProvider,
+      ConcurrentSubscribeAndTeardownDoNotInvertBusAndProviderLocks )
+{
+    grab::EventBus bus;
+    bus.publish(
+        make_window_event( windowCreatedKind, "editor", contendedPid, "main.cpp" )
+    );
+
+    std::atomic<bool>        stop{ false };
+    std::atomic<int>         subscribes{ 0 };
+
+    std::vector<std::thread> subscribers;
+    subscribers.reserve( subscriberThreads );
+    for( auto index = 0U; index < subscriberThreads; ++index )
+    {
+        subscribers.emplace_back(
+            [&bus, &stop, &subscribes]
+            {
+                while( !stop.load( std::memory_order_relaxed ) )
+                {
+                    grab::EventFilter filter;
+                    filter.kinds = { stateSnapshotKind, windowCreatedKind };
+                    // Taking (bus -> provider): add() runs the registered
+                    // snapshot callback under the bus lock.
+                    auto subscription = bus.subscribe( filter, subscriptionCapacity );
+                    subscribes.fetch_add( 1, std::memory_order_relaxed );
+                }
+            }
+        );
+    }
+
+    for( auto round = 0; round < teardownRounds; ++round )
+    {
+        // Taking (provider -> bus) if the destructor holds its own lock while
+        // the subscription unsubscribes.
+        grab::event::StateSnapshotProvider provider{ bus };
+    }
+
+    stop.store( true, std::memory_order_relaxed );
+    for( auto& thread : subscribers )
+    {
+        thread.join();
+    }
+
+    EXPECT_GT( subscribes.load( std::memory_order_relaxed ), noSubscribes );
 }

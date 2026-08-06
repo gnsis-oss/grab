@@ -6,9 +6,14 @@
 #include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/presentation/overlay_animation.hpp"
 #include "kernel/presentation/overlay_raster.hpp"
 #include "kernel/scheduling/pacing_governor.hpp"
 #include "kernel/scheduling/reactor.hpp"
+#include "kernel/support/diag.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/log_tags.hpp"
+#include "spi/overlay_delegate.hpp"
 
 #include <algorithm>
 #include <array>
@@ -18,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <expected>
 #include <functional>
@@ -54,25 +60,48 @@ namespace grab::drivers::desktop::x11
     namespace
     {
 
-        constexpr std::uint32_t    targetFramesPerSecond = 60U;
-        constexpr std::uint8_t     argbDepth             = 32U;
-        constexpr std::uint8_t     bitsPerByte           = 8U;
-        constexpr std::uint8_t     bgraBytesPerPixel     = 4U;
-        constexpr std::uint8_t     fullChannel           = 0XFFU;
-        constexpr std::uint8_t     responseTypeMask      = 0X7FU;
-        constexpr std::uint8_t     noEventPropagation    = 0U;
-        constexpr std::uint8_t     noShmCompletionEvent  = 0U;
-        constexpr std::uint32_t    noRectangles          = 0U;
-        constexpr std::uint32_t    revisionStep          = 1U;
-        constexpr int              xcbSuccess            = 0;
-        constexpr int              flushFailure          = 0;
-        constexpr int              invalidFileDescriptor = -1;
-        constexpr int              systemCallFailure     = -1;
-        constexpr int              noPollEvents          = 0;
-        constexpr std::int16_t     xcbPollEvents         = POLLIN;
-        constexpr int              shmPermissions        = 0600;
-        constexpr auto             noTimerDelay      = std::chrono::nanoseconds::zero();
-        constexpr auto             flushFenceTimeout = std::chrono::seconds{ 2 };
+        constexpr std::uint32_t targetFramesPerSecond = 60U;
+        constexpr std::uint8_t  argbDepth             = 32U;
+        constexpr std::uint8_t  bitsPerByte           = 8U;
+        constexpr std::uint8_t  bgraBytesPerPixel     = 4U;
+        constexpr std::uint8_t  fullChannel           = 0XFFU;
+        constexpr std::uint8_t  responseTypeMask      = 0X7FU;
+        constexpr std::uint8_t  noEventPropagation    = 0U;
+        constexpr std::uint8_t  doNotUseOwnerEvents   = 0U;
+        constexpr std::uint8_t  noShmCompletionEvent  = 0U;
+        constexpr std::uint32_t revisionStep          = 1U;
+        constexpr int           xcbSuccess            = 0;
+        constexpr int           flushFailure          = 0;
+        constexpr int           invalidFileDescriptor = -1;
+        constexpr int           systemCallFailure     = -1;
+        constexpr std::uint32_t generatedIdFailure =
+            std::numeric_limits<std::uint32_t>::max();
+        constexpr int           noPollEvents      = 0;
+        constexpr std::int16_t  xcbPollEvents     = POLLIN;
+        constexpr int           shmPermissions    = 0600;
+        constexpr auto          noTimerDelay      = std::chrono::nanoseconds::zero();
+        constexpr auto          flushFenceTimeout = std::chrono::seconds{ 2 };
+
+        constexpr std::uint32_t passiveWindowEventMask = XCB_EVENT_MASK_EXPOSURE;
+        constexpr std::uint32_t editWindowEventMask    = passiveWindowEventMask |
+                                                         XCB_EVENT_MASK_BUTTON_PRESS |
+                                                         XCB_EVENT_MASK_BUTTON_RELEASE |
+                                                         XCB_EVENT_MASK_POINTER_MOTION |
+                                                         XCB_EVENT_MASK_ENTER_WINDOW |
+                                                         XCB_EVENT_MASK_LEAVE_WINDOW;
+        constexpr std::uint16_t pointerGrabEventMask =
+            XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_BUTTON_MOTION;
+        constexpr std::int64_t nativeCoordinateExtent =
+            static_cast<std::int64_t>( std::numeric_limits<std::int16_t>::max() ) + 1;
+        constexpr std::uint32_t    minimumXfixesRegionMajorVersion = 2U;
+        constexpr std::uint16_t    minimumShapeInputMajorVersion   = 1U;
+        constexpr std::uint16_t    minimumShapeInputMinorVersion   = 1U;
+
+        constexpr std::uint8_t     bgraBlueByteIndex               = 0U;
+        constexpr std::uint8_t     bgraGreenByteIndex              = 1U;
+        constexpr std::uint8_t     bgraRedByteIndex                = 2U;
+        constexpr std::uint8_t     bgraAlphaByteIndex              = 3U;
+        constexpr std::uint8_t     bgraBitsPerPixel = bgraBytesPerPixel * bitsPerByte;
         constexpr std::string_view argbUnavailableReason{
             "X11 overlay requires an XRender ARGB32 visual"
         };
@@ -84,9 +113,38 @@ namespace grab::drivers::desktop::x11
         };
         constexpr std::string_view reactorRequiredReason{
             "X11 overlay requires a bound reactor to map (compositor monitor "
-            "and fade/TTL frame clock)"
+            "and lifetime/animation frame clock)"
         };
         constexpr std::string_view compositorSelectionPrefix{ "_NET_WM_CM_S" };
+        constexpr bool             hostByteOrderKnown{
+            std::endian::native ==
+            std::endian::little ||
+            std::endian::native == std::endian::big
+        };
+        constexpr std::uint8_t hostImageByteOrder =
+            std::endian::native == std::endian::little ? XCB_IMAGE_ORDER_LSB_FIRST
+                                                       : XCB_IMAGE_ORDER_MSB_FIRST;
+
+        [[nodiscard]]
+        constexpr std::uint32_t
+        native_bgra_channel_mask( std::uint8_t byte_index ) noexcept
+        {
+            const auto native_byte_index =
+                std::endian::native == std::endian::little
+                    ? byte_index
+                    : static_cast<std::uint8_t>( bgraAlphaByteIndex - byte_index );
+            return static_cast<std::uint32_t>( fullChannel )
+                << ( static_cast<std::uint32_t>( native_byte_index ) * bitsPerByte );
+        }
+
+        constexpr std::uint32_t nativeBgraBlueMask =
+            native_bgra_channel_mask( bgraBlueByteIndex );
+        constexpr std::uint32_t nativeBgraGreenMask =
+            native_bgra_channel_mask( bgraGreenByteIndex );
+        constexpr std::uint32_t nativeBgraRedMask =
+            native_bgra_channel_mask( bgraRedByteIndex );
+        constexpr std::uint32_t nativeBgraAlphaMask =
+            native_bgra_channel_mask( bgraAlphaByteIndex );
 
         template<typename Type>
         using XcbOwned = std::unique_ptr<Type, decltype( &std::free )>;
@@ -145,6 +203,41 @@ namespace grab::drivers::desktop::x11
                 std::uint32_t  blue_mask{};
                 std::uint32_t  alpha_mask{};
         };
+
+        [[nodiscard]]
+        constexpr bool
+        bgra_row_strides_compatible( std::uint16_t width,
+                                     std::size_t   source_stride,
+                                     std::size_t   destination_stride ) noexcept
+        {
+            const auto row_bytes = static_cast<std::size_t>( width ) * bgraBytesPerPixel;
+            return source_stride >= row_bytes && destination_stride >= row_bytes;
+        }
+
+        [[nodiscard]]
+        constexpr bool
+        native_bgra_memcpy_compatible( const NativeLayout& layout,
+                                       std::uint16_t       width,
+                                       std::size_t         source_stride,
+                                       std::size_t         destination_stride ) noexcept
+        {
+            const bool masks_match = layout.red_mask ==
+                                     nativeBgraRedMask &&
+                                     layout.green_mask ==
+                                     nativeBgraGreenMask &&
+                                     layout.blue_mask ==
+                                     nativeBgraBlueMask &&
+                                     layout.alpha_mask == nativeBgraAlphaMask;
+            return hostByteOrderKnown &&
+                   layout.bits_per_pixel ==
+                   bgraBitsPerPixel &&
+                   masks_match &&
+                   layout.image_byte_order ==
+                   hostImageByteOrder &&
+                   bgra_row_strides_compatible( width,
+                                                source_stride,
+                                                destination_stride );
+        }
 
         struct ExtensionSpec
         {
@@ -464,9 +557,15 @@ namespace grab::drivers::desktop::x11
         }
 
         [[nodiscard]]
-        Result<ExtensionSpec>
-        probe_extensions( xcb_connection_t* connection )
+        Result<std::uint8_t>
+        negotiate_xfixes_shape_input( xcb_connection_t* connection )
         {
+            if( connection == nullptr )
+            {
+                return fail( ErrorCode::InvalidArgument,
+                             "X11 overlay XFixes negotiation requires a connection" );
+            }
+
             const auto* const xfixes =
                 xcb_get_extension_data( connection, &xcb_xfixes_id );
             const bool xfixes_present = xfixes != nullptr && xfixes->present != 0U;
@@ -502,8 +601,34 @@ namespace grab::drivers::desktop::x11
                 return std::unexpected( capability_error( xfixesUnavailableReason ) );
             }
 
+            const bool xfixes_regions_supported =
+                xfixes_version->major_version >= minimumXfixesRegionMajorVersion;
+            const bool shape_input_supported =
+                shape_version->major_version >
+                minimumShapeInputMajorVersion ||
+                ( shape_version->major_version ==
+                  minimumShapeInputMajorVersion &&
+                  shape_version->minor_version >= minimumShapeInputMinorVersion );
+            if( !xfixes_regions_supported || !shape_input_supported )
+            {
+                return std::unexpected( capability_error( xfixesUnavailableReason ) );
+            }
+
+            return xfixes->first_event;
+        }
+
+        [[nodiscard]]
+        Result<ExtensionSpec>
+        probe_extensions( xcb_connection_t* connection )
+        {
+            auto xfixes_first_event = negotiate_xfixes_shape_input( connection );
+            if( !xfixes_first_event.has_value() )
+            {
+                return std::unexpected( std::move( xfixes_first_event.error() ) );
+            }
+
             ExtensionSpec result{
-                .xfixes_first_event = xfixes->first_event,
+                .xfixes_first_event = *xfixes_first_event,
             };
             const auto* const randr =
                 xcb_get_extension_data( connection, &xcb_randr_id );
@@ -666,6 +791,103 @@ namespace grab::drivers::desktop::x11
             return std::nullopt;
         }
 
+        [[nodiscard]]
+        std::optional<std::chrono::milliseconds>
+        animation_deadline( const overlay::ShapeRecord& record ) noexcept
+        {
+            if( !record.shape.animation.has_value() )
+            {
+                return std::nullopt;
+            }
+            return saturating_deadline(
+                record.started_at,
+                kernel::presentation::animation_duration( *record.shape.animation )
+            );
+        }
+
+        [[nodiscard]]
+        Result<void>
+        apply_negotiated_xfixes_input_region(
+            xcb_connection_t*                connection,
+            xcb_window_t                     window,
+            std::span<const xcb_rectangle_t> rectangles
+        )
+        {
+            if( connection == nullptr || window == XCB_WINDOW_NONE )
+            {
+                return fail( ErrorCode::InvalidArgument,
+                             "X11 overlay ShapeInput region requires a window" );
+            }
+
+            const auto region = xcb_generate_id( connection );
+            if( region == generatedIdFailure )
+            {
+                return fail( ErrorCode::ProtocolError,
+                             "allocate X11 overlay XFixes region failed" );
+            }
+
+            auto created =
+                check_request( connection,
+                               xcb_xfixes_create_region_checked(
+                                   connection,
+                                   region,
+                                   static_cast<std::uint32_t>( rectangles.size() ),
+                                   rectangles.empty() ? nullptr : rectangles.data()
+                               ),
+                               "create X11 overlay XFixes input region" );
+            if( !created.has_value() )
+            {
+                return created;
+            }
+
+            auto installed = check_request(
+                connection,
+                xcb_xfixes_set_window_shape_region_checked( connection,
+                                                            window,
+                                                            XCB_SHAPE_SK_INPUT,
+                                                            0,
+                                                            0,
+                                                            region ),
+                "apply X11 overlay XFixes ShapeInput region"
+            );
+            auto destroyed =
+                check_request( connection,
+                               xcb_xfixes_destroy_region_checked( connection, region ),
+                               "destroy temporary X11 overlay XFixes input region" );
+            if( !installed.has_value() )
+            {
+                return installed;
+            }
+
+            // SetWindowShapeRegion copies the region. Cleanup failure cannot roll the
+            // successfully installed window shape back, so keep the applied result.
+            static_cast<void>( destroyed );
+            return {};
+        }
+
+        [[nodiscard]]
+        Result<void>
+        apply_xfixes_input_region( xcb_connection_t*                connection,
+                                   xcb_window_t                     window,
+                                   std::span<const xcb_rectangle_t> rectangles )
+        {
+            if( connection == nullptr || window == XCB_WINDOW_NONE )
+            {
+                return apply_negotiated_xfixes_input_region( connection,
+                                                             window,
+                                                             rectangles );
+            }
+
+            auto negotiated = negotiate_xfixes_shape_input( connection );
+            if( !negotiated.has_value() )
+            {
+                return std::unexpected( std::move( negotiated.error() ) );
+            }
+            return apply_negotiated_xfixes_input_region( connection,
+                                                         window,
+                                                         rectangles );
+        }
+
     }    // namespace
 
     namespace detail
@@ -695,9 +917,11 @@ namespace grab::drivers::desktop::x11
                              bool                                  scene_dirty ) noexcept
         {
             OverlayDamagePlan plan{
-                .render_frame           = scene_dirty,
-                .continue_fade          = false,
-                .next_lifetime_deadline = std::nullopt,
+                .render_frame            = scene_dirty,
+                .continue_fade           = false,
+                .continue_animation      = false,
+                .next_lifetime_deadline  = std::nullopt,
+                .next_animation_deadline = std::nullopt,
             };
             for( const auto& record : shapes )
             {
@@ -715,6 +939,18 @@ namespace grab::drivers::desktop::x11
                         plan.continue_fade = true;
                     }
                 }
+
+                const auto animation = animation_deadline( record );
+                if( animation.has_value() && *animation > now )
+                {
+                    if( !plan.next_animation_deadline.has_value() ||
+                        *animation < *plan.next_animation_deadline )
+                    {
+                        plan.next_animation_deadline = *animation;
+                    }
+                    plan.render_frame       = true;
+                    plan.continue_animation = true;
+                }
             }
             return plan;
         }
@@ -723,24 +959,9 @@ namespace grab::drivers::desktop::x11
         apply_input_passthrough( xcb_connection_t* connection,
                                  xcb_window_t      window )
         {
-            if( connection == nullptr || window == XCB_WINDOW_NONE )
-            {
-                return fail( ErrorCode::InvalidArgument,
-                             "X11 overlay input passthrough requires a window" );
-            }
-            return check_request(
-                connection,
-                xcb_shape_rectangles_checked( connection,
-                                              XCB_SHAPE_SO_SET,
-                                              XCB_SHAPE_SK_INPUT,
-                                              XCB_CLIP_ORDERING_UNSORTED,
+            return apply_xfixes_input_region( connection,
                                               window,
-                                              0,
-                                              0,
-                                              noRectangles,
-                                              nullptr ),
-                "apply empty X11 overlay ShapeInput region"
-            );
+                                              std::span<const xcb_rectangle_t>{} );
         }
 
     }    // namespace detail
@@ -807,6 +1028,12 @@ namespace grab::drivers::desktop::x11
         }
 
         [[nodiscard]]
+        std::optional<geometry::Rectangle>
+        clipped_damage( const geometry::Rectangle& damage,
+                        std::uint16_t              width,
+                        std::uint16_t              height ) noexcept;
+
+        [[nodiscard]]
         std::uint32_t
         channel_bits( std::uint8_t  channel,
                       std::uint32_t mask ) noexcept
@@ -856,13 +1083,21 @@ namespace grab::drivers::desktop::x11
 
         [[nodiscard]]
         Result<void>
-        convert_image( const Image&         source,
-                       const NativeLayout&  layout,
-                       std::size_t          destination_stride,
-                       std::span<std::byte> destination )
+        convert_image( const Image&                         source,
+                       const NativeLayout&                  layout,
+                       std::uint16_t                        surface_width,
+                       std::uint16_t                        surface_height,
+                       std::size_t                          destination_stride,
+                       std::span<std::byte>                 destination,
+                       std::span<const geometry::Rectangle> damage,
+                       bool                                 memcpy_eligible )
         {
             if( source.format !=
                 PixelFormat::Bgra ||
+                source.width !=
+                surface_width ||
+                source.height !=
+                surface_height ||
                 layout.bits_per_pixel %
                 bitsPerByte != 0U )
             {
@@ -876,51 +1111,92 @@ namespace grab::drivers::desktop::x11
                 return fail( ErrorCode::ProtocolError,
                              "X11 overlay visual pixel width is unsupported" );
             }
+            const auto source_row_bytes =
+                static_cast<std::size_t>( surface_width ) * bgraBytesPerPixel;
+            const auto destination_row_bytes =
+                static_cast<std::size_t>( surface_width ) * bytes_per_pixel;
+            if( static_cast<std::size_t>( source.stride ) <
+                source_row_bytes ||
+                destination_stride < destination_row_bytes )
+            {
+                return fail( ErrorCode::ProtocolError,
+                             "X11 overlay image stride is too short" );
+            }
             const auto required =
-                destination_stride * static_cast<std::size_t>( source.height );
+                destination_stride * static_cast<std::size_t>( surface_height );
             if( destination.size() < required )
             {
                 return fail( ErrorCode::ProtocolError,
                              "X11 overlay native pixel storage is too short" );
             }
 
-            std::ranges::fill( destination.first( required ), std::byte{} );
-            for( std::uint32_t y{}; y < source.height; ++y )
+            const bool use_memcpy =
+                memcpy_eligible && bgra_row_strides_compatible( surface_width,
+                                                                source.stride,
+                                                                destination_stride );
+            for( const auto& rectangle : damage )
             {
-                const auto source_row = source.row( y );
-                if( source_row.size() <
-                    static_cast<std::size_t>( source.width ) *
-                    bgraBytesPerPixel )
+                const auto clipped =
+                    clipped_damage( rectangle, surface_width, surface_height );
+                if( !clipped.has_value() )
                 {
-                    return fail( ErrorCode::ProtocolError,
-                                 "X11 overlay raster row is too short" );
+                    continue;
                 }
-                auto* const destination_row =
-                    destination.data() +
-                    ( static_cast<std::size_t>( y ) * destination_stride );
-                for( std::uint32_t x{}; x < source.width; ++x )
+                const auto first_x = static_cast<std::uint32_t>( clipped->x );
+                const auto first_y = static_cast<std::uint32_t>( clipped->y );
+                const auto last_x  = first_x + clipped->width;
+                const auto last_y  = first_y + clipped->height;
+                for( auto y = first_y; y < last_y; ++y )
                 {
+                    const auto source_row = source.row( y );
+                    if( source_row.size() < source_row_bytes )
+                    {
+                        return fail( ErrorCode::ProtocolError,
+                                     "X11 overlay raster row is too short" );
+                    }
+                    auto* const destination_row =
+                        destination.data() +
+                        ( static_cast<std::size_t>( y ) * destination_stride );
                     const auto source_offset =
-                        static_cast<std::size_t>( x ) * bgraBytesPerPixel;
-                    const auto blue =
-                        std::to_integer<std::uint8_t>( source_row[source_offset] );
-                    const auto green =
-                        std::to_integer<std::uint8_t>( source_row[source_offset + 1U] );
-                    const auto red =
-                        std::to_integer<std::uint8_t>( source_row[source_offset + 2U] );
-                    const auto alpha =
-                        std::to_integer<std::uint8_t>( source_row[source_offset + 3U] );
-                    const std::uint32_t pixel =
-                        channel_bits( red, layout.red_mask ) |
-                        channel_bits( green, layout.green_mask ) |
-                        channel_bits( blue, layout.blue_mask ) |
-                        channel_bits( alpha, layout.alpha_mask );
-                    write_native_pixel( destination_row +
-                                            ( static_cast<std::size_t>( x ) *
-                                              bytes_per_pixel ),
-                                        bytes_per_pixel,
-                                        layout.image_byte_order,
-                                        pixel );
+                        static_cast<std::size_t>( first_x ) * bgraBytesPerPixel;
+                    if( use_memcpy )
+                    {
+                        const auto copy_bytes =
+                            static_cast<std::size_t>( clipped->width ) *
+                            bgraBytesPerPixel;
+                        std::memcpy( destination_row + source_offset,
+                                     source_row.data() + source_offset,
+                                     copy_bytes );
+                        continue;
+                    }
+                    for( auto x = first_x; x < last_x; ++x )
+                    {
+                        const auto pixel_source_offset =
+                            static_cast<std::size_t>( x ) * bgraBytesPerPixel;
+                        const auto blue = std::to_integer<std::uint8_t>(
+                            source_row[pixel_source_offset + bgraBlueByteIndex]
+                        );
+                        const auto green = std::to_integer<std::uint8_t>(
+                            source_row[pixel_source_offset + bgraGreenByteIndex]
+                        );
+                        const auto red = std::to_integer<std::uint8_t>(
+                            source_row[pixel_source_offset + bgraRedByteIndex]
+                        );
+                        const auto alpha = std::to_integer<std::uint8_t>(
+                            source_row[pixel_source_offset + bgraAlphaByteIndex]
+                        );
+                        const std::uint32_t pixel =
+                            channel_bits( red, layout.red_mask ) |
+                            channel_bits( green, layout.green_mask ) |
+                            channel_bits( blue, layout.blue_mask ) |
+                            channel_bits( alpha, layout.alpha_mask );
+                        write_native_pixel( destination_row +
+                                                ( static_cast<std::size_t>( x ) *
+                                                  bytes_per_pixel ),
+                                            bytes_per_pixel,
+                                            layout.image_byte_order,
+                                            pixel );
+                    }
                 }
             }
             return {};
@@ -956,6 +1232,67 @@ namespace grab::drivers::desktop::x11
                 .width  = static_cast<std::uint32_t>( right - left ),
                 .height = static_cast<std::uint32_t>( bottom - top ),
             };
+        }
+
+        [[nodiscard]]
+        Result<std::vector<xcb_rectangle_t>>
+        native_input_region( std::span<const geometry::Rectangle> rectangles,
+                             std::uint16_t                        screen_width,
+                             std::uint16_t                        screen_height )
+        {
+            if( rectangles.size() > std::numeric_limits<std::uint32_t>::max() )
+            {
+                return fail( ErrorCode::Overflowed,
+                             "X11 overlay input region has too many rectangles" );
+            }
+
+            std::vector<xcb_rectangle_t> result;
+            try
+            {
+                result.reserve( rectangles.size() );
+                const auto right_limit =
+                    std::min<std::int64_t>( screen_width, nativeCoordinateExtent );
+                const auto bottom_limit =
+                    std::min<std::int64_t>( screen_height, nativeCoordinateExtent );
+                for( const auto& rectangle : rectangles )
+                {
+                    const auto source_left = static_cast<std::int64_t>( rectangle.x );
+                    const auto source_top  = static_cast<std::int64_t>( rectangle.y );
+                    const auto source_right =
+                        source_left + static_cast<std::int64_t>( rectangle.width );
+                    const auto source_bottom =
+                        source_top + static_cast<std::int64_t>( rectangle.height );
+                    const auto left =
+                        std::clamp<std::int64_t>( source_left, 0, right_limit );
+                    const auto top =
+                        std::clamp<std::int64_t>( source_top, 0, bottom_limit );
+                    const auto right =
+                        std::clamp<std::int64_t>( source_right, 0, right_limit );
+                    const auto bottom =
+                        std::clamp<std::int64_t>( source_bottom, 0, bottom_limit );
+                    if( right <= left || bottom <= top )
+                    {
+                        continue;
+                    }
+                    result.push_back( xcb_rectangle_t{
+                        .x      = static_cast<std::int16_t>( left ),
+                        .y      = static_cast<std::int16_t>( top ),
+                        .width  = static_cast<std::uint16_t>( right - left ),
+                        .height = static_cast<std::uint16_t>( bottom - top ),
+                    } );
+                }
+            }
+            catch( const std::bad_alloc& )
+            {
+                return fail( ErrorCode::Overflowed,
+                             "X11 overlay input region allocation failed" );
+            }
+            catch( const std::length_error& )
+            {
+                return fail( ErrorCode::Overflowed,
+                             "X11 overlay input region exceeds limits" );
+            }
+            return result;
         }
 
     }    // namespace
@@ -1016,7 +1353,7 @@ namespace grab::drivers::desktop::x11
                 if( map_window && reactor_ == nullptr )
                 {
                     // A mapped overlay without a reactor has no compositor
-                    // monitor and no fade/TTL frame clock: compositor loss
+                    // monitor and no lifetime/animation frame clock: compositor loss
                     // would leave a fullscreen opaque window on screen. The
                     // capability requires a bound reactor to map. Checked
                     // after the probe so missing-prerequisite reasons
@@ -1203,6 +1540,8 @@ namespace grab::drivers::desktop::x11
                 if( should_map_ && *compositor == XCB_WINDOW_NONE )
                 {
                     auto unavailable = capability_error( compositorUnavailableReason );
+                    const bool grab_invalidated = pointer_grabbed_;
+                    release_pointer_best_effort();
                     if( mapped_ )
                     {
                         xcb_unmap_window( connection_.get(), window_ );
@@ -1213,17 +1552,27 @@ namespace grab::drivers::desktop::x11
                     last_error_      = unavailable;
                     compositor_lost_ = true;
                     notify_availability( false );
+                    if( grab_invalidated )
+                    {
+                        notify_edit_surface_invalidated( true );
+                    }
                     return std::unexpected( std::move( unavailable ) );
                 }
                 probe_.compositor_owner = *compositor;
 
+                bool grab_invalidated{};
                 if( should_map_ && compositor_lost_ )
                 {
+                    grab_invalidated = pointer_grabbed_;
                     destroy_surface();
                     auto recreated = create_surface();
                     if( !recreated.has_value() )
                     {
                         destroy_surface();
+                        if( grab_invalidated )
+                        {
+                            notify_edit_surface_invalidated( true );
+                        }
                         return mark_desynced( std::move( recreated.error() ) );
                     }
                 }
@@ -1240,6 +1589,10 @@ namespace grab::drivers::desktop::x11
                     auto mapped = map_surface();
                     if( !mapped.has_value() )
                     {
+                        if( grab_invalidated )
+                        {
+                            notify_edit_surface_invalidated( true );
+                        }
                         return mark_desynced( std::move( mapped.error() ) );
                     }
                 }
@@ -1247,6 +1600,11 @@ namespace grab::drivers::desktop::x11
                 notify_availability( true );
                 ensure_frame_deadline();
                 schedule_wakeup();
+                if( grab_invalidated )
+                {
+                    // resync() is called while the owning service holds its lock.
+                    notify_edit_surface_invalidated( true );
+                }
                 return {};
             }
 
@@ -1259,7 +1617,7 @@ namespace grab::drivers::desktop::x11
                     return fail( ErrorCode::InvalidArgument,
                                  "cannot flush a closed X11 overlay delegate" );
                 }
-                drain_events();
+                drain_events( true );
                 if( state_ == DelegateState::Desynced )
                 {
                     return resync_required();
@@ -1283,11 +1641,173 @@ namespace grab::drivers::desktop::x11
                 {
                     return mark_desynced( std::move( fenced.error() ) );
                 }
-                drain_events();
+                drain_events( true );
                 if( state_ == DelegateState::Desynced )
                 {
                     return resync_required();
                 }
+                return {};
+            }
+
+            [[nodiscard]]
+            Result<void>
+            set_input_region( std::span<const geometry::Rectangle> rectangles )
+            {
+                if( state_ == DelegateState::Closed || window_ == XCB_WINDOW_NONE )
+                {
+                    if( rectangles.empty() )
+                    {
+                        input_region_.clear();
+                        return {};
+                    }
+                    return fail( ErrorCode::InvalidArgument,
+                                 "X11 overlay input region requires an open window" );
+                }
+
+                auto candidate = native_input_region( rectangles,
+                                                      probe_.screen.width,
+                                                      probe_.screen.height );
+                if( !candidate.has_value() )
+                {
+                    return std::unexpected( std::move( candidate.error() ) );
+                }
+                auto applied = apply_input_region( *candidate );
+                if( !applied.has_value() )
+                {
+                    return applied;
+                }
+                input_region_ = std::move( *candidate );
+                return {};
+            }
+
+            [[nodiscard]]
+            Result<void>
+            set_edit_handler( spi::OverlayEditHandler handler )
+            {
+                if( state_ == DelegateState::Closed || window_ == XCB_WINDOW_NONE )
+                {
+                    if( !handler )
+                    {
+                        edit_handler_ = {};
+                        return {};
+                    }
+                    return fail( ErrorCode::InvalidArgument,
+                                 "X11 overlay edit handler requires an open window" );
+                }
+                if( handler && reactor_ == nullptr )
+                {
+                    return fail( ErrorCode::CapabilityUnavailable,
+                                 "X11 overlay edit events require a bound reactor" );
+                }
+
+                const std::array<std::uint32_t, 1U> values{
+                    handler ? editWindowEventMask : passiveWindowEventMask,
+                };
+                auto selected = check_request(
+                    connection_.get(),
+                    xcb_change_window_attributes_checked( connection_.get(),
+                                                          window_,
+                                                          XCB_CW_EVENT_MASK,
+                                                          values.data() ),
+                    handler ? "select X11 overlay edit events"
+                            : "clear X11 overlay edit events"
+                );
+                if( !selected.has_value() )
+                {
+                    return selected;
+                }
+                edit_handler_ = std::move( handler );
+                return {};
+            }
+
+            // Extent of the overlay surface, which spans the probed screen.
+            [[nodiscard]]
+            geometry::Rectangle
+            surface_bounds() const noexcept
+            {
+                return geometry::Rectangle{
+                    .x      = 0,
+                    .y      = 0,
+                    .width  = probe_.screen.width,
+                    .height = probe_.screen.height,
+                };
+            }
+
+            [[nodiscard]]
+            Result<void>
+            grab_pointer()
+            {
+                if( pointer_grabbed_ )
+                {
+                    return {};
+                }
+                if( state_ == DelegateState::Closed || window_ == XCB_WINDOW_NONE )
+                {
+                    return fail( ErrorCode::InvalidArgument,
+                                 "X11 overlay pointer grab requires an open window" );
+                }
+
+                // Until a reply proves otherwise, a transport failure leaves
+                // the server-side grab state ambiguous.  Keeping the cleanup
+                // obligation causes session rollback to issue XUngrabPointer.
+                pointer_grabbed_ = true;
+                xcb_generic_error_t* raw_error{};
+                const auto           reply = take_xcb_owned(
+                    xcb_grab_pointer_reply( connection_.get(),
+                                            xcb_grab_pointer( connection_.get(),
+                                                              doNotUseOwnerEvents,
+                                                              window_,
+                                                              pointerGrabEventMask,
+                                                              XCB_GRAB_MODE_ASYNC,
+                                                              XCB_GRAB_MODE_ASYNC,
+                                                              XCB_WINDOW_NONE,
+                                                              XCB_CURSOR_NONE,
+                                                              XCB_TIME_CURRENT_TIME ),
+                                            &raw_error )
+                );
+                const auto error = take_xcb_owned( raw_error );
+                if( error != nullptr || reply == nullptr )
+                {
+                    return std::unexpected(
+                        make_error( ErrorCode::ProtocolError,
+                                    "request X11 overlay pointer grab failed" )
+                    );
+                }
+                if( reply->status != XCB_GRAB_STATUS_SUCCESS )
+                {
+                    pointer_grabbed_ = false;
+                    return std::unexpected(
+                        make_error( ErrorCode::ProviderFailed,
+                                    "X11 overlay pointer grab was refused with status " +
+                                        std::to_string( reply->status ) )
+                    );
+                }
+                return {};
+            }
+
+            [[nodiscard]]
+            Result<void>
+            ungrab_pointer()
+            {
+                if( !pointer_grabbed_ )
+                {
+                    return {};
+                }
+                if( connection_ == nullptr )
+                {
+                    pointer_grabbed_ = false;
+                    return {};
+                }
+                auto released =
+                    check_request( connection_.get(),
+                                   xcb_ungrab_pointer_checked( connection_.get(),
+                                                               XCB_TIME_CURRENT_TIME ),
+                                   "release X11 overlay pointer grab" );
+                if( !released.has_value() )
+                {
+                    return released;
+                }
+                pointer_grabbed_ = false;
                 return {};
             }
 
@@ -1320,7 +1840,7 @@ namespace grab::drivers::desktop::x11
             simulate_topology_change( std::uint16_t width,
                                       std::uint16_t height )
             {
-                handle_topology_change( width, height );
+                handle_topology_change( width, height, false );
             }
 
         private:
@@ -1333,6 +1853,29 @@ namespace grab::drivers::desktop::x11
                     std::size_t   size{};
                     bool          attached{};
             };
+
+            [[nodiscard]]
+            Result<void>
+            apply_input_region( std::span<const xcb_rectangle_t> rectangles )
+            {
+                // open() negotiates XFixes once while populating probe_. Reuse that
+                // connection-local result for input-region updates.
+                return apply_negotiated_xfixes_input_region( connection_.get(),
+                                                             window_,
+                                                             rectangles );
+            }
+
+            void
+            refresh_memcpy_eligibility() noexcept
+            {
+                const auto source_stride =
+                    static_cast<std::size_t>( probe_.screen.width ) * bgraBytesPerPixel;
+                native_memcpy_eligible_ =
+                    native_bgra_memcpy_compatible( probe_.layout,
+                                                   probe_.screen.width,
+                                                   source_stride,
+                                                   native_stride_ );
+            }
 
             [[nodiscard]]
             Result<void>
@@ -1368,7 +1911,7 @@ namespace grab::drivers::desktop::x11
                     0U,
                     0U,
                     1U,
-                    static_cast<std::uint32_t>( XCB_EVENT_MASK_EXPOSURE ),
+                    edit_handler_ ? editWindowEventMask : passiveWindowEventMask,
                     colormap_,
                 };
                 auto window_created = check_request(
@@ -1393,11 +1936,18 @@ namespace grab::drivers::desktop::x11
                     return window_created;
                 }
 
-                auto passthrough =
-                    detail::apply_input_passthrough( connection_.get(), window_ );
+                auto passthrough = apply_input_region( {} );
                 if( !passthrough.has_value() )
                 {
                     return passthrough;
+                }
+                if( !input_region_.empty() )
+                {
+                    auto restored = apply_input_region( input_region_ );
+                    if( !restored.has_value() )
+                    {
+                        return restored;
+                    }
                 }
 
                 gc_ = xcb_generate_id( connection_.get() );
@@ -1450,10 +2000,12 @@ namespace grab::drivers::desktop::x11
             Result<void>
             allocate_pixel_storage( std::size_t size )
             {
+                native_memcpy_eligible_ = false;
                 release_shm();
                 native_pixels_.clear();
                 if( probe_.extensions.shm_available && try_allocate_shm( size ) )
                 {
+                    refresh_memcpy_eligibility();
                     return {};
                 }
                 try
@@ -1470,6 +2022,7 @@ namespace grab::drivers::desktop::x11
                     return fail( ErrorCode::Overflowed,
                                  "X11 overlay pixel allocation exceeds limits" );
                 }
+                refresh_memcpy_eligibility();
                 return {};
             }
 
@@ -1541,6 +2094,7 @@ namespace grab::drivers::desktop::x11
             void
             destroy_surface() noexcept
             {
+                release_pointer_best_effort();
                 release_shm();
                 native_pixels_.clear();
                 raster_.reset();
@@ -1559,13 +2113,25 @@ namespace grab::drivers::desktop::x11
                     xcb_free_colormap( connection_.get(), colormap_ );
                     colormap_ = XCB_COLORMAP_NONE;
                 }
-                mapped_            = false;
-                native_stride_     = 0U;
-                surface_presented_ = false;
+                mapped_                 = false;
+                native_stride_          = 0U;
+                native_memcpy_eligible_ = false;
+                surface_presented_      = false;
                 if( connection_ != nullptr )
                 {
                     xcb_flush( connection_.get() );
                 }
+            }
+
+            void
+            release_pointer_best_effort() noexcept
+            {
+                if( !pointer_grabbed_ || connection_ == nullptr )
+                {
+                    return;
+                }
+                xcb_ungrab_pointer( connection_.get(), XCB_TIME_CURRENT_TIME );
+                pointer_grabbed_ = false;
             }
 
             [[nodiscard]]
@@ -1640,7 +2206,7 @@ namespace grab::drivers::desktop::x11
                             {
                                 if( const auto impl = weak.lock() )
                                 {
-                                    impl->drain_events();
+                                    impl->drain_events( false );
                                 }
                             }
                         );
@@ -1799,6 +2365,16 @@ namespace grab::drivers::desktop::x11
                         next = lifetime;
                     }
                 }
+                if( plan.next_animation_deadline.has_value() )
+                {
+                    const auto animation = std::chrono::steady_clock::time_point{
+                        *plan.next_animation_deadline
+                    };
+                    if( !next.has_value() || animation < *next )
+                    {
+                        next = animation;
+                    }
+                }
                 if( !next.has_value() )
                 {
                     scheduled_wakeup_.reset();
@@ -1853,7 +2429,7 @@ namespace grab::drivers::desktop::x11
                     return;
                 }
                 scheduled_wakeup_.reset();
-                drain_events();
+                drain_events( false );
                 if( state_ != DelegateState::Synced )
                 {
                     return;
@@ -1916,39 +2492,130 @@ namespace grab::drivers::desktop::x11
                     return fail( ErrorCode::InternalFault,
                                  "X11 overlay raster is unavailable" );
                 }
-                auto frame = raster_->render( shapes_, monotonic_milliseconds() );
+
+                // The four phases of a frame, each timed separately. Against a
+                // 16.7 ms budget, "the overlay is laggy" is only actionable
+                // once you know which of these spent it.
+                diag::FrameSample                      sample{};
+
+                const diag::Scope<log::Level::Nominal> raster_scope;
+                auto frame    = raster_->render( shapes_, monotonic_milliseconds() );
+                sample.raster = raster_scope.elapsed();
                 if( !frame.has_value() )
                 {
                     return std::unexpected( std::move( frame.error() ) );
                 }
+
                 if( !frame->damage.empty() )
                 {
+                    sample.damaged_pixels = damaged_pixel_count( frame->damage );
+
+                    const diag::Scope<log::Level::Nominal> convert_scope;
                     auto converted = convert_image( frame->pixels,
                                                     probe_.layout,
+                                                    probe_.screen.width,
+                                                    probe_.screen.height,
                                                     native_stride_,
-                                                    native_storage() );
+                                                    native_storage(),
+                                                    frame->damage,
+                                                    native_memcpy_eligible_ );
+                    sample.convert = convert_scope.elapsed();
                     if( !converted.has_value() )
                     {
                         return converted;
                     }
+
+                    const diag::Scope<log::Level::Nominal> present_scope;
                     auto presented = shm_.attached ? present_shm( frame->damage )
                                                    : present_put_image( frame->damage );
+                    sample.present = present_scope.elapsed();
                     if( !presented.has_value() )
                     {
                         return presented;
                     }
+
+                    log::verbose(
+                        [&frame, &sample, this]( auto& event )
+                        {
+                            event.tag( log::tags::present )
+                                .value( "damage_rects", frame->damage.size() )
+                                .value( "damage_px", sample.damaged_pixels )
+                                .value( "route", shm_.attached ? "shm" : "put_image" )
+                                .value( "memcpy_fast_path", native_memcpy_eligible_ )
+                                .value( "revision", accepted_revision_.value );
+                        }
+                    );
                 }
-                if( xcb_flush( connection_.get() ) <=
+
+                const diag::Scope<log::Level::Nominal> flush_scope;
+                const bool                             flush_failed =
+                    xcb_flush( connection_.get() ) <=
                     flushFailure ||
-                    xcb_connection_has_error( connection_.get() ) != xcbSuccess )
+                    xcb_connection_has_error( connection_.get() ) != xcbSuccess;
+                sample.flush = flush_scope.elapsed();
+                if( flush_failed )
                 {
                     return fail( ErrorCode::DeviceInaccessible,
                                  "X11 overlay presentation flush failed" );
                 }
+
+                sample.events_drained   = frame_events_drained_;
+                sample.input_to_present = input_to_present_latency();
+                // Cleared so a frame driven by no new input reports zero
+                // latency rather than re-reporting the previous frame's.
+                frame_events_drained_ = 0;
+                frame_input_server_ms_.reset();
+
+                diag::record_frame( sample );
+                if( diag::due_for_report() )
+                {
+                    diag::log_report( diag::report(), log::Level::Verbose );
+                }
+
                 dirty_              = false;
                 surface_presented_  = true;
                 presented_revision_ = accepted_revision_;
                 return {};
+            }
+
+            // Total pixels in the damage set, for the frame report. Damage
+            // rectangles may overlap, so this is an upper bound on the work
+            // done rather than an exact count of distinct pixels — which is
+            // the quantity that matters for "how much did this frame paint".
+            [[nodiscard]]
+            static std::uint32_t
+            damaged_pixel_count( std::span<const geometry::Rectangle> damage ) noexcept
+            {
+                std::uint64_t total = 0;
+                for( const auto& rectangle : damage )
+                {
+                    total += static_cast<std::uint64_t>( rectangle.width ) *
+                             static_cast<std::uint64_t>( rectangle.height );
+                }
+                return static_cast<std::uint32_t>(
+                    std::min<std::uint64_t>( total,
+                                             std::numeric_limits<std::uint32_t>::max() )
+                );
+            }
+
+            // Server-timestamp of the newest input this frame reflects, to now.
+            // Zero when the clock is uncalibrated or no input drove this frame:
+            // reporting a number derived from an uncalibrated server clock
+            // would be confidently wrong.
+            [[nodiscard]]
+            std::chrono::nanoseconds
+            input_to_present_latency() const noexcept
+            {
+                if( !frame_input_server_ms_.has_value() )
+                {
+                    return {};
+                }
+                const auto instant = server_clock_.instant_of( *frame_input_server_ms_ );
+                if( !instant.has_value() )
+                {
+                    return {};
+                }
+                return std::chrono::steady_clock::now() - *instant;
             }
 
             [[nodiscard]]
@@ -2196,8 +2863,107 @@ namespace grab::drivers::desktop::x11
                 }
             }
 
+            [[nodiscard]]
+            SpacePoint
+            edit_position( std::int16_t root_x,
+                           std::int16_t root_y ) const noexcept
+            {
+                return SpacePoint{
+                    .x     = static_cast<double>( root_x ),
+                    .y     = static_cast<double>( root_y ),
+                    .space = space_,
+                };
+            }
+
+            static void
+            invoke_edit_handler( const spi::OverlayEditHandler& handler,
+                                 const spi::OverlayEditEvent&   event ) noexcept
+            {
+                try
+                {
+                    if( handler )
+                    {
+                        handler( event );
+                    }
+                }
+                catch( ... )
+                {
+                    // An edit callback is isolated from the shared reactor loop.
+                    return;
+                }
+            }
+
             void
-            drain_events()
+            dispatch_edit_event( spi::OverlayEditEvent event,
+                                 bool                  defer ) noexcept
+            {
+                spi::OverlayEditHandler handler;
+                try
+                {
+                    handler = edit_handler_;
+                }
+                catch( ... )
+                {
+                    return;
+                }
+                if( !handler )
+                {
+                    return;
+                }
+                if( defer && reactor_ != nullptr )
+                {
+                    try
+                    {
+                        reactor_->post(
+                            [handler = std::move( handler ), event]
+                            {
+                                invoke_edit_handler( handler, event );
+                            }
+                        );
+                    }
+                    catch( ... )
+                    {
+                        // Never dispatch inline while the service's flush lock may
+                        // be held. Teardown will release any surviving pointer grab.
+                        return;
+                    }
+                    return;
+                }
+                invoke_edit_handler( handler, event );
+            }
+
+            void
+            notify_edit_surface_invalidated( bool defer ) noexcept
+            {
+                dispatch_edit_event(
+                    spi::OverlayEditEvent{
+                        .kind     = spi::OverlayEditEventKind::NotifyUngrab,
+                        .position = SpacePoint{ .space = space_ },
+                        .button   = {},
+                    },
+                    defer
+                );
+            }
+
+            // Records that an input event with this X server timestamp is about
+            // to drive the next frame, calibrating the server clock on first
+            // sight. Only events delivered to the overlay window arrive here —
+            // the trail path observes XI raw events elsewhere and does not pass
+            // through this delegate, so `input_to_present` covers interactive
+            // overlay input rather than every source.
+            void
+            note_input_timestamp( std::uint32_t server_ms ) noexcept
+            {
+                if( !server_clock_.calibrated() )
+                {
+                    server_clock_.calibrate( server_ms );
+                }
+                frame_input_server_ms_ = server_ms;
+                ++frame_events_drained_;
+            }
+
+            void
+            drain_events( bool defer_edit_events )
             {
                 while( const auto event =
                            take_xcb_owned( xcb_poll_for_event( connection_.get() ) ) )
@@ -2212,6 +2978,69 @@ namespace grab::drivers::desktop::x11
                         );
                         return;
                     }
+                    if( type == XCB_BUTTON_PRESS || type == XCB_BUTTON_RELEASE )
+                    {
+                        const auto* button =
+                            event_as<xcb_button_press_event_t>( event.get() );
+                        if( button->event == window_ )
+                        {
+                            note_input_timestamp( button->time );
+                            dispatch_edit_event(
+                                spi::OverlayEditEvent{
+                                    .kind = type == XCB_BUTTON_PRESS
+                                              ? spi::OverlayEditEventKind::ButtonPress
+                                              : spi::OverlayEditEventKind::ButtonRelease,
+                                    .position =
+                                        edit_position( button->root_x, button->root_y ),
+                                    .button = button->detail,
+                                },
+                                defer_edit_events
+                            );
+                        }
+                        continue;
+                    }
+                    if( type == XCB_MOTION_NOTIFY )
+                    {
+                        const auto* motion =
+                            event_as<xcb_motion_notify_event_t>( event.get() );
+                        if( motion->event == window_ )
+                        {
+                            note_input_timestamp( motion->time );
+                            dispatch_edit_event(
+                                spi::OverlayEditEvent{
+                                    .kind = spi::OverlayEditEventKind::PointerMotion,
+                                    .position =
+                                        edit_position( motion->root_x, motion->root_y ),
+                                    .button = {},
+                                },
+                                defer_edit_events
+                            );
+                        }
+                        continue;
+                    }
+                    if( type == XCB_ENTER_NOTIFY || type == XCB_LEAVE_NOTIFY )
+                    {
+                        const auto* crossing =
+                            event_as<xcb_enter_notify_event_t>( event.get() );
+                        if( crossing->event ==
+                            window_ &&
+                            crossing->mode ==
+                            XCB_NOTIFY_MODE_UNGRAB &&
+                            pointer_grabbed_ )
+                        {
+                            pointer_grabbed_ = false;
+                            dispatch_edit_event(
+                                spi::OverlayEditEvent{
+                                    .kind     = spi::OverlayEditEventKind::NotifyUngrab,
+                                    .position = edit_position( crossing->root_x,
+                                                               crossing->root_y ),
+                                    .button   = {},
+                                },
+                                defer_edit_events
+                            );
+                        }
+                        continue;
+                    }
                     if( type ==
                         static_cast<std::uint8_t>( probe_.extensions.xfixes_first_event +
                                                    XCB_XFIXES_SELECTION_NOTIFY ) )
@@ -2220,7 +3049,8 @@ namespace grab::drivers::desktop::x11
                             event_as<xcb_xfixes_selection_notify_event_t>( event.get() );
                         if( selection->selection == probe_.compositor_selection )
                         {
-                            handle_compositor_owner( selection->owner );
+                            handle_compositor_owner( selection->owner,
+                                                     defer_edit_events );
                         }
                         continue;
                     }
@@ -2234,7 +3064,8 @@ namespace grab::drivers::desktop::x11
                                 event.get()
                             );
                         handle_topology_change( screen_change->width,
-                                                screen_change->height );
+                                                screen_change->height,
+                                                defer_edit_events );
                         continue;
                     }
                     if( type == XCB_CONFIGURE_NOTIFY )
@@ -2265,13 +3096,15 @@ namespace grab::drivers::desktop::x11
             }
 
             void
-            handle_compositor_owner( xcb_window_t owner )
+            handle_compositor_owner( xcb_window_t owner,
+                                     bool         defer_edit_events )
             {
                 probe_.compositor_owner = owner;
                 if( owner != XCB_WINDOW_NONE )
                 {
                     if( compositor_lost_ && should_map_ )
                     {
+                        const bool grab_invalidated = pointer_grabbed_;
                         destroy_surface();
                         auto recreated = create_surface();
                         if( !recreated.has_value() )
@@ -2279,6 +3112,10 @@ namespace grab::drivers::desktop::x11
                             destroy_surface();
                             mark_async_desynced( std::move( recreated.error() ) );
                             notify_availability( false );
+                            if( grab_invalidated )
+                            {
+                                notify_edit_surface_invalidated( defer_edit_events );
+                            }
                             return;
                         }
                         auto mapped = map_surface();
@@ -2287,6 +3124,10 @@ namespace grab::drivers::desktop::x11
                             destroy_surface();
                             mark_async_desynced( std::move( mapped.error() ) );
                             notify_availability( false );
+                            if( grab_invalidated )
+                            {
+                                notify_edit_surface_invalidated( defer_edit_events );
+                            }
                             return;
                         }
                         state_ = DelegateState::Synced;
@@ -2297,11 +3138,17 @@ namespace grab::drivers::desktop::x11
                         presented_revision_ = {};
                         ensure_frame_deadline();
                         schedule_wakeup();
+                        if( grab_invalidated )
+                        {
+                            notify_edit_surface_invalidated( defer_edit_events );
+                        }
                     }
                     notify_availability( true );
                     return;
                 }
 
+                const bool grab_invalidated = pointer_grabbed_;
+                release_pointer_best_effort();
                 if( mapped_ )
                 {
                     xcb_unmap_window( connection_.get(), window_ );
@@ -2312,11 +3159,16 @@ namespace grab::drivers::desktop::x11
                 state_           = DelegateState::Desynced;
                 last_error_      = capability_error( compositorUnavailableReason );
                 notify_availability( false );
+                if( grab_invalidated )
+                {
+                    notify_edit_surface_invalidated( defer_edit_events );
+                }
             }
 
             void
             handle_topology_change( std::uint16_t width,
-                                    std::uint16_t height )
+                                    std::uint16_t height,
+                                    bool          defer_edit_events )
             {
                 if( state_ == DelegateState::Closed || width == 0U || height == 0U )
                 {
@@ -2334,11 +3186,13 @@ namespace grab::drivers::desktop::x11
 
                 probe_.screen.width  = width;
                 probe_.screen.height = height;
+                input_region_.clear();
                 destroy_surface();
                 auto created = create_surface();
                 if( !created.has_value() )
                 {
                     mark_async_desynced( std::move( created.error() ) );
+                    notify_edit_surface_invalidated( defer_edit_events );
                     return;
                 }
                 if( should_map_ )
@@ -2348,17 +3202,20 @@ namespace grab::drivers::desktop::x11
                     if( !owner.has_value() )
                     {
                         mark_async_desynced( std::move( owner.error() ) );
+                        notify_edit_surface_invalidated( defer_edit_events );
                         return;
                     }
                     if( *owner == XCB_WINDOW_NONE )
                     {
-                        handle_compositor_owner( XCB_WINDOW_NONE );
+                        handle_compositor_owner( XCB_WINDOW_NONE, defer_edit_events );
+                        notify_edit_surface_invalidated( defer_edit_events );
                         return;
                     }
                     auto mapped = map_surface();
                     if( !mapped.has_value() )
                     {
                         mark_async_desynced( std::move( mapped.error() ) );
+                        notify_edit_surface_invalidated( defer_edit_events );
                         return;
                     }
                 }
@@ -2384,6 +3241,10 @@ namespace grab::drivers::desktop::x11
                 }
                 surface_presented_  = false;
                 presented_revision_ = {};
+                // Topology invalidates the cached native ShapeInput geometry.
+                // The service refreshes the replacement window's region before
+                // interpreting NotifyUngrab, and cancels an active drag if needed.
+                notify_edit_surface_invalidated( defer_edit_events );
             }
 
             void
@@ -2458,10 +3319,13 @@ namespace grab::drivers::desktop::x11
                 accepted_revision_  = {};
                 presented_revision_ = {};
                 shapes_.clear();
+                input_region_.clear();
+                edit_handler_       = {};
                 dirty_              = false;
                 should_map_         = false;
                 has_frame_deadline_ = false;
                 compositor_lost_    = false;
+                pointer_grabbed_    = false;
                 last_error_.reset();
             }
 
@@ -2476,6 +3340,7 @@ namespace grab::drivers::desktop::x11
             overlay::Revision                  accepted_revision_{};
             overlay::Revision                  presented_revision_{};
             std::vector<overlay::ShapeRecord>  shapes_;
+            std::vector<xcb_rectangle_t>       input_region_;
             std::optional<kernel::presentation::OverlayRaster>   raster_;
             xcb_colormap_t                                       colormap_{};
             xcb_window_t                                         window_{};
@@ -2487,15 +3352,27 @@ namespace grab::drivers::desktop::x11
             std::uint64_t                                        timer_serial_{};
             std::optional<std::chrono::steady_clock::time_point> scheduled_wakeup_;
             std::chrono::steady_clock::time_point                next_frame_deadline_;
+
+            // Frame instrumentation. server_clock_ ties the X server's 32-bit
+            // millisecond timestamps to steady_clock; without it an event
+            // timestamp and a steady_clock reading share no origin and
+            // subtracting them yields a meaningless latency.
+            diag::ServerClock                                    server_clock_;
+            std::optional<std::uint32_t>                         frame_input_server_ms_;
+            std::uint32_t                                        frame_events_drained_{};
+
             std::optional<Error>                                 last_error_;
             AvailabilityChanged                                  availability_changed_;
             TopologyRefresh                                      topology_refresh_;
+            spi::OverlayEditHandler                              edit_handler_;
             bool                                                 mapped_{};
             bool                                                 should_map_{};
             bool                                                 dirty_{};
             bool                                                 surface_presented_{};
             bool                                                 has_frame_deadline_{};
             bool                                                 compositor_lost_{};
+            bool                                                 pointer_grabbed_{};
+            bool native_memcpy_eligible_{};
     };
 
     X11OverlayDelegate::X11OverlayDelegate( std::shared_ptr<Impl> impl ) noexcept :
@@ -2569,6 +3446,38 @@ namespace grab::drivers::desktop::x11
     X11OverlayDelegate::flush( overlay::Revision through )
     {
         return impl_->flush( through );
+    }
+
+    Result<void>
+    X11OverlayDelegate::set_input_region(
+        std::span<const geometry::Rectangle> rectangles
+    )
+    {
+        return impl_->set_input_region( rectangles );
+    }
+
+    Result<void>
+    X11OverlayDelegate::set_edit_handler( spi::OverlayEditHandler handler )
+    {
+        return impl_->set_edit_handler( std::move( handler ) );
+    }
+
+    geometry::Rectangle
+    X11OverlayDelegate::surface_bounds() const noexcept
+    {
+        return impl_->surface_bounds();
+    }
+
+    Result<void>
+    X11OverlayDelegate::grab_pointer()
+    {
+        return impl_->grab_pointer();
+    }
+
+    Result<void>
+    X11OverlayDelegate::ungrab_pointer()
+    {
+        return impl_->ungrab_pointer();
     }
 
     void

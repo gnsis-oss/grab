@@ -74,15 +74,123 @@ namespace
     constexpr std::int32_t              centerPixelX      = 12;
     constexpr std::int32_t              centerPixelY      = 10;
     constexpr std::size_t               blueByteOffset{};
-    constexpr std::size_t               greenByteOffset  = 1U;
-    constexpr std::size_t               redByteOffset    = 2U;
-    constexpr std::size_t               alphaByteOffset  = 3U;
-    constexpr std::uint8_t              fadeRed          = 200U;
-    constexpr std::uint8_t              fadeGreen        = 100U;
-    constexpr std::uint8_t              fadeBlue         = 50U;
-    constexpr std::uint8_t              fadeAlpha        = 240U;
-    constexpr std::uint8_t              halfFadeAlpha    = 120U;
-    constexpr std::size_t               singleDamageRect = 1U;
+    constexpr std::size_t               greenByteOffset          = 1U;
+    constexpr std::size_t               redByteOffset            = 2U;
+    constexpr std::size_t               alphaByteOffset          = 3U;
+    constexpr std::uint8_t              fadeRed                  = 200U;
+    constexpr std::uint8_t              fadeGreen                = 100U;
+    constexpr std::uint8_t              fadeBlue                 = 50U;
+    constexpr std::uint8_t              fadeAlpha                = 240U;
+    constexpr std::uint8_t              halfFadeAlpha            = 120U;
+    constexpr std::size_t               singleDamageRect         = 1U;
+
+    constexpr std::uint32_t             OverlapTestSurfaceWidth  = 48U;
+    constexpr std::uint32_t             OverlapTestSurfaceHeight = 36U;
+    constexpr double                    FirstShapeX              = 6.0;
+    constexpr double                    FirstShapeY              = 6.0;
+    constexpr double                    FirstShapeWidth          = 18.0;
+    constexpr double                    FirstShapeHeight         = 14.0;
+    constexpr std::uint8_t              FirstShapeRed            = 220U;
+    constexpr std::uint8_t              FirstShapeGreen          = 40U;
+    constexpr std::uint8_t              FirstShapeBlue           = 80U;
+    constexpr std::uint8_t              FirstShapeAlpha          = 144U;
+    constexpr double                    SecondShapeX             = 14.0;
+    constexpr double                    SecondShapeY             = 10.0;
+    constexpr double                    SecondShapeWidth         = 18.0;
+    constexpr double                    SecondShapeHeight        = 14.0;
+    constexpr std::uint8_t              SecondShapeRed           = 40U;
+    constexpr std::uint8_t              SecondShapeGreen         = 120U;
+    constexpr std::uint8_t              SecondShapeBlue          = 230U;
+    constexpr std::uint8_t              SecondShapeAlpha         = 176U;
+    constexpr grab::geometry::Size      OverlapTestSurface{
+        .width  = OverlapTestSurfaceWidth,
+        .height = OverlapTestSurfaceHeight,
+    };
+    constexpr grab::SpaceRect FirstShapeBounds{
+        .x     = FirstShapeX,
+        .y     = FirstShapeY,
+        .w     = FirstShapeWidth,
+        .h     = FirstShapeHeight,
+        .space = surfaceSpace,
+    };
+    constexpr grab::SpaceRect SecondShapeBounds{
+        .x     = SecondShapeX,
+        .y     = SecondShapeY,
+        .w     = SecondShapeWidth,
+        .h     = SecondShapeHeight,
+        .space = surfaceSpace,
+    };
+    constexpr grab::geometry::Rectangle OverlapFullSurfaceDamage{
+        .width  = OverlapTestSurfaceWidth,
+        .height = OverlapTestSurfaceHeight,
+    };
+    // Everything the two overlapping shapes touch once both fades advance.
+    // Damage must contain this; it is not required to partition it.
+    constexpr grab::geometry::Rectangle OverlapChangedRegion{
+        .x      = 5,
+        .y      = 5,
+        .width  = 28U,
+        .height = 20U,
+    };
+    constexpr std::uint32_t        RetentionTestSurfaceWidth  = 64U;
+    constexpr std::uint32_t        RetentionTestSurfaceHeight = 32U;
+    constexpr double               UnchangedShapeX            = 46.0;
+    constexpr double               UnchangedShapeY            = 8.0;
+    constexpr double               UnchangedShapeWidth        = 10.0;
+    constexpr double               UnchangedShapeHeight       = 10.0;
+    constexpr std::uint8_t         UnchangedShapeRed          = 25U;
+    constexpr std::uint8_t         UnchangedShapeGreen        = 210U;
+    constexpr std::uint8_t         UnchangedShapeBlue         = 90U;
+    constexpr std::uint8_t         UnchangedShapeAlpha        = 137U;
+    constexpr double               MovingShapeInitialX        = 5.0;
+    constexpr double               MovingShapeInitialY        = 8.0;
+    constexpr double               MovingShapeWidth           = 10.0;
+    constexpr double               MovingShapeHeight          = 10.0;
+    constexpr double               MovingShapeNewX            = 24.0;
+    constexpr std::uint8_t         MovingShapeRed             = 240U;
+    constexpr std::uint8_t         MovingShapeGreen           = 120U;
+    constexpr std::uint8_t         MovingShapeBlue            = 20U;
+    constexpr std::uint8_t         MovingShapeAlpha           = 193U;
+    constexpr grab::geometry::Size RetentionTestSurface{
+        .width  = RetentionTestSurfaceWidth,
+        .height = RetentionTestSurfaceHeight,
+    };
+    constexpr grab::SpaceRect UnchangedShapeBounds{
+        .x     = UnchangedShapeX,
+        .y     = UnchangedShapeY,
+        .w     = UnchangedShapeWidth,
+        .h     = UnchangedShapeHeight,
+        .space = surfaceSpace,
+    };
+    constexpr grab::SpaceRect MovingShapeInitialBounds{
+        .x     = MovingShapeInitialX,
+        .y     = MovingShapeInitialY,
+        .w     = MovingShapeWidth,
+        .h     = MovingShapeHeight,
+        .space = surfaceSpace,
+    };
+    constexpr grab::geometry::Rectangle RetentionFullSurfaceDamage{
+        .width  = RetentionTestSurfaceWidth,
+        .height = RetentionTestSurfaceHeight,
+    };
+    constexpr grab::geometry::Rectangle MovingShapeExpectedDamage{
+        .x      = 4,
+        .y      = 7,
+        .width  = 31U,
+        .height = 12U,
+    };
+    constexpr grab::geometry::Rectangle UnchangedShapeDamageBounds{
+        .x      = 45,
+        .y      = 7,
+        .width  = 12U,
+        .height = 12U,
+    };
+    constexpr grab::geometry::Rectangle UnchangedShapePixelRegion{
+        .x      = 46,
+        .y      = 8,
+        .width  = 10U,
+        .height = 10U,
+    };
     constexpr auto updateGoldenEnvironment       = std::to_array( "GRAB_UPDATE_GOLDEN" );
     constexpr std::string_view updateGoldenValue = "1";
     constexpr grab::SpaceRect  goldenRectangleBounds{
@@ -196,6 +304,19 @@ namespace
             .b = blue,
             .a = alpha,
         };
+    }
+
+    [[nodiscard]]
+    grab::overlay::Shape
+    filled_rectangle_shape( grab::SpaceRect      bounds,
+                            grab::overlay::Color fill_color )
+    {
+        grab::overlay::Shape shape;
+        shape.geometry = grab::overlay::Rect{ .bounds = bounds };
+        shape.fill     = grab::overlay::FillStyle{
+            .color = fill_color,
+        };
+        return shape;
     }
 
     [[nodiscard]]
@@ -431,6 +552,83 @@ namespace
         return std::to_integer<unsigned char>( pixel_channel( image, x, y, channel ) );
     }
 
+    [[nodiscard]]
+    std::vector<std::byte>
+    copy_pixel_region( std::span<const std::byte> pixels,
+                       std::uint32_t              stride,
+                       grab::geometry::Rectangle  region )
+    {
+        const auto             first_x   = static_cast<std::size_t>( region.x );
+        const auto             first_y   = static_cast<std::size_t>( region.y );
+        const auto             row_bytes = static_cast<std::size_t>( region.width ) *
+                                           static_cast<std::size_t>( bgraBytesPerPixel );
+        const auto             row_count = static_cast<std::size_t>( region.height );
+
+        std::vector<std::byte> copied;
+        copied.reserve( row_bytes * row_count );
+        for( std::size_t row{}; row < row_count; ++row )
+        {
+            const auto offset =
+                ( ( first_y + row ) * static_cast<std::size_t>( stride ) ) +
+                ( first_x * static_cast<std::size_t>( bgraBytesPerPixel ) );
+            const auto source = pixels.subspan( offset, row_bytes );
+            copied.insert( copied.end(), source.begin(), source.end() );
+        }
+        return copied;
+    }
+
+    [[nodiscard]]
+    bool
+    rectangles_intersect( grab::geometry::Rectangle left,
+                          grab::geometry::Rectangle right )
+    {
+        return left.x <
+               right.right() &&
+               right.x <
+               left.right() &&
+               left.y <
+               right.bottom() &&
+               right.y < left.bottom();
+    }
+
+    [[nodiscard]]
+    std::uint64_t
+    damage_area( std::span<const grab::geometry::Rectangle> damage )
+    {
+        std::uint64_t area{};
+        for( const auto rectangle : damage )
+        {
+            area += static_cast<std::uint64_t>( rectangle.width ) * rectangle.height;
+        }
+        return area;
+    }
+
+    // Every pixel of `region` falls in at least one damage rectangle.
+    void
+    expect_damage_covers( std::span<const grab::geometry::Rectangle> damage,
+                          grab::geometry::Rectangle                  region )
+    {
+        for( std::int64_t y = region.y; y < region.bottom(); ++y )
+        {
+            for( std::int64_t x = region.x; x < region.right(); ++x )
+            {
+                const bool covered =
+                    std::ranges::any_of( damage,
+                                         [x, y]( grab::geometry::Rectangle rectangle )
+                                         {
+                                             return x >=
+                                                    rectangle.x &&
+                                                    x <
+                                                    rectangle.right() &&
+                                                    y >=
+                                                    rectangle.y &&
+                                                    y < rectangle.bottom();
+                                         } );
+                ASSERT_TRUE( covered ) << "pixel " << x << "," << y << " not damaged";
+            }
+        }
+    }
+
     void
     expect_all_transparent( const grab::Image& image )
     {
@@ -651,6 +849,113 @@ TEST( OverlayRaster,
         channel_value( rendered->pixels, centerPixelX, centerPixelY, redByteOffset ),
         transparentChannel
     );
+}
+
+TEST( OverlayRaster,
+      OverlappingTranslucentShapesWithOverlappingDamage )
+{
+    auto first_shape = filled_rectangle_shape(
+        FirstShapeBounds,
+        color( FirstShapeRed, FirstShapeGreen, FirstShapeBlue, FirstShapeAlpha )
+    );
+    first_shape.lifetime = grab::overlay::Fade{ .duration = fadeDuration };
+    auto second_shape    = filled_rectangle_shape(
+        SecondShapeBounds,
+        color( SecondShapeRed, SecondShapeGreen, SecondShapeBlue, SecondShapeAlpha )
+    );
+    second_shape.lifetime = grab::overlay::Fade{ .duration = fadeDuration };
+    const std::array shapes{
+        record( first_shape, firstSlot ),
+        record( second_shape, secondSlot ),
+    };
+
+    auto raster = OverlayRaster::create( OverlapTestSurface );
+    ASSERT_TRUE( raster.has_value() ) << raster.error().message;
+    const auto initial_frame = raster->render( shapes, startedAt );
+    ASSERT_TRUE( initial_frame.has_value() ) << initial_frame.error().message;
+    ASSERT_EQ( initial_frame->damage.size(), singleDamageRect );
+    EXPECT_EQ( initial_frame->damage.front(), OverlapFullSurfaceDamage );
+
+    // Advancing both fades changes both shapes and produces overlapping raw damage.
+    const auto damaged_frame = raster->render( shapes, halfFadeAt );
+    ASSERT_TRUE( damaged_frame.has_value() ) << damaged_frame.error().message;
+    // Damage is a cover, not a partition.
+    //
+    // It used to be made disjoint by subtracting every rectangle from every
+    // other, which turned these two overlapping shapes into three fragments
+    // and a 600-segment trail into 3236 of them — each one then re-running the
+    // rasterizer's full setup for the shapes that touched it. Rectangles are
+    // merged now and may overlap; the rasterizer merges each row's x-runs
+    // before it blends, so a pixel still receives exactly one blend per shape.
+    //
+    // What the raster owes its caller is that damage contains everything that
+    // changed, that it stays cheaper than a full redraw, and — the assertion
+    // that actually proves it, at the end of this test — that the incremental
+    // frame is pixel-identical to a full one.
+    expect_damage_covers( damaged_frame->damage, OverlapChangedRegion );
+    EXPECT_LT( damage_area( damaged_frame->damage ),
+               damage_area( std::array{ OverlapFullSurfaceDamage } ) );
+
+    auto reference_raster = OverlayRaster::create( OverlapTestSurface );
+    ASSERT_TRUE( reference_raster.has_value() ) << reference_raster.error().message;
+    const auto reference_frame = reference_raster->render( shapes, halfFadeAt );
+    ASSERT_TRUE( reference_frame.has_value() ) << reference_frame.error().message;
+    ASSERT_EQ( reference_frame->damage.size(), singleDamageRect );
+    EXPECT_EQ( reference_frame->damage.front(), OverlapFullSurfaceDamage );
+
+    EXPECT_EQ( damaged_frame->pixels.pixels, reference_frame->pixels.pixels );
+}
+
+TEST( OverlayRaster,
+      RetainedPixelsForUntouchedShapesAcrossRenders )
+{
+    auto moving_shape = filled_rectangle_shape(
+        MovingShapeInitialBounds,
+        color( MovingShapeRed, MovingShapeGreen, MovingShapeBlue, MovingShapeAlpha )
+    );
+    const auto unchanged_shape = filled_rectangle_shape( UnchangedShapeBounds,
+                                                         color( UnchangedShapeRed,
+                                                                UnchangedShapeGreen,
+                                                                UnchangedShapeBlue,
+                                                                UnchangedShapeAlpha ) );
+    const std::array initial_shapes{
+        record( moving_shape, firstSlot ),
+        record( unchanged_shape, secondSlot ),
+    };
+
+    auto raster = OverlayRaster::create( RetentionTestSurface );
+    ASSERT_TRUE( raster.has_value() ) << raster.error().message;
+    const auto initial_frame = raster->render( initial_shapes, startedAt );
+    ASSERT_TRUE( initial_frame.has_value() ) << initial_frame.error().message;
+    ASSERT_EQ( initial_frame->damage.size(), singleDamageRect );
+    EXPECT_EQ( initial_frame->damage.front(), RetentionFullSurfaceDamage );
+    const auto frame1_stride = initial_frame->pixels.stride;
+    const auto frame1_pixels = initial_frame->pixels.pixels;
+
+    std::get<grab::overlay::Rect>( moving_shape.geometry ).bounds.x = MovingShapeNewX;
+    const std::array updated_shapes{
+        record( moving_shape, firstSlot ),
+        record( unchanged_shape, secondSlot ),
+    };
+    const auto rendered = raster->render( updated_shapes, startedAt );
+    ASSERT_TRUE( rendered.has_value() ) << rendered.error().message;
+    ASSERT_EQ( rendered->damage.size(), singleDamageRect );
+    EXPECT_EQ( rendered->damage.front(), MovingShapeExpectedDamage );
+    EXPECT_TRUE( std::ranges::none_of(
+        rendered->damage,
+        []( grab::geometry::Rectangle damage )
+        {
+            return rectangles_intersect( damage, UnchangedShapeDamageBounds );
+        }
+    ) );
+
+    const auto frame1_region = copy_pixel_region( std::span{ frame1_pixels },
+                                                  frame1_stride,
+                                                  UnchangedShapePixelRegion );
+    const auto frame2_region = copy_pixel_region( std::span{ rendered->pixels.pixels },
+                                                  rendered->pixels.stride,
+                                                  UnchangedShapePixelRegion );
+    EXPECT_TRUE( std::ranges::equal( frame1_region, frame2_region ) );
 }
 
 TEST( OverlayRasterGolden,

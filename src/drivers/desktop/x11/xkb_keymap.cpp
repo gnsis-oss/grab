@@ -36,6 +36,9 @@ namespace grab::platform::x11
         constexpr xkb_level_index_t  levelFour             = 3U;
         constexpr xkb_level_index_t  expressibleLevelCount = 4U;
         constexpr xkb_keysym_t       noSymbol              = XKB_KEY_NoSymbol;
+        constexpr std::size_t        keysymNameBufferSize  = 64U;
+        constexpr int                invalidKeysymNameSize = -1;
+        constexpr int                noKeysyms             = 0;
         constexpr std::uint32_t      hexDigitCount         = 16U;
         constexpr std::size_t        maxCodepointHexDigits = 8U;
         constexpr std::string_view   hexDigits             = "0123456789ABCDEF";
@@ -70,6 +73,13 @@ namespace grab::platform::x11
             std::unique_ptr<xkb_keymap, decltype( &xkb_keymap_unref )>;
         using XkbStateHandle = std::unique_ptr<xkb_state, decltype( &xkb_state_unref )>;
 
+        struct LoadedXkb
+        {
+                XkbContextHandle context;
+                XkbKeymapHandle  keymap;
+                XkbStateHandle   state;
+        };
+
         [[nodiscard]]
         XkbContextHandle
         take_context( xkb_context* context ) noexcept
@@ -89,6 +99,107 @@ namespace grab::platform::x11
         take_state( xkb_state* state ) noexcept
         {
             return XkbStateHandle{ state, &xkb_state_unref };
+        }
+
+        [[nodiscard]]
+        grab::Result<LoadedXkb>
+        load_keymap_from_connection( xcb_connection_t* connection )
+        {
+            if( connection == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
+                                   "XCB connection is not open" );
+            }
+
+            auto context = take_context( xkb_context_new( XKB_CONTEXT_NO_FLAGS ) );
+            if( context == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::InternalFault,
+                                   "failed to create XKB context" );
+            }
+
+            const int setup =
+                xkb_x11_setup_xkb_extension( connection,
+                                             XKB_X11_MIN_MAJOR_XKB_VERSION,
+                                             XKB_X11_MIN_MINOR_XKB_VERSION,
+                                             XKB_X11_SETUP_XKB_EXTENSION_NO_FLAGS,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr );
+            if( setup == 0 )
+            {
+                return grab::fail( grab::ErrorCode::CapabilityUnavailable,
+                                   "XKB extension is unavailable on the X display" );
+            }
+
+            const int device_id = xkb_x11_get_core_keyboard_device_id( connection );
+            if( device_id == invalidDevice )
+            {
+                return grab::fail( grab::ErrorCode::DeviceInaccessible,
+                                   "failed to resolve the XKB core keyboard device" );
+            }
+
+            auto keymap = take_keymap(
+                xkb_x11_keymap_new_from_device( context.get(),
+                                                connection,
+                                                device_id,
+                                                XKB_KEYMAP_COMPILE_NO_FLAGS )
+            );
+            if( keymap == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::ProviderFailed,
+                                   "failed to load the X server keymap" );
+            }
+
+            auto state = take_state(
+                xkb_x11_state_new_from_device( keymap.get(), connection, device_id )
+            );
+            if( state == nullptr )
+            {
+                return grab::fail( grab::ErrorCode::ProviderFailed,
+                                   "failed to load the X server keyboard state" );
+            }
+
+            return LoadedXkb{
+                .context = std::move( context ),
+                .keymap  = std::move( keymap ),
+                .state   = std::move( state ),
+            };
+        }
+
+        [[nodiscard]]
+        std::string
+        keysym_name( xkb_keysym_t keysym )
+        {
+            if( keysym == noSymbol )
+            {
+                return {};
+            }
+
+            std::array<char, keysymNameBufferSize> buffer{};
+            const int                              name_size =
+                xkb_keysym_get_name( keysym, buffer.data(), buffer.size() );
+            if( name_size == invalidKeysymNameSize )
+            {
+                return {};
+            }
+
+            const auto name_length = static_cast<std::size_t>( name_size );
+            if( name_length < buffer.size() )
+            {
+                return std::string{ buffer.data(), name_length };
+            }
+
+            std::string expanded( name_length + 1U, '\0' );
+            const int   expanded_size =
+                xkb_keysym_get_name( keysym, expanded.data(), expanded.size() );
+            if( expanded_size != name_size )
+            {
+                return {};
+            }
+            expanded.resize( name_length );
+            return expanded;
         }
 
         [[nodiscard]]
@@ -553,6 +664,99 @@ namespace grab::platform::x11
 
     }    // namespace
 
+    class XkbKeymapSnapshot::Impl final
+    {
+        public:
+
+            Impl( XkbContextHandle context,
+                  XkbKeymapHandle  keymap,
+                  XkbStateHandle   state ) noexcept :
+                context_{ std::move( context ) },
+                keymap_{ std::move( keymap ) },
+                state_{ std::move( state ) }
+            {
+            }
+
+            [[nodiscard]]
+            std::string
+            base_key_name( std::uint32_t raw_keycode ) const
+            {
+                if( keymap_ == nullptr || state_ == nullptr )
+                {
+                    return {};
+                }
+
+                const auto keycode = static_cast<xkb_keycode_t>( raw_keycode );
+                if( keycode <
+                    xkb_keymap_min_keycode( keymap_.get() ) ||
+                    keycode > xkb_keymap_max_keycode( keymap_.get() ) )
+                {
+                    return {};
+                }
+
+                const xkb_layout_index_t layout =
+                    xkb_state_key_get_layout( state_.get(), keycode );
+                if( layout ==
+                    XKB_LAYOUT_INVALID ||
+                    layout >= xkb_keymap_num_layouts_for_key( keymap_.get(), keycode ) )
+                {
+                    return {};
+                }
+
+                const xkb_keysym_t* symbols = nullptr;
+                // Deliberately request level zero instead of resolving through the
+                // modifier state. Observation reports the base key name even while
+                // Shift or AltGr is held; consumers can interpret modifier events.
+                const int symbol_count = xkb_keymap_key_get_syms_by_level( keymap_.get(),
+                                                                           keycode,
+                                                                           layout,
+                                                                           levelOne,
+                                                                           &symbols );
+                if( symbol_count <= noKeysyms || symbols == nullptr )
+                {
+                    return {};
+                }
+
+                const std::span<const xkb_keysym_t> keysyms{
+                    symbols,
+                    static_cast<std::size_t>( symbol_count )
+                };
+                for( const xkb_keysym_t keysym : keysyms )
+                {
+                    std::string name = keysym_name( keysym );
+                    if( !name.empty() )
+                    {
+                        return name;
+                    }
+                }
+                return {};
+            }
+
+        private:
+
+            XkbContextHandle context_{ nullptr, &xkb_context_unref };
+            XkbKeymapHandle  keymap_{ nullptr, &xkb_keymap_unref };
+            XkbStateHandle   state_{ nullptr, &xkb_state_unref };
+    };
+
+    XkbKeymapSnapshot::XkbKeymapSnapshot( std::unique_ptr<Impl> impl ) noexcept :
+        impl_{ std::move( impl ) }
+    {
+    }
+
+    XkbKeymapSnapshot::XkbKeymapSnapshot( XkbKeymapSnapshot&& ) noexcept = default;
+
+    XkbKeymapSnapshot&
+    XkbKeymapSnapshot::operator=( XkbKeymapSnapshot&& ) noexcept = default;
+
+    XkbKeymapSnapshot::~XkbKeymapSnapshot()                      = default;
+
+    std::string
+    XkbKeymapSnapshot::base_key_name( std::uint32_t keycode ) const
+    {
+        return impl_ == nullptr ? std::string{} : impl_->base_key_name( keycode );
+    }
+
     grab::Result<grab::Keymap>
     make_keymap_from_layout( std::string_view layout )
     {
@@ -589,62 +793,35 @@ namespace grab::platform::x11
         return grab::Keymap{ std::move( backend ) };
     }
 
+    grab::Result<XkbKeymapSnapshot>
+    make_keymap_from_connection( xcb_connection_t* connection )
+    {
+        auto loaded = load_keymap_from_connection( connection );
+        if( !loaded.has_value() )
+        {
+            return std::unexpected( std::move( loaded.error() ) );
+        }
+
+        return XkbKeymapSnapshot{
+            std::make_unique<XkbKeymapSnapshot::Impl>( std::move( loaded->context ),
+                                                       std::move( loaded->keymap ),
+                                                       std::move( loaded->state ) )
+        };
+    }
+
     grab::Result<grab::Keymap>
     make_keymap_from_connection( const XcbConnection& conn )
     {
-        auto context = take_context( xkb_context_new( XKB_CONTEXT_NO_FLAGS ) );
-        if( context == nullptr )
+        auto loaded = load_keymap_from_connection( conn.get() );
+        if( !loaded.has_value() )
         {
-            return grab::fail( grab::ErrorCode::InternalFault,
-                               "failed to create XKB context" );
-        }
-
-        const int setup =
-            xkb_x11_setup_xkb_extension( conn.get(),
-                                         XKB_X11_MIN_MAJOR_XKB_VERSION,
-                                         XKB_X11_MIN_MINOR_XKB_VERSION,
-                                         XKB_X11_SETUP_XKB_EXTENSION_NO_FLAGS,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr );
-        if( setup == 0 )
-        {
-            return grab::fail( grab::ErrorCode::CapabilityUnavailable,
-                               "XKB extension is unavailable on the X display" );
-        }
-
-        const int device_id = xkb_x11_get_core_keyboard_device_id( conn.get() );
-        if( device_id == invalidDevice )
-        {
-            return grab::fail( grab::ErrorCode::DeviceInaccessible,
-                               "failed to resolve the XKB core keyboard device" );
-        }
-
-        auto keymap =
-            take_keymap( xkb_x11_keymap_new_from_device( context.get(),
-                                                         conn.get(),
-                                                         device_id,
-                                                         XKB_KEYMAP_COMPILE_NO_FLAGS ) );
-        if( keymap == nullptr )
-        {
-            return grab::fail( grab::ErrorCode::ProviderFailed,
-                               "failed to load the X server keymap" );
-        }
-
-        auto state = take_state(
-            xkb_x11_state_new_from_device( keymap.get(), conn.get(), device_id )
-        );
-        if( state == nullptr )
-        {
-            return grab::fail( grab::ErrorCode::ProviderFailed,
-                               "failed to load the X server keyboard state" );
+            return std::unexpected( std::move( loaded.error() ) );
         }
 
         std::unique_ptr<grab::Keymap::Backend> backend =
-            std::make_unique<XkbKeymap>( std::move( context ),
-                                         std::move( keymap ),
-                                         std::move( state ) );
+            std::make_unique<XkbKeymap>( std::move( loaded->context ),
+                                         std::move( loaded->keymap ),
+                                         std::move( loaded->state ) );
         return grab::Keymap{ std::move( backend ) };
     }
 

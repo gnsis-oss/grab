@@ -2,39 +2,175 @@
   "version": 6,
   "configurePresets": [
     {
-      "name": "default",
+      "name": "base",
+      "hidden": true,
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_C_COMPILER": "clang",
-        "BUILD_TESTING": "ON"
+        "BUILD_TESTING": "ON",
+        "GRAB_SANITIZER": "none",
+        "GRAB_COVERAGE": "OFF",
+        "GRAB_FRAME_POINTERS": "OFF",
+        "GRAB_FORMAT": "OFF",
+        "GRAB_TIDY": "OFF",
+        "GRAB_LOG_LEVEL": "debug"
       }
     },
     {
-      "name": "iwyu",
-      "inherits": "default",
+      "name": "dev",
+      "displayName": "dev — day-to-day: -O2 -g, no instrumentation, formats and tidies",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/dev",
       "cacheVariables": {
-        "WITH_IWYU": "ON"
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "GRAB_FORMAT": "ON",
+        "GRAB_TIDY": "ON",
+        "GRAB_COMPILE_COMMANDS_LINK": "ON"
       }
     },
     {
-      "name": "gcc",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
+      "name": "default",
+      "displayName": "default — alias for dev",
+      "inherits": "dev"
+    },
+    {
+      "name": "debug",
+      "displayName": "debug — -O0 -g3 for stepping under gdb",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/debug",
       "cacheVariables": {
-        "CMAKE_CXX_COMPILER": "g++",
-        "CMAKE_C_COMPILER": "gcc",
-        "BUILD_TESTING": "ON"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O0 -g3"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "asan — ASan + UBSan at -O1 -g3, for crash hunting",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O1 -g3",
+        "GRAB_SANITIZER": "address"
+      }
+    },
+    {
+      "name": "tsan",
+      "displayName": "tsan — TSan + UBSan at -O1 -g3, for data races",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O1 -g3",
+        "GRAB_SANITIZER": "thread"
+      }
+    },
+    {
+      "name": "msan",
+      "displayName": "msan — MSan + UBSan; needs an instrumented libc++",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/msan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O1 -g3",
+        "GRAB_SANITIZER": "memory"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "coverage — gcov arcs; the ONLY place coverage is measured",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GRAB_COVERAGE": "ON"
+      }
+    },
+    {
+      "name": "profile",
+      "displayName": "profile — -O2 -g with frame pointers, for perf/flamegraph",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/profile",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "GRAB_FRAME_POINTERS": "ON",
+        "ENABLE_PERF": "ON"
       }
     },
     {
       "name": "release",
-      "inherits": "default",
-      "binaryDir": "${sourceDir}/build-release",
+      "displayName": "release — -O3 -DNDEBUG, logging still reachable",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "gcc",
+      "displayName": "gcc — dev configuration built with g++",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/gcc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_C_COMPILER": "gcc"
+      }
+    },
+    {
+      "name": "iwyu",
+      "displayName": "iwyu — include-what-you-use analysis",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/iwyu",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "WITH_IWYU": "ON"
+      }
     }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "msan", "configurePreset": "msan" },
+    { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "profile", "configurePreset": "profile" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "gcc", "configurePreset": "gcc" },
+    { "name": "iwyu", "configurePreset": "iwyu" }
+  ],
+  "testPresets": [
+    {
+      "name": "serial",
+      "hidden": true,
+      "configurePreset": "dev",
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 1 }
+    },
+    { "name": "dev", "inherits": "serial", "configurePreset": "dev" },
+    { "name": "debug", "inherits": "serial", "configurePreset": "debug" },
+    {
+      "name": "asan",
+      "inherits": "serial",
+      "configurePreset": "asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:print_stacktrace=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "serial",
+      "configurePreset": "tsan",
+      "environment": {
+        "TSAN_OPTIONS": "print_stacktrace=1:suppressions=${sourceDir}/tests/sanitizer-suppressions-tsan.txt",
+        "UBSAN_OPTIONS": "print_stacktrace=1"
+      }
+    },
+    { "name": "msan", "inherits": "serial", "configurePreset": "msan" },
+    { "name": "coverage", "inherits": "serial", "configurePreset": "coverage" },
+    { "name": "release", "inherits": "serial", "configurePreset": "release" }
   ]
 }

@@ -35,13 +35,16 @@ namespace grab
 
     using WorkspaceGeometry = geometry::Size;
 
-    struct WorkspaceDesc
+    struct WorkspaceDescriptor
     {
             std::string       name;
             WorkspaceMode     mode = WorkspaceMode::Offscreen;
             WorkspaceGeometry geometry;
             std::string       app_command;    // empty = launch nothing
     };
+
+    using WorkspaceDesc [[deprecated( "use WorkspaceDescriptor" )]] =
+        WorkspaceDescriptor;
 
     namespace detail
     {

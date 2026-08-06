@@ -1,6 +1,7 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
 #include "drivers/desktop/x11/injection_ledger.hpp"
+#include "drivers/desktop/x11/xkb_keymap.hpp"
 #include "grab/event.hpp"
 #include "grab/space.hpp"
 #include "spi/event_source.hpp"
@@ -52,13 +53,14 @@ namespace grab::drivers::desktop::x11
 
         private:
 
-            static constexpr std::size_t inputDemandCount = 4U;
+            static constexpr std::size_t inputDemandCount = 6U;
 
             X11EventSource( xcb_connection_t*          connection,
                             xcb_window_t               root,
                             std::uint8_t               extension_opcode,
                             std::vector<std::uint16_t> xtest_device_ids,
-                            InjectionLedger&           ledger ) noexcept;
+                            std::optional<grab::platform::x11::XkbKeymapSnapshot> keymap,
+                            InjectionLedger& ledger ) noexcept;
 
             [[nodiscard]]
             std::uint32_t
@@ -73,16 +75,17 @@ namespace grab::drivers::desktop::x11
                                          std::vector<grab::Event>& events,
                                          std::size_t               first_event );
 
-            xcb_connection_t*                         connection_{};
-            xcb_window_t                              root_{};
-            std::uint8_t                              extension_opcode_{};
-            std::vector<std::uint16_t>                xtest_device_ids_;
-            InjectionLedger*                          ledger_{};
-            std::array<std::size_t, inputDemandCount> demand_refcounts_{};
-            std::optional<grab::CoordinateSpaceId>    global_space_{};
-            std::mutex                                state_mutex_;
-            EventSink                                 sink_;
-            std::mutex                                sink_mutex_;
+            xcb_connection_t*                                     connection_{};
+            xcb_window_t                                          root_{};
+            std::uint8_t                                          extension_opcode_{};
+            std::vector<std::uint16_t>                            xtest_device_ids_;
+            std::optional<grab::platform::x11::XkbKeymapSnapshot> keymap_;
+            InjectionLedger*                                      ledger_{};
+            std::array<std::size_t, inputDemandCount>             demand_refcounts_{};
+            std::optional<grab::CoordinateSpaceId>                global_space_{};
+            std::mutex                                            state_mutex_;
+            EventSink                                             sink_;
+            std::mutex                                            sink_mutex_;
     };
 
 }    // namespace grab::drivers::desktop::x11

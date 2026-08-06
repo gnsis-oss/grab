@@ -10,6 +10,7 @@
 #include "grab/watch.hpp"
 #include "grab/workspace.hpp"
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -33,6 +34,64 @@ namespace grab
 {
 
     class EventBus;
+
+    struct GestureThresholds
+    {
+            std::chrono::milliseconds hold{ 500 };
+            std::chrono::milliseconds double_click{ 400 };
+            std::chrono::milliseconds pause{ 700 };
+            double                    slop_px = 5.0;
+    };
+
+    struct RippleStyle
+    {
+            double                    radius_px = 48.0;
+            overlay::Color            color{ overlay::defaultOverlayColor };
+            std::chrono::milliseconds duration{ 400 };
+    };
+
+    struct ProgressStyle
+    {
+            double         width_px    = 64.0;
+            double         height_px   = 6.0;
+            double         offset_y_px = 24.0;
+            overlay::Color color{ overlay::defaultOverlayColor };
+    };
+
+    struct CursorFeedbackConfig
+    {
+            std::optional<RippleStyle>   click;
+            std::optional<ProgressStyle> hold;
+            GestureThresholds            thresholds{};
+    };
+
+    class CursorFeedback
+    {
+        public:
+
+            ~CursorFeedback();
+
+            CursorFeedback( const CursorFeedback& ) = delete;
+            CursorFeedback&
+            operator=( const CursorFeedback& ) = delete;
+            CursorFeedback( CursorFeedback&& ) noexcept;
+            CursorFeedback&
+            operator=( CursorFeedback&& ) noexcept;
+
+            [[nodiscard]]
+            Result<void>
+            status() const;
+
+        private:
+
+            friend class Session;
+
+            class Impl;
+
+            explicit CursorFeedback( std::unique_ptr<Impl> impl ) noexcept;
+
+            std::unique_ptr<Impl> impl_;
+    };
 
     struct SessionOptions
     {
@@ -89,6 +148,10 @@ namespace grab
             [[nodiscard]]
             Result<Overlay*>
             overlay();
+
+            [[nodiscard]]
+            Result<CursorFeedback>
+            cursor_feedback( CursorFeedbackConfig config );
 
             // Start/stop continuous observation over the composed runtime's
             // event source and tree deltas. No-op when no runtime is composed.
@@ -154,9 +217,9 @@ namespace grab
             std::unique_ptr<Impl> impl_;
     };
 
-    using SessionDesc [[deprecated( "use WorkspaceDesc" )]]         = WorkspaceDesc;
-    using SessionMode [[deprecated( "use WorkspaceMode" )]]         = WorkspaceMode;
-    using SessionState [[deprecated( "use WorkspaceState" )]]       = WorkspaceState;
+    using SessionDesc [[deprecated( "use WorkspaceDescriptor" )]] = WorkspaceDescriptor;
+    using SessionMode [[deprecated( "use WorkspaceMode" )]]       = WorkspaceMode;
+    using SessionState [[deprecated( "use WorkspaceState" )]]     = WorkspaceState;
     using SessionGeometry [[deprecated( "use WorkspaceGeometry" )]] = WorkspaceGeometry;
 
 }    // namespace grab

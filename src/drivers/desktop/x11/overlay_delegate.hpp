@@ -37,7 +37,9 @@ namespace grab::drivers::desktop::x11
         {
                 bool                                     render_frame{};
                 bool                                     continue_fade{};
+                bool                                     continue_animation{};
                 std::optional<std::chrono::milliseconds> next_lifetime_deadline;
+                std::optional<std::chrono::milliseconds> next_animation_deadline;
         };
 
         [[nodiscard]]
@@ -99,6 +101,26 @@ namespace grab::drivers::desktop::x11
             [[nodiscard]]
             Result<void>
             flush( overlay::Revision through ) override;
+
+            [[nodiscard]]
+            Result<void>
+            set_input_region( std::span<const geometry::Rectangle> rectangles ) override;
+
+            [[nodiscard]]
+            Result<void>
+            set_edit_handler( spi::OverlayEditHandler handler ) override;
+
+            [[nodiscard]]
+            geometry::Rectangle
+            surface_bounds() const noexcept override;
+
+            [[nodiscard]]
+            Result<void>
+            grab_pointer() override;
+
+            [[nodiscard]]
+            Result<void>
+            ungrab_pointer() override;
 
             void
             close() override;

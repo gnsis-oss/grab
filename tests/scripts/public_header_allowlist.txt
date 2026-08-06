@@ -23,6 +23,7 @@ keymap.hpp
 locator.hpp
 origin.hpp
 overlay.hpp
+overlay_edit.hpp
 payload_fields.hpp
 pid.hpp
 pointer_button.hpp

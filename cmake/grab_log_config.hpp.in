@@ -1,0 +1,24 @@
+#pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
+
+// GENERATED FILE — do not edit.
+// Template: cmake/grab_log_config.hpp.in, expanded by cmake/Logging.cmake into
+// <binaryDir>/generated/kernel/support/log_config.hpp.
+//
+// Each build directory generates its own copy, so `release` compiles logging
+// out and `asan` compiles it in with no shared preprocessor state and nothing
+// to keep in sync by hand.
+
+namespace grab::log
+{
+
+    // Compile-time ceiling for this build directory. Levels above it are
+    // discarded by `if constexpr` in log.hpp and never instantiated, so their
+    // emitter lambdas cost nothing — not even argument evaluation.
+    //
+    //   0 = Off      nothing is compiled in
+    //   1 = Nominal  lifecycle, errors, rejected preconditions
+    //   2 = Verbose  branch decisions, state transitions, per-step summaries
+    //   3 = Debug    per-sample detail
+    inline constexpr int compileLevel = @GRAB_LOG_COMPILE_LEVEL@;
+
+}    // namespace grab::log

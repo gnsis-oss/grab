@@ -1,5 +1,6 @@
 #pragma once    // NOLINT(portability-avoid-pragma-once,llvm-header-guard)
 
+#include "grab/geometry/rectangle.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
 
@@ -22,6 +23,13 @@ namespace grab::overlay
             std::uint8_t g = 0U;
             std::uint8_t b = 0U;
             std::uint8_t a = std::numeric_limits<std::uint8_t>::max();
+    };
+
+    inline constexpr Color defaultOverlayColor{
+        .r = 237U,
+        .g = 206U,
+        .b = 89U,
+        .a = 255U,
     };
 
     struct StrokeStyle
@@ -50,6 +58,69 @@ namespace grab::overlay
     };
 
     using LifetimePolicy = std::variant<Persistent, Ttl, Fade>;
+
+    enum class Easing : std::uint8_t
+    {
+        Linear,
+        InQuad,
+        OutQuad,
+        InOutQuad,
+        InCubic,
+        OutCubic,
+        InOutCubic,
+    };
+
+    enum class Axis : std::uint8_t
+    {
+        X,
+        Y,
+    };
+
+    enum class Edge : std::uint8_t
+    {
+        Min,
+        Max,
+    };
+
+    struct Channel
+    {
+            Easing                    easing = Easing::Linear;
+            std::chrono::milliseconds duration{};
+    };
+
+    struct ScaleChannel : Channel
+    {
+            double from = 1.0;
+            double to   = 1.0;
+    };
+
+    struct OpacityChannel : Channel
+    {
+            double from = 1.0;
+            double to   = 1.0;
+    };
+
+    struct TranslateChannel : Channel
+    {
+            double dx = 0.0;
+            double dy = 0.0;
+    };
+
+    struct RevealChannel : Channel
+    {
+            Axis   axis      = Axis::X;
+            Edge   from_edge = Edge::Min;
+            double from      = 0.0;
+            double to        = 1.0;
+    };
+
+    struct AnimationSpec
+    {
+            std::optional<ScaleChannel>     scale     = std::nullopt;
+            std::optional<OpacityChannel>   opacity   = std::nullopt;
+            std::optional<TranslateChannel> translate = std::nullopt;
+            std::optional<RevealChannel>    reveal    = std::nullopt;
+    };
 
     enum class Band : std::uint8_t
     {
@@ -105,12 +176,13 @@ namespace grab::overlay
 
     struct Shape
     {
-            Geometry                   geometry;
-            std::optional<StrokeStyle> stroke;
-            std::optional<FillStyle>   fill;
-            LifetimePolicy             lifetime{ Persistent{} };
-            Band                       band = Band::Annotation;
-            std::int32_t               z    = 0;
+            Geometry                     geometry;
+            std::optional<StrokeStyle>   stroke;
+            std::optional<FillStyle>     fill;
+            LifetimePolicy               lifetime{ Persistent{} };
+            Band                         band      = Band::Annotation;
+            std::int32_t                 z         = 0;
+            std::optional<AnimationSpec> animation = std::nullopt;
     };
 
     struct SceneEpoch
@@ -179,6 +251,8 @@ namespace grab::overlay
 namespace grab
 {
 
+    class EditSession;
+
     class Overlay
     {
         public:
@@ -235,8 +309,36 @@ namespace grab
             Result<CoordinateSpaceId>
             space();
 
+            // Makes the overlay consume pointer input over its whole surface
+            // instead of passing it through to whatever is underneath.
+            //
+            // An overlay is click-through by default, which is right for
+            // annotation (a trail, a highlight) and wrong for a modal tool that
+            // draws from the pointer. Such a tool learns about input from the
+            // observation stream, which the server delivers regardless of who
+            // owns the pointer — so without capture the same press ALSO reaches
+            // the window below and, on a desktop, starts its rubber-band
+            // selection alongside yours.
+            //
+            // Arm this when the tool becomes active, NOT when the button goes
+            // down: by then the press has already been delivered elsewhere, and
+            // grabbing afterwards only strands whatever it started.
+            //
+            // THE CALLER OWNS THE CAPTURE. A pointer grab that outlives its
+            // owner freezes the user's desktop, so pair this with
+            // release_pointer() on every exit path including the error ones.
+            [[nodiscard]]
+            Result<void>
+            capture_pointer();
+
+            // Idempotent and safe when nothing is captured.
+            [[nodiscard]]
+            Result<void>
+            release_pointer();
+
         private:
 
+            friend class EditSession;
             friend class Session;
 
             Overlay();
@@ -245,7 +347,7 @@ namespace grab
             detach() noexcept;
 
             class Impl;
-            std::unique_ptr<Impl> impl_;
+            std::shared_ptr<Impl> impl_;
     };
 
 }    // namespace grab

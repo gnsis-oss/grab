@@ -20,16 +20,16 @@ namespace grab::session
 
         [[nodiscard]]
         SessionRecord
-        starting_record( const WorkspaceDesc&   desc,
-                         const SessionProvider& provider )
+        starting_record( const WorkspaceDescriptor& descriptor,
+                         const SessionProvider&     provider )
         {
             return SessionRecord{
-                .name              = desc.name,
+                .name              = descriptor.name,
                 .provider          = provider.info().name,
                 .endpoint          = {},
                 .control_socket    = {},
-                .mode              = desc.mode,
-                .geometry          = desc.geometry,
+                .mode              = descriptor.mode,
+                .geometry          = descriptor.geometry,
                 .state             = WorkspaceState::Starting,
                 .supervisor_pid    = grab::Pid{},
                 .created_monotonic = 0U,
@@ -120,9 +120,9 @@ namespace grab::session
     }
 
     grab::Result<SessionRecord>
-    SessionManager::start( const WorkspaceDesc& desc )
+    SessionManager::start( const WorkspaceDescriptor& descriptor )
     {
-        auto record = starting_record( desc, provider );
+        auto record = starting_record( descriptor, provider );
         log_transition( record.name, record.state );
 
         const auto created = registry.create( record );
@@ -131,7 +131,7 @@ namespace grab::session
             return std::unexpected( created.error() );
         }
 
-        const auto runtime = provider.create( desc );
+        const auto runtime = provider.create( descriptor );
         if( !runtime.has_value() )
         {
             remove_after_failed_start( registry, record.name );

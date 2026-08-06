@@ -21,7 +21,7 @@ namespace grab::session
 
             [[nodiscard]]
             grab::Result<SessionRecord>
-            start( const WorkspaceDesc& desc );
+            start( const WorkspaceDescriptor& descriptor );
 
             [[nodiscard]]
             grab::Result<void>

@@ -17,7 +17,7 @@ execute on the machine with the desktop session (or a virtual `Xvfb` display).
 
 Check availability first with `grab doctor --json`; it reports which backends
 and capabilities are present. If `grab` is not on `PATH`, build it from the repo
-(`cmake --preset default && cmake --build build`) and use `build/bin/grab`.
+(`cmake --preset dev && cmake --build --preset dev`) and use `build/dev/bin/grab`.
 
 ## Prefer structured output
 

@@ -42,7 +42,7 @@ namespace grab::session
 
             [[nodiscard]]
             virtual grab::Result<SessionRuntime>
-            create( const WorkspaceDesc& desc ) const = 0;
+            create( const WorkspaceDescriptor& descriptor ) const = 0;
 
             [[nodiscard]]
             virtual grab::Result<void>

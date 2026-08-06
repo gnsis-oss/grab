@@ -41,7 +41,7 @@ namespace grab::session
 
             [[nodiscard]]
             grab::Result<SessionRuntime>
-            create( const WorkspaceDesc& desc ) const override;
+            create( const WorkspaceDescriptor& descriptor ) const override;
 
             [[nodiscard]]
             grab::Result<void>

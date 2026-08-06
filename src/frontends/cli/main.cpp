@@ -9,9 +9,12 @@
 #include "drivers/desktop/x11/workflow.hpp"
 #include "frontends/cli/capture_command.hpp"
 #include "frontends/cli/common.hpp"
+#include "frontends/cli/feedback_command.hpp"
 #include "frontends/cli/input_command.hpp"
+#include "frontends/cli/log_options.hpp"
 #include "frontends/cli/overlay_command.hpp"
 #include "frontends/cli/session_command.hpp"
+#include "frontends/cli/sketch_command.hpp"
 #include "frontends/cli/watch_daemon.hpp"
 #include "frontends/cli/windows_command.hpp"
 #include "frontends/grpc/daemon.hpp"
@@ -262,9 +265,18 @@ namespace
                             "       grab overlay trail [--color RRGGBB] "
                             "[--injected-color RRGGBB] [--fade-ms N] [--width F]\n"
                             "       grab trail [trail options]\n"
+                            "       grab feedback [--no-click] [--no-hold] "
+                            "[--hold-ms N] [--double-click-ms N] [--pause-ms N] "
+                            "[--slop-px F]\n"
+                            "                     [--ripple-radius PX] "
+                            "[--ripple-ms N] [--bar-width PX] [--bar-height PX]\n"
+                            "       grab sketch [--stroke-px F] [--filled] "
+                            "[--color RRGGBB]\n"
                             "       grab overlay rect|ellipse|path --at VALUES "
                             "[--ttl MS | --fade MS | --hold]\n",
                             stderr );
+        ( void )std::fputs( "\nglobal options, accepted by every verb:\n", stderr );
+        ( void )std::fputs( grab::cli::log_options_usage().data(), stderr );
     }
 
     using Printer = int ( * )( std::FILE*,
@@ -2414,7 +2426,22 @@ namespace
         }
 
         const std::span<char*> args( argv, static_cast<std::size_t>( argc ) );
-        const auto             cli_args = args.subspan( 1 );
+
+        // --log-level / --log-tags / --log-file are global, so they are applied
+        // and stripped before dispatch: every verb parses its own flags
+        // strictly and would reject them as unknown.
+        auto log_options = grab::cli::apply_log_options( args.subspan( 1 ) );
+        if( !log_options.has_value() )
+        {
+            print_error( log_options.error().message );
+            return usageError;
+        }
+        const std::span<char*> cli_args{ log_options->remaining };
+        if( cli_args.empty() )
+        {
+            print_usage();
+            return usageError;
+        }
         const auto* const command = grab::cli::find_command_by_verb( cli_args.front() );
         constexpr std::string_view jsonFlag{ "--json" };
 
@@ -2483,6 +2510,10 @@ namespace
                 return grab::cli::run_trail_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::OverlayShape :
                 return grab::cli::run_overlay_command( cli_args.subspan( 1 ) );
+            case grab::CommandKind::OverlayFeedback :
+                return grab::cli::run_feedback_command( cli_args.subspan( 1 ) );
+            case grab::CommandKind::OverlaySketch :
+                return grab::cli::run_sketch_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::Count :
                 break;
         }

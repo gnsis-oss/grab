@@ -5,8 +5,9 @@
 #include "grab/space.hpp"
 #include "grab/trace.hpp"
 #include "grab/ui.hpp"
+#include "kernel/graph/adjacency_graph.hpp"
+#include "kernel/graph/graph_delta.hpp"
 #include "kernel/graph/tree_store.hpp"
-#include "kernel/support/vendor_adapt.hpp"
 #include "spi/tree_source.hpp"
 
 #include <algorithm>
@@ -24,14 +25,10 @@
 #include <set>
 #include <span>
 #include <string>
-#include <tag/idx.hpp>
 #include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
-#include <walk/diff.hpp>
-#include <web/knot.hpp>
-#include <web/web.hpp>
 
 namespace grab::kernel
 {
@@ -41,11 +38,16 @@ namespace grab::kernel
         constexpr std::size_t maxPropertiesPerNode =
             static_cast<std::size_t>( std::numeric_limits<std::uint8_t>::max() ) + 1U;
 
-        struct NodeTag
+        // A node's position in this generation's parallel fact arrays. Its own
+        // type so it cannot be confused with a NodeId or a raw count.
+        struct NodeIndex
         {
+                std::uint32_t value{};
         };
 
-        using NodeIndex = tag::Idx<NodeTag, std::uint32_t>;
+        // The relation graph over one generation's nodes, keyed by NodeId
+        // directly so no vertex-handle table has to be carried alongside.
+        using RelationGraph = AdjacencyGraph<NodeId, RelationSet>;
 
         struct PropertySlice
         {
@@ -58,9 +60,8 @@ namespace grab::kernel
         struct Generation
         {
                 UiSnapshot                                  snapshot;
-                web::Web<web::OneWay, RelationSet>          relations;
+                RelationGraph                               relations;
                 std::map<NodeId, NodeIndex>                 node_indexes;
-                std::map<web::Knot, NodeId>                 knot_nodes;
                 std::vector<NodeId>                         node_ids;
                 std::vector<NodeGeneration>                 node_generations;
                 std::vector<RoleId>                         roles;
@@ -240,7 +241,7 @@ namespace grab::kernel
         std::size_t
         index_value( NodeIndex index ) noexcept
         {
-            return static_cast<std::size_t>( index.raw() );
+            return static_cast<std::size_t>( index.value );
         }
 
         [[nodiscard]]
@@ -305,19 +306,16 @@ namespace grab::kernel
 
         [[nodiscard]]
         std::optional<RelationSet>
-        edge_relations( const web::Web<web::OneWay,
-                                       RelationSet>& graph,
-                        NodeId                       source,
-                        NodeId                       target )
+        edge_relations( const RelationGraph& graph,
+                        NodeId               source,
+                        NodeId               target )
         {
-            for( const auto& neighbor : graph.out( web::Knot{ source.value } ) )
+            const auto* relations = graph.edge_payload( source, target );
+            if( relations == nullptr )
             {
-                if( neighbor.target == web::Knot{ target.value } )
-                {
-                    return neighbor.data;
-                }
+                return std::nullopt;
             }
-            return std::nullopt;
+            return *relations;
         }
 
         [[nodiscard]]
@@ -549,8 +547,6 @@ namespace grab::kernel
                 const auto dense_index =
                     NodeIndex{ static_cast<std::uint32_t>( dense_position ) };
                 generation->node_indexes.emplace( record.id, dense_index );
-                generation->knot_nodes.emplace( web::Knot{ record.id.value },
-                                                record.id );
                 generation->node_ids.push_back( record.id );
                 generation->node_generations.push_back( record.generation );
                 generation->roles.push_back( record.role );
@@ -574,15 +570,13 @@ namespace grab::kernel
                     ++property_index;
                 }
 
-                auto added = detail::from_put(
-                    generation->relations.add( web::Knot{ record.id.value } ),
-                    ErrorCode::InternalFault
-                );
-                if( !added )
+                if( !generation->relations.add_node( record.id ) )
                 {
-                    auto error   = std::move( added.error() );
-                    error.target = provenance_text( metadata );
-                    return std::unexpected( std::move( error ) );
+                    return rejected<std::unique_ptr<Generation>>(
+                        ErrorCode::InternalFault,
+                        "snapshot lists the same node id more than once",
+                        metadata
+                    );
                 }
                 ++dense_position;
             }
@@ -610,17 +604,16 @@ namespace grab::kernel
 
             for( const auto& [endpoints, relation_set] : core_relations )
             {
-                auto tied = detail::from_put(
-                    generation->relations.tie( web::Knot{ endpoints.first.value },
-                                               web::Knot{ endpoints.second.value },
-                                               relation_set ),
-                    ErrorCode::InternalFault
-                );
-                if( !tied )
+                if( !generation->relations.add_edge( endpoints.first,
+                                                     endpoints.second,
+                                                     relation_set ) )
                 {
-                    auto error   = std::move( tied.error() );
-                    error.target = provenance_text( metadata );
-                    return std::unexpected( std::move( error ) );
+                    return rejected<std::unique_ptr<Generation>>(
+                        ErrorCode::InternalFault,
+                        "relation names an endpoint the snapshot does not declare, "
+                        "or relates a node to itself",
+                        metadata
+                    );
                 }
             }
             return generation;
@@ -674,44 +667,16 @@ namespace grab::kernel
         }
 
         void
-        append_edge_added( std::vector<TreeEvent>& events,
+        append_edge_event( std::vector<TreeEvent>& events,
+                           TreeEventKind           kind,
                            const Generation&       generation,
-                           web::Knot               source,
-                           web::Knot               target )
+                           NodeId                  source,
+                           NodeId                  target )
         {
-            const auto source_id = generation.knot_nodes.at( source );
-            const auto target_id = generation.knot_nodes.at( target );
-            const auto bits =
-                edge_relations( generation.relations, source_id, target_id );
+            const auto bits = edge_relations( generation.relations, source, target );
             if( bits )
             {
-                append_relation_bits( events,
-                                      TreeEventKind::RelationAdded,
-                                      generation,
-                                      source_id,
-                                      target_id,
-                                      *bits );
-            }
-        }
-
-        void
-        append_edge_removed( std::vector<TreeEvent>& events,
-                             const Generation&       generation,
-                             web::Knot               source,
-                             web::Knot               target )
-        {
-            const auto source_id = generation.knot_nodes.at( source );
-            const auto target_id = generation.knot_nodes.at( target );
-            const auto bits =
-                edge_relations( generation.relations, source_id, target_id );
-            if( bits )
-            {
-                append_relation_bits( events,
-                                      TreeEventKind::RelationRemoved,
-                                      generation,
-                                      source_id,
-                                      target_id,
-                                      *bits );
+                append_relation_bits( events, kind, generation, source, target, *bits );
             }
         }
 
@@ -739,24 +704,22 @@ namespace grab::kernel
                                   const Generation& after )
         {
             std::vector<TreeEvent> events;
-            const auto difference = walk::diff( before.relations, after.relations );
-            events.reserve( difference.added_knots.size() +
-                            difference.removed_knots.size() +
-                            difference.added_edges.size() +
-                            difference.removed_edges.size() +
-                            difference.changed_edges.size() );
+            const auto delta = graph_difference( before.relations, after.relations );
+            events.reserve( delta.added_nodes.size() +
+                            delta.removed_nodes.size() +
+                            delta.added_edges.size() +
+                            delta.removed_edges.size() +
+                            delta.changed_edges.size() );
 
-            for( const auto knot : difference.removed_knots )
+            for( const auto node : delta.removed_nodes )
             {
-                events.push_back( node_event( TreeEventKind::NodeRemoved,
-                                              before,
-                                              before.knot_nodes.at( knot ) ) );
+                events.push_back(
+                    node_event( TreeEventKind::NodeRemoved, before, node )
+                );
             }
-            for( const auto knot : difference.added_knots )
+            for( const auto node : delta.added_nodes )
             {
-                events.push_back( node_event( TreeEventKind::NodeAdded,
-                                              after,
-                                              after.knot_nodes.at( knot ) ) );
+                events.push_back( node_event( TreeEventKind::NodeAdded, after, node ) );
             }
 
             for( const auto& [node_id, after_index] : after.node_indexes )
@@ -775,35 +738,39 @@ namespace grab::kernel
                 }
             }
 
-            for( const auto& [source, target] : difference.removed_edges )
+            for( const auto& [source, target] : delta.removed_edges )
             {
-                append_edge_removed( events, before, source, target );
+                append_edge_event( events,
+                                   TreeEventKind::RelationRemoved,
+                                   before,
+                                   source,
+                                   target );
             }
-            for( const auto& [source, target] : difference.added_edges )
+            for( const auto& [source, target] : delta.added_edges )
             {
-                append_edge_added( events, after, source, target );
+                append_edge_event( events,
+                                   TreeEventKind::RelationAdded,
+                                   after,
+                                   source,
+                                   target );
             }
-            for( const auto& [source, target] : difference.changed_edges )
+            for( const auto& [source, target] : delta.changed_edges )
             {
-                const auto source_id = after.knot_nodes.at( source );
-                const auto target_id = after.knot_nodes.at( target );
                 const auto before_bits =
-                    edge_relations( before.relations, source_id, target_id )
-                        .value_or( 0U );
+                    edge_relations( before.relations, source, target ).value_or( 0U );
                 const auto after_bits =
-                    edge_relations( after.relations, source_id, target_id )
-                        .value_or( 0U );
+                    edge_relations( after.relations, source, target ).value_or( 0U );
                 append_relation_bits( events,
                                       TreeEventKind::RelationRemoved,
                                       before,
-                                      source_id,
-                                      target_id,
+                                      source,
+                                      target,
                                       before_bits & ~after_bits );
                 append_relation_bits( events,
                                       TreeEventKind::RelationAdded,
                                       after,
-                                      source_id,
-                                      target_id,
+                                      source,
+                                      target,
                                       after_bits & ~before_bits );
             }
 
@@ -839,21 +806,25 @@ namespace grab::kernel
         {
             if( before == nullptr )
             {
-                web::Web<web::OneWay, RelationSet> empty;
-                std::vector<TreeEvent>             events;
-                const auto difference = walk::diff( empty, after.relations );
-                events.reserve( difference.added_knots.size() +
-                                difference.added_edges.size() +
+                const RelationGraph    empty;
+                std::vector<TreeEvent> events;
+                const auto delta = graph_difference( empty, after.relations );
+                events.reserve( delta.added_nodes.size() +
+                                delta.added_edges.size() +
                                 after.extension_relations.size() );
-                for( const auto knot : difference.added_knots )
+                for( const auto node : delta.added_nodes )
                 {
-                    events.push_back( node_event( TreeEventKind::NodeAdded,
-                                                  after,
-                                                  after.knot_nodes.at( knot ) ) );
+                    events.push_back(
+                        node_event( TreeEventKind::NodeAdded, after, node )
+                    );
                 }
-                for( const auto& [source, target] : difference.added_edges )
+                for( const auto& [source, target] : delta.added_edges )
                 {
-                    append_edge_added( events, after, source, target );
+                    append_edge_event( events,
+                                       TreeEventKind::RelationAdded,
+                                       after,
+                                       source,
+                                       target );
                 }
                 for( const auto& [key, unused] : after.extension_relations )
                 {
@@ -876,25 +847,29 @@ namespace grab::kernel
                 return derive_same_scope_events( *before, after );
             }
 
-            web::Web<web::OneWay, RelationSet> empty;
-            std::vector<TreeEvent>             events;
-            const auto removed = walk::diff( before->relations, empty );
-            const auto added   = walk::diff( empty, after.relations );
-            events.reserve( removed.removed_knots.size() +
+            const RelationGraph    empty;
+            std::vector<TreeEvent> events;
+            const auto removed = graph_difference( before->relations, empty );
+            const auto added   = graph_difference( empty, after.relations );
+            events.reserve( removed.removed_nodes.size() +
                             removed.removed_edges.size() +
                             before->extension_relations.size() +
-                            added.added_knots.size() +
+                            added.added_nodes.size() +
                             added.added_edges.size() +
                             after.extension_relations.size() );
-            for( const auto knot : removed.removed_knots )
+            for( const auto node : removed.removed_nodes )
             {
-                events.push_back( node_event( TreeEventKind::NodeRemoved,
-                                              *before,
-                                              before->knot_nodes.at( knot ) ) );
+                events.push_back(
+                    node_event( TreeEventKind::NodeRemoved, *before, node )
+                );
             }
             for( const auto& [source, target] : removed.removed_edges )
             {
-                append_edge_removed( events, *before, source, target );
+                append_edge_event( events,
+                                   TreeEventKind::RelationRemoved,
+                                   *before,
+                                   source,
+                                   target );
             }
             for( const auto& [key, unused] : before->extension_relations )
             {
@@ -904,15 +879,17 @@ namespace grab::kernel
                                         *before,
                                         key );
             }
-            for( const auto knot : added.added_knots )
+            for( const auto node : added.added_nodes )
             {
-                events.push_back( node_event( TreeEventKind::NodeAdded,
-                                              after,
-                                              after.knot_nodes.at( knot ) ) );
+                events.push_back( node_event( TreeEventKind::NodeAdded, after, node ) );
             }
             for( const auto& [source, target] : added.added_edges )
             {
-                append_edge_added( events, after, source, target );
+                append_edge_event( events,
+                                   TreeEventKind::RelationAdded,
+                                   after,
+                                   source,
+                                   target );
             }
             for( const auto& [key, unused] : after.extension_relations )
             {

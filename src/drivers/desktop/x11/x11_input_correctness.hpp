@@ -111,18 +111,18 @@ namespace grab::drivers::desktop::x11
     {
         public:
 
-            class Loan final
+            class Lease final
             {
                 public:
 
-                    ~Loan();
+                    ~Lease();
 
-                    Loan( const Loan& ) = delete;
-                    Loan&
-                    operator=( const Loan& ) = delete;
-                    Loan( Loan&& other ) noexcept;
-                    Loan&
-                    operator=( Loan&& other ) noexcept;
+                    Lease( const Lease& ) = delete;
+                    Lease&
+                    operator=( const Lease& ) = delete;
+                    Lease( Lease&& other ) noexcept;
+                    Lease&
+                    operator=( Lease&& other ) noexcept;
 
                     [[nodiscard]]
                     std::uint8_t
@@ -136,9 +136,9 @@ namespace grab::drivers::desktop::x11
 
                     friend class ScratchKeycodePool;
 
-                    Loan( ScratchKeycodePool& pool,
-                          std::uint32_t       keysym,
-                          std::uint8_t        keycode ) noexcept;
+                    Lease( ScratchKeycodePool& pool,
+                           std::uint32_t       keysym,
+                           std::uint8_t        keycode ) noexcept;
 
                     ScratchKeycodePool* pool_{};
                     std::uint32_t       keysym_{};
@@ -159,8 +159,8 @@ namespace grab::drivers::desktop::x11
             operator=( ScratchKeycodePool&& ) = delete;
 
             [[nodiscard]]
-            grab::Result<Loan>
-            loan( std::uint32_t keysym );
+            grab::Result<Lease>
+            acquire( std::uint32_t keysym );
 
         private:
 

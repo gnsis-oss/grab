@@ -562,6 +562,8 @@ namespace grab::compat::eventgrab_v1
             case grab::EventKind::AppContextUpdate :
                 return true;
             case grab::EventKind::StateSnapshot :
+            case grab::EventKind::MouseButtonDown :
+            case grab::EventKind::MouseButtonUp :
             case grab::EventKind::NodeAdded :
             case grab::EventKind::NodeRemoved :
             case grab::EventKind::NodeChanged :
@@ -619,6 +621,8 @@ namespace grab::compat::eventgrab_v1
                                           std::get<grab::IntegrationEvent>( payload ) );
                 break;
             case grab::EventKind::StateSnapshot :
+            case grab::EventKind::MouseButtonDown :
+            case grab::EventKind::MouseButtonUp :
             case grab::EventKind::NodeAdded :
             case grab::EventKind::NodeRemoved :
             case grab::EventKind::NodeChanged :
@@ -664,6 +668,8 @@ namespace grab::compat::eventgrab_v1
             case grab::EventKind::AppContextUpdate :
                 return decode_integration_event( wire );
             case grab::EventKind::StateSnapshot :
+            case grab::EventKind::MouseButtonDown :
+            case grab::EventKind::MouseButtonUp :
             case grab::EventKind::NodeAdded :
             case grab::EventKind::NodeRemoved :
             case grab::EventKind::NodeChanged :

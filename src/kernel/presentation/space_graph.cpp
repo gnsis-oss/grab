@@ -1,16 +1,16 @@
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/graph/adjacency_graph.hpp"
+#include "kernel/graph/graph_traversal.hpp"
 #include "kernel/presentation/space_graph.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/log_tags.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <expected>
 #include <map>
-#include <unordered_map>
 #include <utility>
-#include <walk/sweep.hpp>
-#include <web/knot.hpp>
-#include <web/web.hpp>
 
 namespace grab::detail
 {
@@ -18,8 +18,8 @@ namespace grab::detail
     namespace
     {
 
-        using TransformGraph   = web::Web<web::OneWay, TransformRecord>;
-        using SpaceLookup      = std::map<web::Knot, CoordinateSpaceId>;
+        using TransformGraph =
+            kernel::AdjacencyGraph<CoordinateSpaceId, TransformRecord>;
         using GenerationLookup = std::map<CoordinateSpaceId, std::uint32_t>;
 
         struct RouteState
@@ -57,38 +57,34 @@ namespace grab::detail
             public:
 
                 RouteVisitor( const TransformGraph&   graph,
-                              const SpaceLookup&      spaces,
                               const GenerationLookup& generations,
-                              web::Knot               source ) :
+                              CoordinateSpaceId       source ) :
                     graph_{ &graph },
-                    spaces_{ &spaces },
                     generations_{ &generations }
                 {
                     routes_.emplace( source, RouteState{} );
                 }
 
                 void
-                on( web::Knot /* knot */ )
+                visit_node( CoordinateSpaceId /* space */ )
                 {
                 }
 
+                // Breadth-first order guarantees `source` already has a route by
+                // the time its outgoing edges are offered, so each destination
+                // is reached by the shortest chain of transforms and the first
+                // route recorded for it is the one kept.
                 void
-                on_edge( web::Knot source,
-                         web::Knot destination )
+                visit_edge( CoordinateSpaceId source,
+                            CoordinateSpaceId destination )
                 {
                     if( routes_.contains( destination ) )
                     {
                         return;
                     }
 
-                    const auto neighbors = graph_->out( source );
-                    const auto edge =
-                        std::ranges::find_if( neighbors,
-                                              [destination]( const auto& candidate )
-                                              {
-                                                  return candidate.target == destination;
-                                              } );
-                    if( edge == neighbors.end() )
+                    const auto* transform = graph_->edge_payload( source, destination );
+                    if( transform == nullptr )
                     {
                         return;
                     }
@@ -97,17 +93,17 @@ namespace grab::detail
                     routes_.emplace(
                         destination,
                         RouteState{
-                            .transform = compose( prior.transform, edge->data.map ),
-                            .trust     = weakest( prior.trust, edge->data.trust ),
+                            .transform = compose( prior.transform, transform->map ),
+                            .trust     = weakest( prior.trust, transform->trust ),
                             .stale     = prior.stale ||
-                                         is_stale( edge->data, source, destination ),
+                                         is_stale( *transform, source, destination ),
                         }
                     );
                 }
 
                 [[nodiscard]]
                 const RouteState*
-                route_to( web::Knot destination ) const
+                route_to( CoordinateSpaceId destination ) const
                 {
                     const auto route = routes_.find( destination );
                     return route == routes_.end() ? nullptr : &route->second;
@@ -118,20 +114,17 @@ namespace grab::detail
                 [[nodiscard]]
                 bool
                 is_stale( const TransformRecord& transform,
-                          web::Knot              source,
-                          web::Knot              destination ) const
+                          CoordinateSpaceId      source,
+                          CoordinateSpaceId      destination ) const
                 {
-                    const auto source_space      = spaces_->at( source );
-                    const auto destination_space = spaces_->at( destination );
                     return transform.generation <
-                           generations_->at( source_space ) ||
-                           transform.generation < generations_->at( destination_space );
+                           generations_->at( source ) ||
+                           transform.generation < generations_->at( destination );
                 }
 
-                const TransformGraph*                     graph_;
-                const SpaceLookup*                        spaces_;
-                const GenerationLookup*                   generations_;
-                std::unordered_map<web::Knot, RouteState> routes_;
+                const TransformGraph*                   graph_;
+                const GenerationLookup*                 generations_;
+                std::map<CoordinateSpaceId, RouteState> routes_;
         };
 
     }    // namespace
@@ -141,11 +134,8 @@ namespace grab::detail
     {
         const CoordinateSpaceId space{ .value = next_space_ };
         ++next_space_;
-        const web::Knot knot{ static_cast<std::uint64_t>( space.value ) };
 
-        ( void )graph_.add( knot );
-        knots_.emplace( space, knot );
-        spaces_.emplace( knot, space );
+        ( void )graph_.add_node( space );
         generations_.emplace( space, generation );
         return space;
     }
@@ -153,9 +143,23 @@ namespace grab::detail
     void
     SpaceGraph::add_transform( TransformRecord transform )
     {
-        const auto source      = knots_.at( transform.source );
-        const auto destination = knots_.at( transform.destination );
-        ( void )graph_.tie( source, destination, transform );
+        const auto source      = transform.source;
+        const auto destination = transform.destination;
+        if( !graph_.add_edge( source, destination, transform ) )
+        {
+            // Either endpoint may be a space nobody registered, which is a
+            // caller mistake rather than a runtime condition: say so instead of
+            // leaving a route silently missing later.
+            log::nominal(
+                [&]( log::Event& event )
+                {
+                    event.tag( log::tags::space )
+                        .value( "rejected", "transform" )
+                        .value( "source", source.value )
+                        .value( "destination", destination.value );
+                }
+            );
+        }
     }
 
     void
@@ -223,17 +227,15 @@ namespace grab::detail
     SpaceGraph::find_route( CoordinateSpaceId source,
                             CoordinateSpaceId destination ) const
     {
-        const auto source_knot      = knots_.find( source );
-        const auto destination_knot = knots_.find( destination );
-        if( source_knot == knots_.end() || destination_knot == knots_.end() )
+        if( !graph_.contains_node( source ) || !graph_.contains_node( destination ) )
         {
             return fail( ErrorCode::RouteUnavailable,
                          "coordinate space is not in the transform graph" );
         }
 
-        RouteVisitor visitor{ graph_, spaces_, generations_, source_knot->second };
-        walk::sweep( graph_, source_knot->second, visitor );
-        const auto* route = visitor.route_to( destination_knot->second );
+        RouteVisitor visitor{ graph_, generations_, source };
+        kernel::breadth_first_search( graph_, source, visitor );
+        const auto* route = visitor.route_to( destination );
         if( route == nullptr )
         {
             return fail( ErrorCode::RouteUnavailable,

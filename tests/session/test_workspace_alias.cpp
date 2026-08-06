@@ -14,7 +14,9 @@ static_assert( std::is_class_v<grab::Workspace> );
 #endif
 
 static_assert( std::is_same_v<grab::SessionDesc,
-                              grab::WorkspaceDesc> );
+                              grab::WorkspaceDescriptor> );
+static_assert( std::is_same_v<grab::WorkspaceDesc,
+                              grab::WorkspaceDescriptor> );
 static_assert( std::is_same_v<grab::SessionMode,
                               grab::WorkspaceMode> );
 static_assert( std::is_same_v<grab::SessionState,

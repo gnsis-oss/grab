@@ -44,10 +44,58 @@ Its very useful if you want to :
 ## Build
 
 ```sh
-cmake --preset default
-cmake --build build -j"$(nproc)"
-ctest --test-dir build
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
 ```
 
 Requires X11. Toolchain: C++23, Clang, CMake + Ninja. Process ownership via
 `grab::OwnedProcess` requires Linux 5.4 or newer and glibc 2.36 or newer.
+
+**X11 platform floor: XInput 2.1.** Under XI 2.0 the server does not deliver
+raw events to non-grabbing clients while a pointer grab is active, so anything
+observing input during a drag goes blind for the duration. grab checks the
+minor version and refuses a server below 2.1. XI 2.1 dates from 2010.
+
+### Build configurations
+
+Instrumentation is an explicit choice, not a consequence of the build type.
+Each preset owns its own directory under `build/`, so configuring one never
+disturbs another.
+
+| Preset | Directory | Flags | Instrumentation | Log ceiling |
+| --- | --- | --- | --- | --- |
+| `dev` (`default`) | `build/dev` | `-O2 -g` | — (formats + tidies) | debug |
+| `debug` | `build/debug` | `-O0 -g3` | — | debug |
+| `asan` | `build/asan` | `-O1 -g3` | ASan + UBSan | debug |
+| `tsan` | `build/tsan` | `-O1 -g3` | TSan + UBSan | debug |
+| `msan` | `build/msan` | `-O1 -g3` | MSan + UBSan | debug |
+| `coverage` | `build/coverage` | `-O0 -g` | gcov arcs | nominal |
+| `profile` | `build/profile` | `-O2 -g` + frame pointers | perf targets | nominal |
+| `release` | `build/release` | `-O3 -DNDEBUG` | — | off |
+| `gcc` | `build/gcc` | `-O2 -g`, g++ | — | debug |
+| `iwyu` | `build/iwyu` | `-O2 -g` | include-what-you-use | debug |
+
+The options compose freely if none of the presets fit —
+`-DGRAB_SANITIZER=none|address|thread|memory`, `-DGRAB_COVERAGE=ON|OFF`,
+`-DGRAB_FRAME_POINTERS=ON|OFF`, `-DGRAB_FORMAT=ON|OFF`, `-DGRAB_TIDY=ON|OFF`,
+`-DGRAB_LOG_LEVEL=off|nominal|verbose|debug`.
+
+Two things worth knowing:
+
+- **Coverage lives only in the `coverage` preset.** gcov arc counters dominate
+  per-pixel loops — the overlay raster goes from ~1 ms to over 100 ms per
+  3200x2000 frame — which no interactive build can absorb.
+- **`ctest` presets run serially.** A rotating set of display-backed tests
+  fails under `-j4` and passes under `-j1`; always confirm a display-backed
+  failure serially before believing it.
+
+### Logging
+
+The compile-time ceiling above decides what exists in the binary. What is
+actually emitted is a separate runtime level, **off by default**:
+
+```sh
+grab trail --log-level verbose --log-tags frame,present
+GRAB_LOG=debug GRAB_LOG_FILE=/tmp/grab.log grab sketch
+```

@@ -6,7 +6,11 @@
 #include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/space.hpp"
+#include "kernel/presentation/overlay_animation.hpp"
 #include "kernel/presentation/overlay_raster.hpp"
+#include "kernel/support/diag.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/log_tags.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,12 +19,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <new>
 #include <numbers>
 #include <optional>
+#include <ratio>
 #include <span>
 #include <stdexcept>
 #include <tuple>
@@ -44,16 +50,51 @@ namespace grab::kernel::presentation
         constexpr double        antiAliasDamageMargin  = 1.0;
         constexpr std::size_t   antiAliasSubscanlines  = 8U;
         constexpr std::size_t   bezierSubdivisionSteps = 32U;
-        constexpr std::size_t   ellipseSamples         = 128U;
-        constexpr std::size_t   roundHalfCircleSamples = 16U;
         constexpr std::size_t   circleHalves           = 2U;
-        constexpr std::size_t roundCircleSamples = roundHalfCircleSamples * circleHalves;
-        constexpr double      roundAngularStepRadians =
-            std::numbers::pi_v<double> / static_cast<double>( roundHalfCircleSamples );
-        constexpr double fullCircleRadians =
+        constexpr double        fullCircleRadians =
             std::numbers::pi_v<double> * static_cast<double>( circleHalves );
-        constexpr double minimumSegmentLengthSquared =
+
+        // How far a flattened arc may sit from the curve it stands in for.
+        // A fifth of a pixel is below what the 8x sub-scanline coverage can
+        // resolve, so the chord count derived from it is the smallest that
+        // still costs nothing visually.
+        constexpr double      maximumChordDeviationPx = 0.05;
+        constexpr std::size_t minimumArcChords        = 8U;
+        constexpr std::size_t maximumArcChords        = 256U;
+        constexpr double      minimumSegmentLengthSquared =
             std::numeric_limits<double>::epsilon();
+        // Round-half-up for an already-clamped non-negative channel value.
+        constexpr double roundingBias = 0.5;
+
+        // Chords for a circular arc of `radius`, from the deviation budget:
+        // a regular n-gon's worst error is radius * (1 - cos(pi / n)).
+        //
+        // Round caps and joins used to be a fixed 32 chords whatever the stroke
+        // width, and an ellipse a fixed 128 whatever its size. Both are wrong
+        // in both directions. A trail is a 3-pixel stroke — a 1.5-pixel radius,
+        // where 8 chords are already accurate to a tenth of a pixel — and it
+        // pays for a round join at every sample, each chord becoming an edge
+        // that is sorted once and tested eight times per row it spans. In the
+        // other direction a 1500-pixel ellipse radius at 128 chords is visibly
+        // faceted at the extremes.
+        [[nodiscard]]
+        std::size_t
+        arc_chord_count( double radius ) noexcept
+        {
+            if( !( radius > 0.0 ) )
+            {
+                return minimumArcChords;
+            }
+            const auto ratio = maximumChordDeviationPx / radius;
+            if( ratio >= 1.0 )
+            {
+                return minimumArcChords;
+            }
+            const auto chords = std::numbers::pi_v<double> / std::acos( 1.0 - ratio );
+            return std::clamp( static_cast<std::size_t>( std::ceil( chords ) ),
+                               minimumArcChords,
+                               maximumArcChords );
+        }
 
         struct Contour
         {
@@ -82,11 +123,64 @@ namespace grab::kernel::presentation
                 int    winding_delta{};
         };
 
+        struct RevealMask
+        {
+                overlay::Axis axis      = overlay::Axis::X;
+                overlay::Edge from_edge = overlay::Edge::Min;
+                double        boundary{};
+                double        fraction{};
+        };
+
+        // Per-phase breakdown of one render.
+        //
+        // "The overlay is laggy" has two entirely different causes with the
+        // same symptom: a fading trail re-rasterizes every live segment every
+        // frame (cost scales with shape count), and a large annotation covers
+        // millions of pixels (cost scales with area). Only a split like this
+        // tells them apart, and the residual after a fix is the only way to
+        // know whether the fix was the right one.
+        //
+        // Populated only when a caller passes one. The per-shape timers cost
+        // two clock reads each, which at a thousand live segments is real time
+        // inside a 16.7 ms budget, so the null pointer is the "not measuring"
+        // state and costs one predictable branch per phase.
+        struct RenderProfile
+        {
+                std::chrono::nanoseconds evaluate{};
+                std::chrono::nanoseconds clear{};
+                std::chrono::nanoseconds outline{};
+                std::chrono::nanoseconds fill{};
+                std::size_t              rasterize_calls{};
+                std::size_t              covered_pixels{};
+        };
+
+        using ProfileClock = std::chrono::steady_clock;
+
+        [[nodiscard]]
+        ProfileClock::time_point
+        profile_now( const RenderProfile* profile ) noexcept
+        {
+            return profile == nullptr ? ProfileClock::time_point{} : ProfileClock::now();
+        }
+
+        void
+        profile_add( RenderProfile*           profile,
+                     std::chrono::nanoseconds RenderProfile::* bucket,
+                     ProfileClock::time_point                  started ) noexcept
+        {
+            if( profile != nullptr )
+            {
+                profile->*bucket += ProfileClock::now() - started;
+            }
+        }
+
         struct TrackedShape
         {
                 overlay::ShapeRecord               record;
                 std::optional<geometry::Rectangle> bounds;
                 double                             opacity{};
+                EvaluatedAnimation                 animation;
+                std::optional<RevealMask>          reveal;
         };
 
         [[nodiscard]]
@@ -252,37 +346,99 @@ namespace grab::kernel::presentation
         }
 
         [[nodiscard]]
-        double
-        lifetime_opacity( const overlay::ShapeRecord& record,
-                          std::chrono::milliseconds   now ) noexcept
+        bool
+        reveals_equal( const std::optional<EvaluatedReveal>& left,
+                       const std::optional<EvaluatedReveal>& right ) noexcept
         {
-            if( std::holds_alternative<overlay::Persistent>( record.shape.lifetime ) )
+            if( left.has_value() != right.has_value() )
+            {
+                return false;
+            }
+            return !left.has_value() || ( left->axis ==
+                                          right->axis &&
+                                          left->from_edge ==
+                                          right->from_edge &&
+                                          left->fraction == right->fraction );
+        }
+
+        [[nodiscard]]
+        bool
+        animated_geometry_equal( const EvaluatedAnimation& left,
+                                 const EvaluatedAnimation& right ) noexcept
+        {
+            return left.scale ==
+                   right.scale &&
+                   left.translate_x ==
+                   right.translate_x &&
+                   left.translate_y ==
+                   right.translate_y &&
+                   reveals_equal( left.reveal, right.reveal );
+        }
+
+        [[nodiscard]]
+        bool
+        reveal_is_hidden( const std::optional<RevealMask>& reveal ) noexcept
+        {
+            return reveal.has_value() && reveal->fraction <= fullyTransparent;
+        }
+
+        [[nodiscard]]
+        bool
+        reveal_is_partial( const std::optional<RevealMask>& reveal ) noexcept
+        {
+            return reveal.has_value() &&
+                   reveal->fraction >
+                   fullyTransparent &&
+                   reveal->fraction < fullyOpaque;
+        }
+
+        [[nodiscard]]
+        bool
+        sample_passes_reveal( double                           sample,
+                              const std::optional<RevealMask>& reveal ) noexcept
+        {
+            if( !reveal.has_value() )
+            {
+                return true;
+            }
+            const auto& mask = *reveal;
+            if( mask.fraction <=
+                fullyTransparent ||
+                mask.fraction >=
+                fullyOpaque ||
+                mask.axis != overlay::Axis::Y )
+            {
+                return true;
+            }
+            return mask.from_edge == overlay::Edge::Min ? sample < mask.boundary
+                                                        : sample >= mask.boundary;
+        }
+
+        [[nodiscard]]
+        double
+        horizontal_reveal_coverage( std::size_t                      pixel,
+                                    const std::optional<RevealMask>& reveal ) noexcept
+        {
+            if( !reveal.has_value() )
             {
                 return fullyOpaque;
             }
-
-            const auto elapsed = static_cast<double>( now.count() ) -
-                                 static_cast<double>( record.started_at.count() );
-            if( const auto* ttl = std::get_if<overlay::Ttl>( &record.shape.lifetime ) )
+            const auto& mask = *reveal;
+            if( mask.fraction <=
+                fullyTransparent ||
+                mask.fraction >=
+                fullyOpaque ||
+                mask.axis != overlay::Axis::X )
             {
-                const auto duration = static_cast<double>( ttl->duration.count() );
-                return duration > elapsed && duration > fullyTransparent
-                         ? fullyOpaque
-                         : fullyTransparent;
+                return fullyOpaque;
             }
-
-            const auto* fade = std::get_if<overlay::Fade>( &record.shape.lifetime );
-            if( fade == nullptr )
+            const auto left  = static_cast<double>( pixel );
+            const auto right = left + fullyOpaque;
+            if( mask.from_edge == overlay::Edge::Min )
             {
-                return fullyTransparent;
+                return std::clamp( mask.boundary - left, fullyTransparent, fullyOpaque );
             }
-            const auto duration = static_cast<double>( fade->duration.count() );
-            if( duration <= fullyTransparent )
-            {
-                return fullyTransparent;
-            }
-            const auto factor = fullyOpaque - ( elapsed / duration );
-            return std::clamp( factor, fullyTransparent, fullyOpaque );
+            return std::clamp( right - mask.boundary, fullyTransparent, fullyOpaque );
         }
 
         [[nodiscard]]
@@ -426,16 +582,19 @@ namespace grab::kernel::presentation
                 return {};
             }
             FlatContours result;
-            result.points.reserve( ellipseSamples );
+            // The wider radius sets the accuracy the other one inherits.
+            const auto   samples =
+                arc_chord_count( std::max( ellipse.radius_x, ellipse.radius_y ) );
+            result.points.reserve( samples );
             result.contours.push_back( Contour{
-                .count  = ellipseSamples,
+                .count  = samples,
                 .closed = true,
             } );
-            for( std::size_t sample{}; sample < ellipseSamples; ++sample )
+            for( std::size_t sample{}; sample < samples; ++sample )
             {
                 const auto angle = fullCircleRadians *
                                    static_cast<double>( sample ) /
-                                   static_cast<double>( ellipseSamples );
+                                   static_cast<double>( samples );
                 result.points.push_back( geometry::PointF{
                     .x = ellipse.center.x + ( ellipse.radius_x * std::cos( angle ) ),
                     .y = ellipse.center.y + ( ellipse.radius_y * std::sin( angle ) ),
@@ -585,12 +744,13 @@ namespace grab::kernel::presentation
                               geometry::PointF center,
                               double           radius )
         {
-            const auto first = destination.points.size();
-            destination.points.reserve( first + roundCircleSamples );
-            for( std::size_t sample{}; sample < roundCircleSamples; ++sample )
+            const auto first  = destination.points.size();
+            const auto chords = arc_chord_count( radius );
+            const auto step   = fullCircleRadians / static_cast<double>( chords );
+            destination.points.reserve( first + chords );
+            for( std::size_t sample{}; sample < chords; ++sample )
             {
-                const auto angle =
-                    static_cast<double>( sample ) * roundAngularStepRadians;
+                const auto angle = static_cast<double>( sample ) * step;
                 destination.points.push_back( geometry::PointF{
                     .x = center.x + ( radius * std::cos( angle ) ),
                     .y = center.y + ( radius * std::sin( angle ) ),
@@ -598,7 +758,7 @@ namespace grab::kernel::presentation
             }
             destination.contours.push_back( Contour{
                 .first  = first,
-                .count  = roundCircleSamples,
+                .count  = chords,
                 .closed = true,
             } );
         }
@@ -684,6 +844,95 @@ namespace grab::kernel::presentation
                 bounds.bottom = std::max( bounds.bottom, point.y );
             }
             return bounds;
+        }
+
+        void
+        scale_contours( FlatContours& contours,
+                        double        scale )
+        {
+            if( scale == fullyOpaque )
+            {
+                return;
+            }
+            const auto bounds = point_bounds( contours );
+            if( !bounds.has_value() )
+            {
+                return;
+            }
+            const auto center_x =
+                ( bounds->left + bounds->right ) / static_cast<double>( circleHalves );
+            const auto center_y =
+                ( bounds->top + bounds->bottom ) / static_cast<double>( circleHalves );
+            for( auto& point : contours.points )
+            {
+                point.x = center_x + ( ( point.x - center_x ) * scale );
+                point.y = center_y + ( ( point.y - center_y ) * scale );
+            }
+        }
+
+        void
+        translate_contours( FlatContours& contours,
+                            double        translate_x,
+                            double        translate_y )
+        {
+            if( translate_x == fullyTransparent && translate_y == fullyTransparent )
+            {
+                return;
+            }
+            for( auto& point : contours.points )
+            {
+                point.x += translate_x;
+                point.y += translate_y;
+            }
+        }
+
+        [[nodiscard]]
+        std::optional<RevealMask>
+        apply_animation( FlatContours&             contours,
+                         const EvaluatedAnimation& animation )
+        {
+            scale_contours( contours, animation.scale );
+
+            std::optional<RevealMask> mask;
+            if( animation.reveal.has_value() )
+            {
+                const auto bounds = point_bounds( contours );
+                if( bounds.has_value() )
+                {
+                    const auto clipped = reveal_clip(
+                        AnimationRect{
+                            .x      = bounds->left,
+                            .y      = bounds->top,
+                            .width  = bounds->right - bounds->left,
+                            .height = bounds->bottom - bounds->top,
+                        },
+                        *animation.reveal
+                    );
+                    auto boundary = animation.reveal->axis == overlay::Axis::X
+                                      ? clipped.x
+                                      : clipped.y;
+                    if( animation.reveal->from_edge == overlay::Edge::Min )
+                    {
+                        boundary += animation.reveal->axis == overlay::Axis::X
+                                      ? clipped.width
+                                      : clipped.height;
+                    }
+                    mask = RevealMask{
+                        .axis      = animation.reveal->axis,
+                        .from_edge = animation.reveal->from_edge,
+                        .boundary  = boundary,
+                        .fraction  = animation.reveal->fraction,
+                    };
+                }
+            }
+
+            translate_contours( contours, animation.translate_x, animation.translate_y );
+            if( mask.has_value() )
+            {
+                mask->boundary += mask->axis == overlay::Axis::X ? animation.translate_x
+                                                                 : animation.translate_y;
+            }
+            return mask;
         }
 
         [[nodiscard]]
@@ -791,59 +1040,476 @@ namespace grab::kernel::presentation
         }
 
         [[nodiscard]]
-        std::uint8_t
-        channel_byte( double value )
+        std::int64_t
+        rectangle_right( geometry::Rectangle rectangle ) noexcept
         {
-            const auto clamped = std::clamp( value, fullyTransparent, channelMaximum );
-            return static_cast<std::uint8_t>( std::lround( clamped ) );
+            return static_cast<std::int64_t>( rectangle.x ) +
+                   static_cast<std::int64_t>( rectangle.width );
+        }
+
+        [[nodiscard]]
+        std::int64_t
+        rectangle_bottom( geometry::Rectangle rectangle ) noexcept
+        {
+            return static_cast<std::int64_t>( rectangle.y ) +
+                   static_cast<std::int64_t>( rectangle.height );
+        }
+
+        [[nodiscard]]
+        std::optional<geometry::Rectangle>
+        apply_reveal_to_bounds( const std::optional<geometry::Rectangle>& bounds,
+                                const std::optional<RevealMask>&          reveal,
+                                geometry::Size                            surface )
+        {
+            if( !bounds.has_value() || !reveal.has_value() )
+            {
+                return bounds;
+            }
+            if( reveal_is_hidden( reveal ) )
+            {
+                return std::nullopt;
+            }
+            if( !reveal_is_partial( reveal ) )
+            {
+                return bounds;
+            }
+
+            auto left   = static_cast<std::int64_t>( bounds->x );
+            auto top    = static_cast<std::int64_t>( bounds->y );
+            auto right  = rectangle_right( *bounds );
+            auto bottom = rectangle_bottom( *bounds );
+            if( reveal->axis == overlay::Axis::X )
+            {
+                const auto boundary = std::clamp( reveal->boundary,
+                                                  fullyTransparent,
+                                                  static_cast<double>( surface.width ) );
+                if( reveal->from_edge == overlay::Edge::Min )
+                {
+                    right =
+                        std::min( right,
+                                  static_cast<std::int64_t>( std::ceil( boundary ) ) );
+                }
+                else
+                {
+                    left =
+                        std::max( left,
+                                  static_cast<std::int64_t>( std::floor( boundary ) ) );
+                }
+            }
+            else
+            {
+                const auto boundary =
+                    std::clamp( reveal->boundary,
+                                fullyTransparent,
+                                static_cast<double>( surface.height ) );
+                if( reveal->from_edge == overlay::Edge::Min )
+                {
+                    bottom =
+                        std::min( bottom,
+                                  static_cast<std::int64_t>( std::ceil( boundary ) ) );
+                }
+                else
+                {
+                    top =
+                        std::max( top,
+                                  static_cast<std::int64_t>( std::floor( boundary ) ) );
+                }
+            }
+
+            if( right <= left || bottom <= top )
+            {
+                return std::nullopt;
+            }
+            return geometry::Rectangle{
+                .x      = static_cast<std::int32_t>( left ),
+                .y      = static_cast<std::int32_t>( top ),
+                .width  = static_cast<std::uint32_t>( right - left ),
+                .height = static_cast<std::uint32_t>( bottom - top ),
+            };
+        }
+
+        [[nodiscard]]
+        std::optional<geometry::Rectangle>
+        intersection( geometry::Rectangle left,
+                      geometry::Rectangle right ) noexcept
+        {
+            const auto left_edge = std::max( static_cast<std::int64_t>( left.x ),
+                                             static_cast<std::int64_t>( right.x ) );
+            const auto top_edge  = std::max( static_cast<std::int64_t>( left.y ),
+                                             static_cast<std::int64_t>( right.y ) );
+            const auto right_edge =
+                std::min( rectangle_right( left ), rectangle_right( right ) );
+            const auto bottom_edge =
+                std::min( rectangle_bottom( left ), rectangle_bottom( right ) );
+            if( right_edge <= left_edge || bottom_edge <= top_edge )
+            {
+                return std::nullopt;
+            }
+            return geometry::Rectangle{
+                .x      = static_cast<std::int32_t>( left_edge ),
+                .y      = static_cast<std::int32_t>( top_edge ),
+                .width  = static_cast<std::uint32_t>( right_edge - left_edge ),
+                .height = static_cast<std::uint32_t>( bottom_edge - top_edge ),
+            };
+        }
+
+        [[nodiscard]]
+        bool
+        intersects( geometry::Rectangle left,
+                    geometry::Rectangle right ) noexcept
+        {
+            const auto left_edge = std::max( static_cast<std::int64_t>( left.x ),
+                                             static_cast<std::int64_t>( right.x ) );
+            const auto top_edge  = std::max( static_cast<std::int64_t>( left.y ),
+                                             static_cast<std::int64_t>( right.y ) );
+            return left_edge <
+                   std::min( rectangle_right( left ), rectangle_right( right ) ) &&
+                   top_edge <
+                   std::min( rectangle_bottom( left ), rectangle_bottom( right ) );
+        }
+
+        // How much area a merge may waste before it stops paying. Two damage
+        // rectangles combine when their union costs no more than this many
+        // pixels beyond keeping them apart. 4096 is a 64x64 patch: far cheaper
+        // to clear than the per-rectangle bookkeeping it removes, and small
+        // enough that a trail travelling diagonally across the screen does not
+        // chain into one screen-sized box.
+        constexpr std::uint64_t mergeWasteBudget = 4'096U;
+
+        // Past this the per-rectangle work outweighs the pixels it saves and
+        // the set collapses to its bounding box.
+        constexpr std::size_t   maxDamageRectangles = 64U;
+
+        // How wide a shape's clipped extent has to be before a row is resolved
+        // through coverage events rather than a value per pixel.
+        //
+        // The two representations have opposite failure modes. Events cost
+        // O(crossings) per row however wide the shape is, but carry a fixed
+        // overhead of two small sorts and a few dozen vector appends — which
+        // measured as 12.2 ms of fill for a 1200-segment trail covering only
+        // 60 572 pixels, 201 ns per pixel of pure bookkeeping. A value per
+        // pixel has almost no fixed cost but scans the full extent of every
+        // row, which for a 2400-pixel-wide annotation is 32 bytes of
+        // accumulator traffic per pixel before anything is blended.
+        //
+        // 256 is comfortably above a trail segment or a glyph and far below a
+        // large annotation, and the benchmark is flat either side of it.
+        constexpr std::size_t   denseRowWidthLimit = 256U;
+
+        [[nodiscard]]
+        std::uint64_t
+        rectangle_area( geometry::Rectangle rectangle ) noexcept
+        {
+            return static_cast<std::uint64_t>( rectangle.width ) * rectangle.height;
+        }
+
+        [[nodiscard]]
+        geometry::Rectangle
+        rectangle_union( geometry::Rectangle left,
+                         geometry::Rectangle right ) noexcept
+        {
+            const auto x = std::min( left.x, right.x );
+            const auto y = std::min( left.y, right.y );
+            const auto right_edge =
+                std::max( rectangle_right( left ), rectangle_right( right ) );
+            const auto bottom_edge =
+                std::max( rectangle_bottom( left ), rectangle_bottom( right ) );
+            return geometry::Rectangle{
+                .x      = x,
+                .y      = y,
+                .width  = static_cast<std::uint32_t>( right_edge - x ),
+                .height = static_cast<std::uint32_t>( bottom_edge - y ),
+            };
+        }
+
+        [[nodiscard]]
+        bool
+        worth_merging( geometry::Rectangle left,
+                       geometry::Rectangle right ) noexcept
+        {
+            return rectangle_area( rectangle_union( left, right ) ) <=
+                   rectangle_area( left ) +
+                   rectangle_area( right ) +
+                   mergeWasteBudget;
+        }
+
+        // The frame's damage, clipped to the surface and merged.
+        //
+        // This used to make the set disjoint by SUBTRACTION: every new
+        // rectangle was cut against every rectangle already accepted, and each
+        // cut yields up to four pieces. 600 overlapping trail bounds came out
+        // as 3236 fragments — more rectangles than there were shapes — and
+        // every shape then paid a linear scan of all of them, twice: once in
+        // select_damage and once inside the rasterizer.
+        //
+        // Merging instead of cutting can only shrink the count. Disjointness is
+        // no longer required of this function: overlapping rectangles reach the
+        // rasterizer, which merges each row's x-runs before it blends, so a
+        // pixel still receives exactly one blend per shape.
+        [[nodiscard]]
+        std::vector<geometry::Rectangle>
+        coalesce_damage( std::span<const geometry::Rectangle> damage,
+                         geometry::Size                       surface )
+        {
+            const geometry::Rectangle surface_rectangle{
+                .width  = surface.width,
+                .height = surface.height,
+            };
+            std::vector<geometry::Rectangle> merged;
+            merged.reserve( damage.size() );
+            for( const auto rectangle : damage )
+            {
+                const auto clipped = intersection( rectangle, surface_rectangle );
+                if( !clipped.has_value() || rectangle_area( *clipped ) == 0U )
+                {
+                    continue;
+                }
+                auto        candidate = *clipped;
+                std::size_t write     = 0;
+                for( std::size_t read = 0; read < merged.size(); ++read )
+                {
+                    if( worth_merging( candidate, merged[read] ) )
+                    {
+                        candidate = rectangle_union( candidate, merged[read] );
+                        continue;
+                    }
+                    merged[write] = merged[read];
+                    ++write;
+                }
+                merged.resize( write );
+                merged.push_back( candidate );
+            }
+            if( merged.size() > maxDamageRectangles )
+            {
+                auto bounding = merged.front();
+                for( const auto rectangle : merged )
+                {
+                    bounding = rectangle_union( bounding, rectangle );
+                }
+                merged.assign( 1U, bounding );
+            }
+            return merged;
+        }
+
+        // Collects the damage rectangles `bounds` overlaps. Replaces an any_of
+        // predicate: paint_shapes needs the subset, not just whether one
+        // exists, because handing rasterize_contours the whole damage set makes
+        // its cost shapes x damage.
+        void
+        select_damage( geometry::Rectangle                  bounds,
+                       std::span<const geometry::Rectangle> damage,
+                       std::vector<geometry::Rectangle>&    selected )
+        {
+            selected.clear();
+            for( const auto rectangle : damage )
+            {
+                if( intersects( bounds, rectangle ) )
+                {
+                    selected.push_back( rectangle );
+                }
+            }
         }
 
         void
-        blend_pixel( Image&                image,
-                     std::size_t           x,
-                     std::size_t           y,
-                     const overlay::Color& color,
-                     double                opacity,
-                     double                coverage )
+        clear_damage( Image&                               image,
+                      std::span<const geometry::Rectangle> damage )
         {
-            const auto source_alpha =
-                ( static_cast<double>( color.a ) / channelMaximum ) * opacity * coverage;
-            if( source_alpha <= fullyTransparent )
+            auto pixels = std::span<std::byte>{ image.pixels };
+            for( const auto rectangle : damage )
+            {
+                if( rectangle.width == 0U || rectangle.height == 0U )
+                {
+                    continue;
+                }
+                assert( rectangle.x >= 0 );
+                assert( rectangle.y >= 0 );
+                assert( rectangle_right( rectangle ) <=
+                        static_cast<std::int64_t>( image.width ) );
+                assert( rectangle_bottom( rectangle ) <=
+                        static_cast<std::int64_t>( image.height ) );
+                const auto first_x = static_cast<std::size_t>( rectangle.x );
+                const auto first_y = static_cast<std::size_t>( rectangle.y );
+                const auto row_bytes =
+                    static_cast<std::size_t>( rectangle.width ) * bgraBytesPerPixel;
+                for( std::size_t row{}; row < rectangle.height; ++row )
+                {
+                    const auto offset = ( ( first_y + row ) *
+                                          static_cast<std::size_t>( image.stride ) ) +
+                                        ( first_x * bgraBytesPerPixel );
+                    std::ranges::fill( pixels.subspan( offset, row_bytes ),
+                                       std::byte{} );
+                }
+            }
+        }
+
+        // The packed blend works on two channels at a time, in the 16-bit
+        // lanes of a 32-bit word: B and R in one word, G and A in the other.
+        constexpr std::uint32_t channelMaximumByte = 255U;
+        constexpr std::uint32_t evenLaneMask       = 0X00'FF'00'FFU;
+        constexpr std::uint32_t roundingLanes      = 0X00'80'00'80U;
+        constexpr std::uint32_t laneShift          = 8U;
+        constexpr std::uint32_t highLaneShift      = 16U;
+
+        // round(lane / 255) for both 16-bit lanes at once, without a divide.
+        //
+        // Each lane holds at most 255 x 255 = 65025 and gains at most 382 here,
+        // so neither can carry into the other.
+        [[nodiscard]]
+        std::uint32_t
+        divide_lanes_by_channel_maximum( std::uint32_t lanes ) noexcept
+        {
+            const auto biased = lanes + roundingLanes;
+            return ( ( biased + ( ( biased >> laneShift ) & evenLaneMask ) ) >>
+                     laneShift ) &
+                   evenLaneMask;
+        }
+
+        // Blends [first_x, last_x) of row `y` at one constant coverage.
+        //
+        // This is the innermost loop of the whole overlay and, until this
+        // rewrite, the single most expensive thing grab did. It ran per pixel
+        // and converted four channels between double and byte each time, having
+        // recomputed the source alpha per pixel as well. Measured on a
+        // 2400x1600 annotation it was 44.6 ms of a 55.9 ms frame — 80% of the
+        // time, for arithmetic that does not vary across a span.
+        //
+        // Two things fix that. Coverage is constant across a run by
+        // construction — the caller only calls this between two coverage
+        // events — so the source's premultiplied contribution is computed once
+        // for the run. And src-over is exact in integers, two channels at a
+        // time, so a pixel costs two multiply-adds and two rounded divides
+        // rather than four of each in double precision with eight conversions.
+        void
+        blend_run( Image&                image,
+                   std::size_t           first_x,
+                   std::size_t           last_x,
+                   std::size_t           y,
+                   const overlay::Color& color,
+                   double                source_alpha ) noexcept
+        {
+            if( source_alpha <= fullyTransparent || first_x >= last_x )
             {
                 return;
             }
-            const auto inverse_alpha = fullyOpaque - source_alpha;
-            const auto pixel_offset  = ( y * static_cast<std::size_t>( image.stride ) ) +
-                                       ( x * bgraBytesPerPixel );
-            const auto destination   = [&image, pixel_offset]( std::size_t channel )
+            const auto alpha = static_cast<std::uint32_t>(
+                ( std::min( source_alpha, fullyOpaque ) * channelMaximum ) + roundingBias
+            );
+            if( alpha == 0U )
             {
-                return static_cast<double>( std::to_integer<std::uint8_t>(
-                    image.pixels.at( pixel_offset + channel )
-                ) );
-            };
-            image.pixels.at( pixel_offset + blueChannelOffset ) = std::byte{
-                channel_byte( ( static_cast<double>( color.b ) * source_alpha ) +
-                              ( destination( blueChannelOffset ) * inverse_alpha ) ),
-            };
-            image.pixels.at( pixel_offset + greenChannelOffset ) = std::byte{
-                channel_byte( ( static_cast<double>( color.g ) * source_alpha ) +
-                              ( destination( greenChannelOffset ) * inverse_alpha ) ),
-            };
-            image.pixels.at( pixel_offset + redChannelOffset ) = std::byte{
-                channel_byte( ( static_cast<double>( color.r ) * source_alpha ) +
-                              ( destination( redChannelOffset ) * inverse_alpha ) ),
-            };
-            image.pixels.at( pixel_offset + alphaChannelOffset ) = std::byte{
-                channel_byte( ( channelMaximum * source_alpha ) +
-                              ( destination( alphaChannelOffset ) * inverse_alpha ) ),
-            };
+                return;
+            }
+            const auto inverse = channelMaximumByte - alpha;
+
+            // The lane layout below is the surface's byte order, not a choice.
+            static_assert( blueChannelOffset ==
+                               0U &&
+                               greenChannelOffset ==
+                               1U &&
+                               redChannelOffset ==
+                               2U &&
+                               alphaChannelOffset == 3U,
+                           "the packed blend assumes BGRA bytes in memory order" );
+            const auto source_blue_red =
+                ( static_cast<std::uint32_t>( color.b ) * alpha ) |
+                ( ( static_cast<std::uint32_t>( color.r ) * alpha ) << highLaneShift );
+            const auto source_green_alpha =
+                ( static_cast<std::uint32_t>( color.g ) * alpha ) |
+                ( ( channelMaximumByte * alpha ) << highLaneShift );
+
+            const auto row_offset = y * static_cast<std::size_t>( image.stride );
+            assert( row_offset + ( last_x * bgraBytesPerPixel ) <= image.pixels.size() );
+            auto* const row = std::next( image.pixels.data(),
+                                         static_cast<std::ptrdiff_t>( row_offset ) );
+            for( auto x = first_x; x < last_x; ++x )
+            {
+                auto* const pixel =
+                    std::next( row,
+                               static_cast<std::ptrdiff_t>( x * bgraBytesPerPixel ) );
+                // memcpy rather than a cast: the buffer is bytes, and this is
+                // the only way to read four of them as a word without leaning
+                // on type punning. It compiles to the same single load.
+                std::uint32_t destination{};
+                std::memcpy( &destination, pixel, sizeof destination );
+                const auto blue_red = divide_lanes_by_channel_maximum(
+                    ( ( destination & evenLaneMask ) * inverse ) + source_blue_red
+                );
+                const auto green_alpha = divide_lanes_by_channel_maximum(
+                    ( ( ( destination >> laneShift ) & evenLaneMask ) * inverse ) +
+                    source_green_alpha
+                );
+                const auto blended = blue_red | ( green_alpha << laneShift );
+                std::memcpy( pixel, &blended, sizeof blended );
+            }
         }
 
-        void
-        append_crossings( const FlatContours&    contours,
-                          double                 sample_y,
-                          std::vector<Crossing>& crossings )
+        // One directed edge of a flattened contour, in the form a scanline
+        // walk wants: keyed by its top, carrying the x it starts at and the
+        // slope to advance by.
+        //
+        // Building this once per shape is what replaced walking every point of
+        // every contour once per sub-scanline. At 8 sub-scanlines per row that
+        // walk was the shape of the entire cost, and it did it with two
+        // bounds-checked `.at()` accesses and a modulo per edge.
+        struct Edge
         {
+                double y_top{};
+                double y_bottom{};
+                double x_at_top{};
+                double slope{};
+                int    winding{};
+        };
+
+        // A half-open [first, last) run of pixels within one row.
+        struct XInterval
+        {
+                std::size_t first{};
+                std::size_t last{};
+        };
+
+        // Working memory for the scanline fill, owned by the raster and reused
+        // across frames: a busy trail rasterizes several hundred shapes per
+        // frame and none of them should allocate.
+        // Where a run of fully covered pixels starts or stops, on one row.
+        struct CoverageEvent
+        {
+                std::size_t x{};
+                double      weight{};
+        };
+
+        // A pixel one of the sub-scanlines covers only partly — the two ends of
+        // a span. There are at most two per sub-scanline span, so a row carries
+        // a handful of these however wide the shape is.
+        struct PartialPixel
+        {
+                std::size_t x{};
+                double      coverage{};
+        };
+
+        struct RasterScratch
+        {
+                std::vector<Edge>          edges;
+                std::vector<std::size_t>   active;
+                std::vector<Crossing>      crossings;
+                // A row's coverage as events and partial pixels rather than one
+                // value per pixel. The interior of a span is two events, not
+                // 2400 accumulator slots, so nothing per-pixel is written
+                // before the blend.
+                std::vector<CoverageEvent> events;
+                std::vector<PartialPixel>  partials;
+                // The same coverage as a value per pixel, for rows too narrow
+                // to pay for the event bookkeeping. Both are one longer than
+                // the surface is wide: a span may end exactly at the right edge
+                // and its closing delta lands one past it.
+                std::vector<double>        coverage;
+                std::vector<double>        delta;
+                std::vector<XInterval>     row_intervals;
+        };
+
+        void
+        build_edges( const FlatContours& contours,
+                     std::vector<Edge>&  edges )
+        {
+            edges.clear();
             for( const auto& contour : contours.contours )
             {
                 if( contour.count < 2U )
@@ -852,85 +1518,167 @@ namespace grab::kernel::presentation
                 }
                 for( std::size_t offset{}; offset < contour.count; ++offset )
                 {
-                    const auto next_offset = ( offset + 1U ) % contour.count;
-                    const auto start = contours.points.at( contour.first + offset );
-                    const auto end   = contours.points.at( contour.first + next_offset );
-                    const bool downward = start.y <= sample_y && sample_y < end.y;
-                    const bool upward   = end.y <= sample_y && sample_y < start.y;
-                    if( !downward && !upward )
+                    const auto next_offset =
+                        offset + 1U == contour.count ? std::size_t{} : offset + 1U;
+                    const auto start = contours.points[contour.first + offset];
+                    const auto end   = contours.points[contour.first + next_offset];
+                    // A horizontal edge crosses no sub-scanline. The half-open
+                    // test this replaces skipped it too, by never matching.
+                    if( start.y == end.y )
                     {
                         continue;
                     }
-                    const auto x = start.x + ( ( sample_y - start.y ) *
-                                               ( end.x - start.x ) /
-                                               ( end.y - start.y ) );
-                    crossings.push_back( Crossing{
-                        .x             = x,
-                        .winding_delta = downward ? 1 : -1,
+                    const bool  downward = start.y < end.y;
+                    const auto& upper    = downward ? start : end;
+                    const auto& lower    = downward ? end : start;
+                    edges.push_back( Edge{
+                        .y_top    = upper.y,
+                        .y_bottom = lower.y,
+                        .x_at_top = upper.x,
+                        .slope    = ( lower.x - upper.x ) / ( lower.y - upper.y ),
+                        .winding  = downward ? 1 : -1,
                     } );
                 }
             }
-            std::ranges::sort( crossings, {}, &Crossing::x );
+            std::ranges::sort( edges, {}, &Edge::y_top );
         }
 
+        // Records one covered interval of a sub-scanline against the row.
+        //
+        // Only the two partial end pixels are recorded individually. The fully
+        // covered middle becomes a pair of events, so a 2400-pixel-wide
+        // interior costs two entries per sub-scanline instead of 2400
+        // accumulations — and, once the row is resolved, one blended run
+        // instead of 2400 blended pixels.
         void
-        accumulate_interval( std::vector<double>& coverage,
-                             double               interval_start,
-                             double               interval_end,
-                             std::size_t          first_pixel,
-                             std::size_t          last_pixel )
+        add_span( RasterScratch& scratch,
+                  bool           dense,
+                  double         span_start,
+                  double         span_end,
+                  std::size_t    first_pixel,
+                  std::size_t    last_pixel,
+                  double         weight )
         {
             const auto clipped_start =
-                std::max( interval_start, static_cast<double>( first_pixel ) );
+                std::max( span_start, static_cast<double>( first_pixel ) );
             const auto clipped_end =
-                std::min( interval_end, static_cast<double>( last_pixel ) );
+                std::min( span_end, static_cast<double>( last_pixel ) );
             if( clipped_end <= clipped_start )
             {
                 return;
             }
-            const auto first = static_cast<std::size_t>( std::floor( clipped_start ) );
-            const auto last  = static_cast<std::size_t>( std::ceil( clipped_end ) );
-            const auto sample_weight =
-                fullyOpaque / static_cast<double>( antiAliasSubscanlines );
-            for( auto pixel = first; pixel < last; ++pixel )
+            // Both ends are non-negative and clamped into the row, so a
+            // truncating cast is floor.
+            const auto first = static_cast<std::size_t>( clipped_start );
+            const auto last  = static_cast<std::size_t>( clipped_end );
+            const auto head  = static_cast<double>( first + 1U ) - clipped_start;
+            const auto tail  = clipped_end - static_cast<double>( last );
+            if( first == last )
             {
-                const auto pixel_start = static_cast<double>( pixel );
-                const auto overlap = std::min( clipped_end, pixel_start + fullyOpaque ) -
-                                     std::max( clipped_start, pixel_start );
-                if( overlap > fullyTransparent )
+                const auto only = ( clipped_end - clipped_start ) * weight;
+                if( dense )
                 {
-                    coverage.at( pixel ) += overlap * sample_weight;
+                    scratch.coverage[first] += only;
                 }
+                else
+                {
+                    scratch.partials.push_back( PartialPixel{
+                        .x        = first,
+                        .coverage = only,
+                    } );
+                }
+                return;
+            }
+            if( dense )
+            {
+                scratch.coverage[first]   += head * weight;
+                scratch.delta[first + 1U] += weight;
+                scratch.delta[last]       -= weight;
+                if( tail > fullyTransparent )
+                {
+                    scratch.coverage[last] += tail * weight;
+                }
+                return;
+            }
+            scratch.partials.push_back( PartialPixel{
+                .x        = first,
+                .coverage = head * weight,
+            } );
+            if( last > first + 1U )
+            {
+                scratch.events.push_back( CoverageEvent{
+                    .x      = first + 1U,
+                    .weight = weight,
+                } );
+                scratch.events.push_back( CoverageEvent{
+                    .x      = last,
+                    .weight = -weight,
+                } );
+            }
+            if( tail > fullyTransparent && last < last_pixel )
+            {
+                scratch.partials.push_back( PartialPixel{
+                    .x        = last,
+                    .coverage = tail * weight,
+                } );
             }
         }
 
+        // The x-runs of `row` that lie inside the damage set, merged so that no
+        // pixel appears in two of them.
+        //
+        // Damage rectangles are allowed to overlap — see coalesce_damage — and
+        // blending one pixel twice for the same shape darkens it. Merging here,
+        // in one dimension, is exact and costs a sort of two or three entries;
+        // making the rectangles disjoint in two dimensions instead is what used
+        // to turn 600 trail bounds into 3236 fragments.
         void
-        accumulate_scanline( const FlatContours&    contours,
-                             double                 sample_y,
-                             std::vector<double>&   coverage,
-                             std::size_t            first_pixel,
-                             std::size_t            last_pixel,
-                             std::vector<Crossing>& crossings )
+        collect_row_intervals( std::span<const geometry::Rectangle> damage,
+                               std::size_t                          row,
+                               std::size_t                          first_pixel,
+                               std::size_t                          last_pixel,
+                               std::vector<XInterval>&              intervals )
         {
-            crossings.clear();
-            append_crossings( contours, sample_y, crossings );
-            int    winding{};
-            double previous_x{};
-            bool   has_previous{};
-            for( const auto crossing : crossings )
+            intervals.clear();
+            const auto row_index = static_cast<std::int64_t>( row );
+            for( const auto rectangle : damage )
             {
-                if( has_previous && winding != 0 )
+                if( row_index <
+                    rectangle.y ||
+                    row_index >= rectangle_bottom( rectangle ) )
                 {
-                    accumulate_interval( coverage,
-                                         previous_x,
-                                         crossing.x,
-                                         first_pixel,
-                                         last_pixel );
+                    continue;
                 }
-                winding      += crossing.winding_delta;
-                previous_x    = crossing.x;
-                has_previous  = true;
+                const auto left =
+                    std::max( first_pixel, static_cast<std::size_t>( rectangle.x ) );
+                const auto right =
+                    std::min( last_pixel,
+                              static_cast<std::size_t>( rectangle_right( rectangle ) ) );
+                if( right > left )
+                {
+                    intervals.push_back( XInterval{ .first = left, .last = right } );
+                }
             }
+            if( intervals.size() < 2U )
+            {
+                return;
+            }
+            std::ranges::sort( intervals, {}, &XInterval::first );
+            std::size_t write = 0;
+            for( std::size_t read = 1U; read < intervals.size(); ++read )
+            {
+                if( intervals[read].first <= intervals[write].last )
+                {
+                    intervals[write].last =
+                        std::max( intervals[write].last, intervals[read].last );
+                }
+                else
+                {
+                    ++write;
+                    intervals[write] = intervals[read];
+                }
+            }
+            intervals.resize( write + 1U );
         }
 
         [[nodiscard]]
@@ -955,58 +1703,449 @@ namespace grab::kernel::presentation
             return static_cast<std::size_t>( clipped );
         }
 
+        // A row's coverage, read out of the dense accumulators as runs.
+        //
+        // Flush whenever a pixel's coverage differs from the run being built,
+        // so the blend still happens a run at a time even though the coverage
+        // was accumulated one pixel at a time. Both accumulators are reset on
+        // the way past, so the next row starts clean without a second sweep.
+        template<typename Emit>
         void
-        rasterize_contours( const FlatContours&    contours,
-                            const overlay::Color&  color,
-                            double                 opacity,
-                            Image&                 image,
-                            std::vector<double>&   row_coverage,
-                            std::vector<Crossing>& crossings )
+        resolve_dense_row( RasterScratch& scratch,
+                           std::size_t    first_pixel,
+                           std::size_t    last_pixel,
+                           Emit&&         emit )
+        {
+            double      running   = fullyTransparent;
+            std::size_t run_first = first_pixel;
+            double      run_value = fullyTransparent;
+            for( auto x = first_pixel; x < last_pixel; ++x )
+            {
+                const auto step      = scratch.delta[x];
+                const auto own       = scratch.coverage[x];
+                scratch.delta[x]     = fullyTransparent;
+                scratch.coverage[x]  = fullyTransparent;
+                running             += step;
+                const auto value     = running + own;
+                if( value != run_value )
+                {
+                    emit( run_first, x, run_value );
+                    run_first = x;
+                    run_value = value;
+                }
+            }
+            emit( run_first, last_pixel, run_value );
+            // A span ending exactly at the right edge closes one past it.
+            scratch.delta[last_pixel] = fullyTransparent;
+        }
+
+        // The same runs, read out of coverage events and partial pixels.
+        //
+        // Between two events every pixel has the same coverage, so the walk
+        // jumps from boundary to boundary and the interior of a shape never
+        // costs anything per pixel until it is blended. Only the pixels a
+        // sub-scanline cut through are handled one at a time, and there are at
+        // most two of those per span.
+        template<typename Emit>
+        void
+        resolve_sparse_row( RasterScratch& scratch,
+                            std::size_t    first_pixel,
+                            std::size_t    last_pixel,
+                            Emit&&         emit )
+        {
+            std::ranges::sort( scratch.events, {}, &CoverageEvent::x );
+            std::ranges::sort( scratch.partials, {}, &PartialPixel::x );
+
+            double      accumulated   = fullyTransparent;
+            std::size_t cursor        = first_pixel;
+            std::size_t event_index   = 0;
+            std::size_t partial_index = 0;
+            while( cursor < last_pixel )
+            {
+                auto boundary = last_pixel;
+                if( event_index < scratch.events.size() )
+                {
+                    boundary = std::min( boundary, scratch.events[event_index].x );
+                }
+                if( partial_index < scratch.partials.size() )
+                {
+                    boundary = std::min( boundary, scratch.partials[partial_index].x );
+                }
+                if( boundary > cursor )
+                {
+                    emit( cursor, boundary, accumulated );
+                    cursor = boundary;
+                    continue;
+                }
+                while( event_index <
+                       scratch.events.size() &&
+                       scratch.events[event_index].x == cursor )
+                {
+                    accumulated += scratch.events[event_index].weight;
+                    ++event_index;
+                }
+                if( partial_index >=
+                    scratch.partials.size() ||
+                    scratch.partials[partial_index].x != cursor )
+                {
+                    continue;
+                }
+                auto extra = fullyTransparent;
+                while( partial_index <
+                       scratch.partials.size() &&
+                       scratch.partials[partial_index].x == cursor )
+                {
+                    extra += scratch.partials[partial_index].coverage;
+                    ++partial_index;
+                }
+                emit( cursor, cursor + 1U, accumulated + extra );
+                ++cursor;
+            }
+        }
+
+        void
+        rasterize_contours( const FlatContours&                  contours,
+                            const overlay::Color&                color,
+                            double                               opacity,
+                            const std::optional<RevealMask>&     reveal,
+                            std::span<const geometry::Rectangle> damage,
+                            Image&                               image,
+                            RasterScratch&                       scratch,
+                            RenderProfile*                       profile )
         {
             const auto bounds = point_bounds( contours );
-            if( !bounds.has_value() || color.a == 0U || opacity <= fullyTransparent )
+            if( !bounds.has_value() ||
+                color.a ==
+                0U ||
+                opacity <=
+                fullyTransparent ||
+                reveal_is_hidden( reveal ) )
             {
                 return;
             }
-            const auto first_x = clipped_lower_pixel( bounds->left, image.width );
-            const auto last_x  = clipped_upper_pixel( bounds->right, image.width );
-            const auto first_y = clipped_lower_pixel( bounds->top, image.height );
-            const auto last_y  = clipped_upper_pixel( bounds->bottom, image.height );
+            auto first_x = clipped_lower_pixel( bounds->left, image.width );
+            auto last_x  = clipped_upper_pixel( bounds->right, image.width );
+            auto first_y = clipped_lower_pixel( bounds->top, image.height );
+            auto last_y  = clipped_upper_pixel( bounds->bottom, image.height );
+            if( reveal.has_value() )
+            {
+                const auto& mask = *reveal;
+                const auto  partial =
+                    mask.fraction > fullyTransparent && mask.fraction < fullyOpaque;
+                if( partial && mask.axis == overlay::Axis::X )
+                {
+                    if( mask.from_edge == overlay::Edge::Min )
+                    {
+                        last_x = std::min( last_x,
+                                           clipped_upper_pixel( mask.boundary,
+                                                                image.width ) );
+                    }
+                    else
+                    {
+                        first_x = std::max( first_x,
+                                            clipped_lower_pixel( mask.boundary,
+                                                                 image.width ) );
+                    }
+                }
+                else if( partial && mask.from_edge == overlay::Edge::Min )
+                {
+                    last_y =
+                        std::min( last_y,
+                                  clipped_upper_pixel( mask.boundary, image.height ) );
+                }
+                else if( partial )
+                {
+                    first_y =
+                        std::max( first_y,
+                                  clipped_lower_pixel( mask.boundary, image.height ) );
+                }
+            }
             if( first_x >= last_x || first_y >= last_y )
             {
                 return;
             }
-            for( auto y = first_y; y < last_y; ++y )
+
+            // Narrow to the damage this shape actually reaches, once, before
+            // touching an edge. This used to be a loop that re-ran the entire
+            // scanline machinery per damage rectangle the shape overlapped:
+            // with the damage set fragmented into thousands of pieces, a
+            // 600-segment trail made 5840 rasterize calls to paint 20 636
+            // pixels — 3.5 pixels of work behind 2.5 us of setup each.
+            auto covered_first_x = last_x;
+            auto covered_last_x  = first_x;
+            auto covered_first_y = last_y;
+            auto covered_last_y  = first_y;
+            for( const auto clip : damage )
             {
-                std::ranges::fill(
-                    row_coverage.begin() + static_cast<std::ptrdiff_t>( first_x ),
-                    row_coverage.begin() + static_cast<std::ptrdiff_t>( last_x ),
-                    fullyTransparent
-                );
+                assert( clip.x >= 0 );
+                assert( clip.y >= 0 );
+                const auto clip_first_x =
+                    std::max( first_x, static_cast<std::size_t>( clip.x ) );
+                const auto clip_last_x =
+                    std::min( last_x,
+                              static_cast<std::size_t>( rectangle_right( clip ) ) );
+                const auto clip_first_y =
+                    std::max( first_y, static_cast<std::size_t>( clip.y ) );
+                const auto clip_last_y =
+                    std::min( last_y,
+                              static_cast<std::size_t>( rectangle_bottom( clip ) ) );
+                if( clip_first_x >= clip_last_x || clip_first_y >= clip_last_y )
+                {
+                    continue;
+                }
+                covered_first_x = std::min( covered_first_x, clip_first_x );
+                covered_last_x  = std::max( covered_last_x, clip_last_x );
+                covered_first_y = std::min( covered_first_y, clip_first_y );
+                covered_last_y  = std::max( covered_last_y, clip_last_y );
+            }
+            if( covered_first_x >= covered_last_x || covered_first_y >= covered_last_y )
+            {
+                return;
+            }
+
+            build_edges( contours, scratch.edges );
+            if( scratch.edges.empty() )
+            {
+                return;
+            }
+            if( profile != nullptr )
+            {
+                profile->rasterize_calls += 1U;
+            }
+
+            constexpr auto sampleCentre =
+                fullyOpaque / static_cast<double>( circleHalves );
+            const auto sample_weight =
+                fullyOpaque / static_cast<double>( antiAliasSubscanlines );
+            // Everything about the source that does not vary across the shape,
+            // computed once instead of per pixel.
+            const auto base_alpha =
+                ( static_cast<double>( color.a ) / channelMaximum ) * opacity;
+            // A reveal along X is the one thing that makes coverage differ
+            // between neighbouring pixels of an otherwise constant run.
+            const bool reveal_varies = reveal.has_value() &&
+                                       reveal_is_partial( reveal ) &&
+                                       reveal->axis == overlay::Axis::X;
+            const bool dense_rows =
+                covered_last_x - covered_first_x <= denseRowWidthLimit;
+
+            scratch.active.clear();
+            std::size_t next_edge = 0;
+
+            for( auto y = covered_first_y; y < covered_last_y; ++y )
+            {
+                const auto row_top    = static_cast<double>( y );
+                const auto row_bottom = row_top + fullyOpaque;
+
+                // The active edge table. Edges arrive in y_top order and leave
+                // when the row passes their bottom, so each is examined once on
+                // the way in and once on the way out rather than once per
+                // sub-scanline of every row it does not touch.
+                while( next_edge <
+                       scratch.edges.size() &&
+                       scratch.edges[next_edge].y_top < row_bottom )
+                {
+                    scratch.active.push_back( next_edge );
+                    ++next_edge;
+                }
+                std::erase_if( scratch.active,
+                               [&scratch, row_top]( std::size_t index )
+                               {
+                                   return scratch.edges[index].y_bottom <= row_top;
+                               } );
+
+                collect_row_intervals( damage,
+                                       y,
+                                       covered_first_x,
+                                       covered_last_x,
+                                       scratch.row_intervals );
+                if( scratch.row_intervals.empty() || scratch.active.empty() )
+                {
+                    continue;
+                }
+                if( profile != nullptr )
+                {
+                    for( const auto interval : scratch.row_intervals )
+                    {
+                        profile->covered_pixels += interval.last - interval.first;
+                    }
+                }
+
+                scratch.events.clear();
+                scratch.partials.clear();
                 for( std::size_t sample{}; sample < antiAliasSubscanlines; ++sample )
                 {
                     const auto sample_y =
-                        static_cast<double>( y ) +
-                        ( ( static_cast<double>( sample ) +
-                            ( fullyOpaque / static_cast<double>( circleHalves ) ) ) /
-                          static_cast<double>( antiAliasSubscanlines ) );
-                    accumulate_scanline( contours,
-                                         sample_y,
-                                         row_coverage,
-                                         first_x,
-                                         last_x,
-                                         crossings );
+                        row_top + ( ( static_cast<double>( sample ) + sampleCentre ) /
+                                    static_cast<double>( antiAliasSubscanlines ) );
+                    if( !sample_passes_reveal( sample_y, reveal ) )
+                    {
+                        continue;
+                    }
+                    scratch.crossings.clear();
+                    for( const auto index : scratch.active )
+                    {
+                        const auto& edge = scratch.edges[index];
+                        if( edge.y_top > sample_y || sample_y >= edge.y_bottom )
+                        {
+                            continue;
+                        }
+                        scratch.crossings.push_back( Crossing{
+                            .x             = edge.x_at_top +
+                                             ( ( sample_y - edge.y_top ) * edge.slope ),
+                            .winding_delta = edge.winding,
+                        } );
+                    }
+                    if( scratch.crossings.size() < circleHalves )
+                    {
+                        continue;
+                    }
+                    std::ranges::sort( scratch.crossings, {}, &Crossing::x );
+                    int    winding{};
+                    double previous_x{};
+                    bool   has_previous{};
+                    for( const auto crossing : scratch.crossings )
+                    {
+                        if( has_previous && winding != 0 )
+                        {
+                            add_span( scratch,
+                                      dense_rows,
+                                      previous_x,
+                                      crossing.x,
+                                      covered_first_x,
+                                      covered_last_x,
+                                      sample_weight );
+                        }
+                        winding      += crossing.winding_delta;
+                        previous_x    = crossing.x;
+                        has_previous  = true;
+                    }
                 }
-                for( auto x = first_x; x < last_x; ++x )
+
+                // Resolve the row into constant-coverage runs and blend them.
+                //
+                // The two representations have opposite failure modes, so the
+                // shape picks one and both end at the same `emit`.
+                const auto emit =
+                    [&scratch, &image, &color, reveal_varies, &reveal, y, base_alpha](
+                        std::size_t run_first,
+                        std::size_t run_last,
+                        double      coverage
+                    )
                 {
-                    blend_pixel(
-                        image,
-                        x,
-                        y,
-                        color,
-                        opacity,
-                        std::clamp( row_coverage.at( x ), fullyTransparent, fullyOpaque )
+                    const auto clamped =
+                        std::clamp( coverage, fullyTransparent, fullyOpaque );
+                    if( clamped <= fullyTransparent || run_first >= run_last )
+                    {
+                        return;
+                    }
+                    for( const auto interval : scratch.row_intervals )
+                    {
+                        const auto blend_first = std::max( run_first, interval.first );
+                        const auto blend_last  = std::min( run_last, interval.last );
+                        if( blend_first >= blend_last )
+                        {
+                            continue;
+                        }
+                        if( reveal_varies )
+                        {
+                            // A partial reveal along X scales every pixel
+                            // differently, so the run cannot share one alpha.
+                            for( auto x = blend_first; x < blend_last; ++x )
+                            {
+                                blend_run( image,
+                                           x,
+                                           x + 1U,
+                                           y,
+                                           color,
+                                           base_alpha *
+                                               clamped *
+                                               horizontal_reveal_coverage( x, reveal ) );
+                            }
+                            continue;
+                        }
+                        blend_run( image,
+                                   blend_first,
+                                   blend_last,
+                                   y,
+                                   color,
+                                   base_alpha * clamped );
+                    }
+                };
+
+                if( dense_rows )
+                {
+                    resolve_dense_row( scratch, covered_first_x, covered_last_x, emit );
+                }
+                else
+                {
+                    resolve_sparse_row( scratch, covered_first_x, covered_last_x, emit );
+                }
+            }
+        }
+
+        void
+        paint_shapes( std::span<const TrackedShape>        shapes,
+                      std::span<const FlatContours>        geometries,
+                      std::span<const geometry::Rectangle> damage,
+                      Image&                               image,
+                      RasterScratch&                       scratch,
+                      std::vector<geometry::Rectangle>&    shape_damage,
+                      RenderProfile*                       profile )
+        {
+            assert( shapes.size() == geometries.size() );
+            auto geometry_iterator = geometries.begin();
+            for( const auto& tracked : shapes )
+            {
+                const auto& geometry = *geometry_iterator;
+                ++geometry_iterator;
+                if( !tracked.bounds.has_value() )
+                {
+                    continue;
+                }
+
+                // Hand rasterize_contours only the damage rectangles this
+                // shape actually touches, so a frame that repainted one corner
+                // does not walk the whole damage set per shape.
+                select_damage( *tracked.bounds, damage, shape_damage );
+                if( shape_damage.empty() )
+                {
+                    continue;
+                }
+
+                if( tracked.record.shape.fill.has_value() )
+                {
+                    const auto started = profile_now( profile );
+                    rasterize_contours( geometry,
+                                        tracked.record.shape.fill->color,
+                                        tracked.opacity,
+                                        tracked.reveal,
+                                        shape_damage,
+                                        image,
+                                        scratch,
+                                        profile );
+                    profile_add( profile, &RenderProfile::fill, started );
+                }
+                if( tracked.record.shape.stroke.has_value() &&
+                    std::isfinite( tracked.record.shape.stroke->width_px ) &&
+                    tracked.record.shape.stroke->width_px > fullyTransparent )
+                {
+                    const auto outline_started = profile_now( profile );
+                    const auto outline         = stroke_outline(
+                        geometry,
+                        static_cast<double>( tracked.record.shape.stroke->width_px )
                     );
+                    profile_add( profile, &RenderProfile::outline, outline_started );
+                    const auto started = profile_now( profile );
+                    rasterize_contours( outline,
+                                        tracked.record.shape.stroke->color,
+                                        tracked.opacity,
+                                        tracked.reveal,
+                                        shape_damage,
+                                        image,
+                                        scratch,
+                                        profile );
+                    profile_add( profile, &RenderProfile::fill, started );
                 }
             }
         }
@@ -1034,16 +2173,19 @@ namespace grab::kernel::presentation
                     .stride = raster_stride,
                     .format = PixelFormat::Bgra,
                     .pixels = std::vector<std::byte>( pixel_bytes ),
-                },
-                row_coverage( raster_size.width )
+                }
             {
+                scratch.coverage.assign( raster_size.width + 1U, 0.0 );
+                scratch.delta.assign( raster_size.width + 1U, 0.0 );
             }
 
-            Image                     image;
-            std::vector<double>       row_coverage;
-            std::vector<Crossing>     crossings;
-            std::vector<TrackedShape> previous_shapes;
-            bool                      first_render{ true };
+            Image                            image;
+            RasterScratch                    scratch;
+            std::vector<TrackedShape>        previous_shapes;
+            // Per-shape subset of the frame's damage. Lives here so it keeps
+            // its capacity across frames instead of allocating per shape.
+            std::vector<geometry::Rectangle> shape_damage;
+            bool                             full_redraw_required{ true };
     };
 
     OverlayRaster::OverlayRaster( std::unique_ptr<Impl> impl ) noexcept :
@@ -1104,20 +2246,38 @@ namespace grab::kernel::presentation
         assert( std::ranges::is_sorted( shapes, record_order_less ) );
         try
         {
-            std::ranges::fill( impl_->image.pixels, std::byte{} );
             std::vector<TrackedShape>        current_shapes;
+            std::vector<FlatContours>        flattened_shapes;
             std::vector<geometry::Rectangle> damage;
             current_shapes.reserve( shapes.size() );
+            flattened_shapes.reserve( shapes.size() );
             damage.reserve( shapes.size() + impl_->previous_shapes.size() );
+
+            // Measure only when someone is listening. The phase timers are two
+            // clock reads each and the per-shape ones run inside the loop that
+            // is being measured, so an always-on profile would be part of what
+            // it reports.
+            RenderProfile        measured;
+            RenderProfile* const profile = log::enabled( log::Level::Verbose ) &&
+                                                   log::runtime_level() >=
+                                                   log::Level::Verbose
+                                             ? &measured
+                                             : nullptr;
+            const auto           evaluate_started = profile_now( profile );
 
             for( const auto& record : shapes )
             {
-                const auto opacity  = lifetime_opacity( record, now );
-                const auto geometry = flatten_geometry( record.shape.geometry );
-                const auto bounds   = rendered_bounds( record.shape,
-                                                       geometry,
-                                                       opacity,
-                                                       impl_->image.size() );
+                const auto animation = evaluate_animation( record, now );
+                const auto opacity   = evaluate_opacity( record, now );
+                auto       geometry  = flatten_geometry( record.shape.geometry );
+                const auto reveal    = apply_animation( geometry, animation );
+                const auto bounds =
+                    apply_reveal_to_bounds( rendered_bounds( record.shape,
+                                                             geometry,
+                                                             opacity,
+                                                             impl_->image.size() ),
+                                            reveal,
+                                            impl_->image.size() );
                 const auto previous =
                     std::ranges::find( impl_->previous_shapes,
                                        record.id.slot,
@@ -1129,6 +2289,7 @@ namespace grab::kernel::presentation
                     previous ==
                     impl_->previous_shapes.end() ||
                     !appearances_equal( previous->record.shape, record.shape ) ||
+                    !animated_geometry_equal( previous->animation, animation ) ||
                     previous->opacity != opacity;
                 if( changed )
                 {
@@ -1143,35 +2304,13 @@ namespace grab::kernel::presentation
                     }
                 }
                 current_shapes.push_back( TrackedShape{
-                    .record  = record,
-                    .bounds  = bounds,
-                    .opacity = opacity,
+                    .record    = record,
+                    .bounds    = bounds,
+                    .opacity   = opacity,
+                    .animation = animation,
+                    .reveal    = reveal,
                 } );
-
-                if( record.shape.fill.has_value() )
-                {
-                    rasterize_contours( geometry,
-                                        record.shape.fill->color,
-                                        opacity,
-                                        impl_->image,
-                                        impl_->row_coverage,
-                                        impl_->crossings );
-                }
-                if( record.shape.stroke.has_value() &&
-                    std::isfinite( record.shape.stroke->width_px ) &&
-                    record.shape.stroke->width_px > fullyTransparent )
-                {
-                    const auto outline = stroke_outline(
-                        geometry,
-                        static_cast<double>( record.shape.stroke->width_px )
-                    );
-                    rasterize_contours( outline,
-                                        record.shape.stroke->color,
-                                        opacity,
-                                        impl_->image,
-                                        impl_->row_coverage,
-                                        impl_->crossings );
-                }
+                flattened_shapes.push_back( std::move( geometry ) );
             }
 
             for( const auto& previous : impl_->previous_shapes )
@@ -1189,7 +2328,7 @@ namespace grab::kernel::presentation
                 }
             }
 
-            if( impl_->first_render )
+            if( impl_->full_redraw_required )
             {
                 damage = {
                     geometry::Rectangle{
@@ -1197,21 +2336,80 @@ namespace grab::kernel::presentation
                                         .height = impl_->image.height,
                                         },
                 };
-                impl_->first_render = false;
             }
-            impl_->previous_shapes = std::move( current_shapes );
+
+            profile_add( profile, &RenderProfile::evaluate, evaluate_started );
+
+            auto normalized_damage      = coalesce_damage( damage, impl_->image.size() );
+            impl_->full_redraw_required = true;
+            const auto clear_started    = profile_now( profile );
+            clear_damage( impl_->image, normalized_damage );
+            profile_add( profile, &RenderProfile::clear, clear_started );
+
+            // paint_shapes is O(shapes x damage rects) before it touches a
+            // pixel, and rasterizes a shape once per damage rect it overlaps.
+            // These two counts are what tell you whether a slow frame is
+            // shape-bound or pixel-bound.
+            const diag::Scope<log::Level::Verbose> paint_scope;
+            paint_shapes( current_shapes,
+                          flattened_shapes,
+                          normalized_damage,
+                          impl_->image,
+                          impl_->scratch,
+                          impl_->shape_damage,
+                          profile );
+
+            // One line per frame carrying the whole cost model: how many shapes
+            // and how many pixels, then where the time went between diffing the
+            // scene, clearing damage, building stroke outlines and filling.
+            // Reading it is how "the overlay is laggy" becomes a decision about
+            // which of those four to change.
+            log::verbose(
+                [&current_shapes,
+                 &flattened_shapes,
+                 &normalized_damage,
+                 &paint_scope,
+                 &measured]( auto& event )
+                {
+                    std::size_t points = 0;
+                    for( const auto& flattened : flattened_shapes )
+                    {
+                        points += flattened.points.size();
+                    }
+                    const auto milliseconds = []( std::chrono::nanoseconds span )
+                    {
+                        return std::chrono::duration<double, std::milli>( span ).count();
+                    };
+                    event.tag( log::tags::raster )
+                        .value( "shapes", current_shapes.size() )
+                        .value( "damage_rects", normalized_damage.size() )
+                        .value( "contour_points", points )
+                        .value( "covered_px", measured.covered_pixels )
+                        .value( "raster_calls", measured.rasterize_calls )
+                        .value( "evaluate_ms", milliseconds( measured.evaluate ) )
+                        .value( "clear_ms", milliseconds( measured.clear ) )
+                        .value( "outline_ms", milliseconds( measured.outline ) )
+                        .value( "fill_ms", milliseconds( measured.fill ) )
+                        .value( "paint_ms", milliseconds( paint_scope.elapsed() ) );
+                }
+            );
+
+            impl_->previous_shapes      = std::move( current_shapes );
+            impl_->full_redraw_required = false;
             return RasterFrame{
                 .pixels = impl_->image,
-                .damage = std::move( damage ),
+                .damage = std::move( normalized_damage ),
             };
         }
         catch( const std::bad_alloc& )
         {
+            impl_->full_redraw_required = true;
             return fail( ErrorCode::Overflowed,
                          "overlay raster working memory allocation failed" );
         }
         catch( const std::length_error& )
         {
+            impl_->full_redraw_required = true;
             return fail( ErrorCode::Overflowed,
                          "overlay raster working memory exceeds container limits" );
         }

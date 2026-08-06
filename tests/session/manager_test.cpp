@@ -36,10 +36,10 @@ namespace
     }
 
     [[nodiscard]]
-    grab::WorkspaceDesc
-    desc()
+    grab::WorkspaceDescriptor
+    descriptor()
     {
-        return grab::WorkspaceDesc{
+        return grab::WorkspaceDescriptor{
             .name        = session_name,
             .mode        = grab::WorkspaceMode::Offscreen,
             .geometry    = default_geometry,
@@ -56,7 +56,7 @@ TEST( SessionManager,
     const grab::test::FakeSessionProvider provider;
     grab::session::SessionManager         manager{ registry, provider };
 
-    const auto                            record = manager.start( desc() );
+    const auto                            record = manager.start( descriptor() );
     ASSERT_TRUE( record.has_value() ) << record.error().message;
     EXPECT_EQ( record->state, grab::WorkspaceState::Ready );
     EXPECT_FALSE( record->endpoint.empty() );
@@ -70,7 +70,7 @@ TEST( SessionManager,
     provider.fail_next_create( grab::ErrorCode::ProviderFailed, provider_failure );
     grab::session::SessionManager manager{ registry, provider };
 
-    const auto                    record = manager.start( desc() );
+    const auto                    record = manager.start( descriptor() );
     ASSERT_FALSE( record.has_value() );
     EXPECT_EQ( record.error().code, grab::ErrorCode::ProviderFailed );
     EXPECT_FALSE( registry.read( session_name ).has_value() );
@@ -83,7 +83,7 @@ TEST( SessionManager,
     const grab::test::FakeSessionProvider provider;
     grab::session::SessionManager         manager{ registry, provider };
 
-    ASSERT_TRUE( manager.start( desc() ).has_value() );
+    ASSERT_TRUE( manager.start( descriptor() ).has_value() );
     ASSERT_TRUE( manager.stop( session_name ).has_value() );
     EXPECT_FALSE( registry.read( session_name ).has_value() );
     EXPECT_EQ( provider.destroy_calls(), expected_destroy_calls );

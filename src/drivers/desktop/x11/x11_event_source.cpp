@@ -41,7 +41,7 @@ namespace grab::drivers::desktop::x11
         constexpr int           flushFailed               = 0;
         constexpr std::uint8_t  responseTypeMask          = 0X7FU;
         constexpr std::uint16_t requiredXiMajorVersion    = 2U;
-        constexpr std::uint16_t requiredXiMinorVersion    = 0U;
+        constexpr std::uint16_t requiredXiMinorVersion    = 1U;
         constexpr std::uint16_t rawMaskCount              = 1U;
         constexpr std::uint16_t rawMaskWords              = 1U;
         constexpr int           xAxisValuator             = 0;
@@ -55,6 +55,8 @@ namespace grab::drivers::desktop::x11
         constexpr std::size_t   keyUpDemandSlot           = 1U;
         constexpr std::size_t   mouseClickDemandSlot      = 2U;
         constexpr std::size_t   mouseMoveDemandSlot       = 3U;
+        constexpr std::size_t   mouseButtonDownDemandSlot = 4U;
+        constexpr std::size_t   mouseButtonUpDemandSlot   = 5U;
         constexpr std::size_t   noDemand                  = 0U;
         constexpr std::uint32_t firstMaskBit              = 1U;
         constexpr std::uint64_t initialSequence           = 0U;
@@ -77,7 +79,7 @@ namespace grab::drivers::desktop::x11
         constexpr std::string_view xi2QueryFailedMessage{
             "XInput2 version query failed"
         };
-        constexpr std::string_view xi2UnavailableMessage{ "XInput2 2.0 is unavailable" };
+        constexpr std::string_view xi2UnavailableMessage{ "XInput2 2.1 is unavailable" };
         constexpr std::string_view deviceQueryFailedMessage{
             "XInput2 device query failed"
         };
@@ -152,7 +154,11 @@ namespace grab::drivers::desktop::x11
                                    std::string{ xi2QueryFailedMessage } );
             }
 
-            if( reply->major_version < requiredXiMajorVersion )
+            if( reply->major_version <
+                requiredXiMajorVersion ||
+                ( reply->major_version ==
+                  requiredXiMajorVersion &&
+                  reply->minor_version < requiredXiMinorVersion ) )
             {
                 return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                    std::string{ xi2UnavailableMessage } );
@@ -190,8 +196,9 @@ namespace grab::drivers::desktop::x11
 
         [[nodiscard]]
         grab::Event
-        make_key_event( grab::EventKind                        kind,
-                        const xcb_input_raw_key_press_event_t& raw )
+        make_key_event( grab::EventKind                               kind,
+                        const xcb_input_raw_key_press_event_t&        raw,
+                        const grab::platform::x11::XkbKeymapSnapshot* keymap )
         {
             return grab::Event{
                 .timestamp = grab::kernel::now_timestamp_s(),
@@ -200,7 +207,11 @@ namespace grab::drivers::desktop::x11
                 .category  = grab::EventCategory::Input,
                 .payload   = grab::Payload{ grab::InputKey{
                     .code = static_cast<std::uint32_t>( raw.detail ),
-                    .name = std::string{}
+                    .name = keymap == nullptr
+                              ? std::string{}
+                              : keymap->base_key_name(
+                                    static_cast<std::uint32_t>( raw.detail )
+                                )
                 } }
             };
         }
@@ -217,6 +228,24 @@ namespace grab::drivers::desktop::x11
                 .payload   = grab::Payload{ grab::MouseClick{
                     .button = static_cast<std::uint32_t>( raw.detail ),
                     .name   = std::string{}
+                } }
+            };
+        }
+
+        [[nodiscard]]
+        grab::Event
+        make_button_event( grab::EventKind                           kind,
+                           const xcb_input_raw_button_press_event_t& raw )
+        {
+            return grab::Event{
+                .timestamp = grab::kernel::now_timestamp_s(),
+                .sequence  = initialSequence,
+                .kind      = kind,
+                .category  = grab::EventCategory::Input,
+                .payload   = grab::Payload{ grab::MouseButton{
+                    .button   = static_cast<std::uint32_t>( raw.detail ),
+                    .name     = std::string{},
+                    .position = std::nullopt,
                 } }
             };
         }
@@ -316,7 +345,8 @@ namespace grab::drivers::desktop::x11
         DecodedEventIdentity
         append_decoded_event( const xcb_generic_event_t& raw_event,
                               std::uint8_t               extension_opcode,
-                              std::vector<grab::Event>&  events )
+                              const grab::platform::x11::XkbKeymapSnapshot* keymap,
+                              std::vector<grab::Event>&                     events )
         {
             DecodedEventIdentity identity{};
             if( static_cast<std::uint8_t>( raw_event.response_type &
@@ -343,8 +373,9 @@ namespace grab::drivers::desktop::x11
                             static_cast<const xcb_input_raw_key_press_event_t*>(
                                 event_storage
                             );
-                        events.push_back( make_key_event( grab::EventKind::KeyDown,
-                                                          *raw ) );
+                        events.push_back(
+                            make_key_event( grab::EventKind::KeyDown, *raw, keymap )
+                        );
                         identity.sourceid = raw->sourceid;
                         identity.deviceid = raw->deviceid;
                         identity.kind     = InjectionKind::KeyPress;
@@ -357,8 +388,9 @@ namespace grab::drivers::desktop::x11
                             static_cast<const xcb_input_raw_key_release_event_t*>(
                                 event_storage
                             );
-                        events.push_back( make_key_event( grab::EventKind::KeyUp,
-                                                          *raw ) );
+                        events.push_back(
+                            make_key_event( grab::EventKind::KeyUp, *raw, keymap )
+                        );
                         identity.sourceid = raw->sourceid;
                         identity.deviceid = raw->deviceid;
                         identity.kind     = InjectionKind::KeyRelease;
@@ -372,6 +404,9 @@ namespace grab::drivers::desktop::x11
                                 event_storage
                             );
                         events.push_back( make_button_event( *raw ) );
+                        events.push_back(
+                            make_button_event( grab::EventKind::MouseButtonDown, *raw )
+                        );
                         identity.sourceid = raw->sourceid;
                         identity.deviceid = raw->deviceid;
                         identity.kind     = InjectionKind::ButtonPress;
@@ -379,7 +414,20 @@ namespace grab::drivers::desktop::x11
                         break;
                     }
                 case XCB_INPUT_RAW_BUTTON_RELEASE :
-                    break;
+                    {
+                        const auto* raw =
+                            static_cast<const xcb_input_raw_button_release_event_t*>(
+                                event_storage
+                            );
+                        events.push_back(
+                            make_button_event( grab::EventKind::MouseButtonUp, *raw )
+                        );
+                        identity.sourceid = raw->sourceid;
+                        identity.deviceid = raw->deviceid;
+                        identity.kind     = InjectionKind::ButtonRelease;
+                        identity.detail   = static_cast<std::uint32_t>( raw->detail );
+                        break;
+                    }
                 case XCB_INPUT_RAW_MOTION :
                     {
                         const auto* raw =
@@ -415,6 +463,10 @@ namespace grab::drivers::desktop::x11
                     return mouseClickDemandSlot;
                 case grab::EventKind::MouseMove :
                     return mouseMoveDemandSlot;
+                case grab::EventKind::MouseButtonDown :
+                    return mouseButtonDownDemandSlot;
+                case grab::EventKind::MouseButtonUp :
+                    return mouseButtonUpDemandSlot;
                 default :
                     return std::nullopt;
             }
@@ -463,15 +515,19 @@ namespace grab::drivers::desktop::x11
 
     }
 
-    X11EventSource::X11EventSource( xcb_connection_t*          connection,
-                                    xcb_window_t               root,
-                                    std::uint8_t               extension_opcode,
-                                    std::vector<std::uint16_t> xtest_device_ids,
-                                    InjectionLedger&           ledger ) noexcept :
+    X11EventSource::X11EventSource(
+        xcb_connection_t*                                     connection,
+        xcb_window_t                                          root,
+        std::uint8_t                                          extension_opcode,
+        std::vector<std::uint16_t>                            xtest_device_ids,
+        std::optional<grab::platform::x11::XkbKeymapSnapshot> keymap,
+        InjectionLedger&                                      ledger
+    ) noexcept :
         connection_{ connection },
         root_{ root },
         extension_opcode_{ extension_opcode },
         xtest_device_ids_{ std::move( xtest_device_ids ) },
+        keymap_{ std::move( keymap ) },
         ledger_{ &ledger }
     {
     }
@@ -499,11 +555,22 @@ namespace grab::drivers::desktop::x11
             return std::unexpected( std::move( xtest_device_ids.error() ) );
         }
 
+        std::optional<grab::platform::x11::XkbKeymapSnapshot> keymap;
+        auto                                                  opened_keymap =
+            grab::platform::x11::make_keymap_from_connection( connection );
+        if( opened_keymap.has_value() )
+        {
+            keymap.emplace( std::move( *opened_keymap ) );
+        }
+        // Key names are additive metadata. If XKB is unavailable, observation
+        // still opens and delivers raw codes with empty names.
+
         return std::unique_ptr<X11EventSource>{
             new X11EventSource{
                                connection, root,
                                *extension_opcode,
                                std::move( *xtest_device_ids ),
+                               std::move( keymap ),
                                ledger
             }
         };
@@ -528,7 +595,11 @@ namespace grab::drivers::desktop::x11
                                                  std::vector<grab::Event>& events,
                                                  std::size_t               first_event )
     {
-        if( kind != InjectionKind::Motion )
+        if( kind !=
+            InjectionKind::Motion &&
+            kind !=
+            InjectionKind::ButtonPress &&
+            kind != InjectionKind::ButtonRelease )
         {
             return;
         }
@@ -572,6 +643,13 @@ namespace grab::drivers::desktop::x11
             if( motion != nullptr )
             {
                 motion->position = position;
+            }
+
+            auto* const button =
+                std::get_if<grab::MouseButton>( &events.at( event_index ).payload );
+            if( button != nullptr )
+            {
+                button->position = position;
             }
         }
     }
@@ -657,10 +735,17 @@ namespace grab::drivers::desktop::x11
             mask |=
                 static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_KEY_RELEASE );
         }
-        if( demand_refcounts_[mouseClickDemandSlot] > noDemand )
+        if( demand_refcounts_[mouseClickDemandSlot] >
+            noDemand ||
+            demand_refcounts_[mouseButtonDownDemandSlot] > noDemand )
         {
             mask |=
                 static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_BUTTON_PRESS );
+        }
+        if( demand_refcounts_[mouseButtonUpDemandSlot] > noDemand )
+        {
+            mask |=
+                static_cast<std::uint32_t>( XCB_INPUT_XI_EVENT_MASK_RAW_BUTTON_RELEASE );
         }
         if( demand_refcounts_[mouseMoveDemandSlot] > noDemand )
         {
@@ -737,7 +822,10 @@ namespace grab::drivers::desktop::x11
             {
                 const std::size_t          first_pending_event = pending.size();
                 const DecodedEventIdentity decoded =
-                    append_decoded_event( *raw_event, extension_opcode_, pending );
+                    append_decoded_event( *raw_event,
+                                          extension_opcode_,
+                                          keymap_.has_value() ? &*keymap_ : nullptr,
+                                          pending );
                 if( !decoded.decoded_any )
                 {
                     continue;
