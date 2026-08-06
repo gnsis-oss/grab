@@ -1,6 +1,6 @@
 // Contract tests for the closed command variant and the Step that carries it.
 //
-// Two things are pinned here. First, that every one of the 15 alternatives
+// Two things are pinned here. First, that every one of the 23 alternatives
 // reports the CommandKind it actually is — kind_of() is how the player routes,
 // so a mislabelled alternative would silently execute the wrong body. Second,
 // that Step's defaults are the safe ones: Abort, no grace, no identity.
@@ -9,6 +9,8 @@
 #include "grab/command_descriptor.hpp"
 #include "grab/pointer_button.hpp"
 #include "grab/sequence_types.hpp"
+#include "kernel/sequence/execute.hpp"
+#include "support/recording_seat.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -36,6 +38,14 @@ namespace
     using grab::sequence::KeyDownCommand;
     using grab::sequence::KeyUpCommand;
     using grab::sequence::MoveCommand;
+    using grab::sequence::OverlayAddCommand;
+    using grab::sequence::OverlayAttachCommand;
+    using grab::sequence::OverlayClearCommand;
+    using grab::sequence::OverlayDetachCommand;
+    using grab::sequence::OverlayGrabCommand;
+    using grab::sequence::OverlayReleaseCommand;
+    using grab::sequence::OverlayRemoveCommand;
+    using grab::sequence::OverlayUpdateCommand;
     using grab::sequence::PressCommand;
     using grab::sequence::ReleaseCommand;
     using grab::sequence::ScrollCommand;
@@ -44,7 +54,7 @@ namespace
     using grab::sequence::WaitCommand;
     using grab::sequence::WarpCommand;
 
-    constexpr std::size_t expectedAlternativeCount = 15U;
+    constexpr std::size_t expectedAlternativeCount = 23U;
 
     // The kind each variant alternative must report, in variant order. This is
     // the table kind_of() is checked against; writing it out separately is the
@@ -66,6 +76,14 @@ namespace
         grab::CommandKind::Drag,
         grab::CommandKind::Capture,
         grab::CommandKind::Wait,
+        grab::CommandKind::OverlayAdd,
+        grab::CommandKind::OverlayUpdate,
+        grab::CommandKind::OverlayRemove,
+        grab::CommandKind::OverlayClear,
+        grab::CommandKind::OverlayGrab,
+        grab::CommandKind::OverlayRelease,
+        grab::CommandKind::OverlayAttach,
+        grab::CommandKind::OverlayDetach,
     } );
 
     template<std::size_t... Index>
@@ -94,7 +112,7 @@ namespace
         return true;
     }
 
-    // The 15-of-30 gap: is_sequence_command must be true for exactly the kinds
+    // The 23-of-38 gap: is_sequence_command must be true for exactly the kinds
     // that have a payload struct, because the interpreter distinguishes "not
     // available as a sequence step" from "unknown op" on that answer alone.
     [[nodiscard]]
@@ -119,7 +137,7 @@ namespace
 }    // namespace
 
 TEST( CommandVariant,
-      IsClosedAtFifteenAlternatives )
+      IsClosedAtTwentyThreeAlternatives )
 {
     static_assert( std::variant_size_v<Command> == expectedAlternativeCount );
     static_assert( grab::sequence::sequenceCommandCount == expectedAlternativeCount );
@@ -157,6 +175,22 @@ TEST( CommandVariant,
     EXPECT_EQ( kind_of( Command{ DragCommand{} } ), grab::CommandKind::Drag );
     EXPECT_EQ( kind_of( Command{ CaptureCommand{} } ), grab::CommandKind::Capture );
     EXPECT_EQ( kind_of( Command{ WaitCommand{} } ), grab::CommandKind::Wait );
+    EXPECT_EQ( kind_of( Command{ OverlayAddCommand{} } ),
+               grab::CommandKind::OverlayAdd );
+    EXPECT_EQ( kind_of( Command{ OverlayUpdateCommand{} } ),
+               grab::CommandKind::OverlayUpdate );
+    EXPECT_EQ( kind_of( Command{ OverlayRemoveCommand{} } ),
+               grab::CommandKind::OverlayRemove );
+    EXPECT_EQ( kind_of( Command{ OverlayClearCommand{} } ),
+               grab::CommandKind::OverlayClear );
+    EXPECT_EQ( kind_of( Command{ OverlayGrabCommand{} } ),
+               grab::CommandKind::OverlayGrab );
+    EXPECT_EQ( kind_of( Command{ OverlayReleaseCommand{} } ),
+               grab::CommandKind::OverlayRelease );
+    EXPECT_EQ( kind_of( Command{ OverlayAttachCommand{} } ),
+               grab::CommandKind::OverlayAttach );
+    EXPECT_EQ( kind_of( Command{ OverlayDetachCommand{} } ),
+               grab::CommandKind::OverlayDetach );
 }
 
 TEST( CommandVariant,
@@ -207,6 +241,30 @@ TEST( CommandVariant,
         !grab::sequence::is_sequence_command( grab::CommandKind::OverlayTrail )
     );
     static_assert( !grab::sequence::is_sequence_command( grab::CommandKind::Play ) );
+
+    // The overlay STEPS are steps; the four overlay.* CLI verbs are not, and
+    // they are a different set of kinds with different names.
+    static_assert(
+        grab::sequence::is_sequence_command( grab::CommandKind::OverlayAdd )
+    );
+    static_assert(
+        grab::sequence::is_sequence_command( grab::CommandKind::OverlayDetach )
+    );
+    static_assert(
+        !grab::sequence::is_sequence_command( grab::CommandKind::OverlaySketch )
+    );
+    SUCCEED();
+}
+
+TEST( CommandVariant,
+      TheRecordingSeatSatisfiesEverySeam )
+{
+    // A seat that MISSES a seam still compiles: the enter() arm takes the
+    // missing-capability branch instead. So a signature drift in the overlay
+    // seam would be silent until the units built on it found every assertion
+    // empty. static_assert because a compile failure is the stronger signal.
+    static_assert( grab::kernel::sequence::PointerSeat<grab::testing::RecordingSeat> );
+    static_assert( grab::kernel::sequence::OverlaySeat<grab::testing::RecordingSeat> );
     SUCCEED();
 }
 

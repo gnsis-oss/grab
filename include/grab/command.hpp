@@ -7,22 +7,29 @@
 // rule: a third party cannot add a command type without touching this variant,
 // which is consistent with CommandKind already being a closed enum.
 //
-// THE 15-OF-30 GAP, which the interpreter depends on:
+// THE 23-OF-38 GAP, which the interpreter depends on:
 //
-// The CommandDescriptor table names 30 commands. Only the 15 alternatives
+// The CommandDescriptor table names 38 commands. Only the 23 alternatives
 // below are meaningful as sequence steps. `system.doctor`, `service.daemon`,
 // `screen.watch`, `session.open`, `screen.batch`, `image.compare`,
 // `input.drag_curve`, `screen.windows`, `window.focus`, `window.place`,
-// `system.play` and the four `overlay.*` kinds resolve through command_kind()
-// but have NO payload struct here. The interpreter must reject them as
-// "op X is not available as a sequence step" — a DIFFERENT message from
-// "unknown op X", because they are different author mistakes.
+// `system.play` and the four `overlay.*` CLI verbs (trail, shape, feedback,
+// sketch) resolve through command_kind() but have NO payload struct here. The
+// interpreter must reject them as "op X is not available as a sequence step" —
+// a DIFFERENT message from "unknown op X", because they are different author
+// mistakes.
+//
+// The eight overlay STEPS below are a different set from those four verbs and
+// share none of their names: overlay.add/update/remove/clear/grab/release/
+// attach/detach are payload-carrying steps, overlay.trail/shape/feedback/sketch
+// are interactive tools with no payload at all.
 
 #include "grab/command_descriptor.hpp"
 #include "grab/drag.hpp"
 #include "grab/enum_table.hpp"
 #include "grab/geometry/curve.hpp"
 #include "grab/geometry/point.hpp"
+#include "grab/overlay.hpp"
 #include "grab/pointer_button.hpp"
 #include "grab/sequence_types.hpp"
 
@@ -166,23 +173,106 @@ namespace grab::sequence
             std::chrono::nanoseconds     duration{};
     };
 
-    using Command                                     = std::variant<TypeCommand,
-                                                                     KeyCommand,
-                                                                     KeyDownCommand,
-                                                                     KeyUpCommand,
-                                                                     ClickCommand,
-                                                                     ClickAtCommand,
-                                                                     PressCommand,
-                                                                     ReleaseCommand,
-                                                                     ScrollCommand,
-                                                                     WarpCommand,
-                                                                     MoveCommand,
-                                                                     FollowCommand,
-                                                                     DragCommand,
-                                                                     CaptureCommand,
-                                                                     WaitCommand>;
+    // ── Overlay steps ────────────────────────────────────────
+    //
+    // `handle` is a DOCUMENT-LEVEL NAME, exactly like a step label: a readable
+    // string the run state maps to an overlay::ShapeId. It is not the identity
+    // and it is never serialized as one. An overlay.add with an empty handle is
+    // fire-and-forget — drawable, never referenced again.
+    //
+    // Nothing here carries a ShapeId, because a document is written before any
+    // scene exists. Resolving handle to ShapeId is run state, and belongs to
+    // whatever runs the sequence.
 
-    inline constexpr std::size_t sequenceCommandCount = 15U;
+    struct OverlayAddCommand
+    {
+            static constexpr CommandKind commandKind = CommandKind::OverlayAdd;
+
+            std::string                  handle{};
+            grab::overlay::Shape         shape{};
+    };
+
+    struct OverlayUpdateCommand
+    {
+            static constexpr CommandKind commandKind = CommandKind::OverlayUpdate;
+
+            std::string                  handle{};
+            grab::overlay::Shape         shape{};
+    };
+
+    // A ttl or fade lifetime expires a shape from the scene itself, so a
+    // remove may find nothing. That is a no-op, not an error: a document that
+    // wants exact add/remove accounting uses a persistent lifetime.
+    struct OverlayRemoveCommand
+    {
+            static constexpr CommandKind commandKind = CommandKind::OverlayRemove;
+
+            std::string                  handle{};
+    };
+
+    struct OverlayClearCommand
+    {
+            static constexpr CommandKind commandKind = CommandKind::OverlayClear;
+    };
+
+    // Overlay::capture_pointer, with every rule it carries: arm it when the
+    // tool becomes armed rather than at button-press, and THE CALLER OWNS THE
+    // CAPTURE — a pointer grab that outlives its owner freezes the desktop, so
+    // the unwind path must release it.
+    struct OverlayGrabCommand
+    {
+            static constexpr CommandKind commandKind = CommandKind::OverlayGrab;
+    };
+
+    struct OverlayReleaseCommand
+    {
+            static constexpr CommandKind commandKind = CommandKind::OverlayRelease;
+    };
+
+    // The shape rides the pointer until it is detached. `offset` absent means
+    // "keep the gap the shape already has" — the shape's position minus the
+    // pointer's at attach time, which is only knowable at run time — so a
+    // square picked up by its corner stays held by that corner.
+    struct OverlayAttachCommand
+    {
+            static constexpr CommandKind commandKind = CommandKind::OverlayAttach;
+
+            std::string                  handle{};
+            std::optional<grab::geometry::Point> offset{};
+    };
+
+    struct OverlayDetachCommand
+    {
+            static constexpr CommandKind commandKind = CommandKind::OverlayDetach;
+
+            std::string                  handle{};
+    };
+
+    using Command = std::variant<TypeCommand,
+                                 KeyCommand,
+                                 KeyDownCommand,
+                                 KeyUpCommand,
+                                 ClickCommand,
+                                 ClickAtCommand,
+                                 PressCommand,
+                                 ReleaseCommand,
+                                 ScrollCommand,
+                                 WarpCommand,
+                                 MoveCommand,
+                                 FollowCommand,
+                                 DragCommand,
+                                 CaptureCommand,
+                                 WaitCommand,
+                                 OverlayAddCommand,
+                                 OverlayUpdateCommand,
+                                 OverlayRemoveCommand,
+                                 OverlayClearCommand,
+                                 OverlayGrabCommand,
+                                 OverlayReleaseCommand,
+                                 OverlayAttachCommand,
+                                 OverlayDetachCommand>;
+
+    inline constexpr std::size_t sequenceCommandCount = 23U;
     static_assert( std::variant_size_v<Command> == sequenceCommandCount );
 
     [[nodiscard]]
@@ -222,6 +312,14 @@ namespace grab::sequence
             case CommandKind::Drag :
             case CommandKind::Capture :
             case CommandKind::Wait :
+            case CommandKind::OverlayAdd :
+            case CommandKind::OverlayUpdate :
+            case CommandKind::OverlayRemove :
+            case CommandKind::OverlayClear :
+            case CommandKind::OverlayGrab :
+            case CommandKind::OverlayRelease :
+            case CommandKind::OverlayAttach :
+            case CommandKind::OverlayDetach :
                 return true;
             case CommandKind::Doctor :
             case CommandKind::Daemon :

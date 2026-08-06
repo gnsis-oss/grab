@@ -82,17 +82,85 @@
 //   input.drag       "from": [x, y], "to": [x, y], "button", "options"
 //   screen.capture   exactly one of "out": "a.png" / "locator": "..."
 //   time.wait        exactly one of "ms": 250 / "ns": 250000000
+//   overlay.add      "handle": "c01" (OPTIONAL), "shape": { ... }
+//   overlay.update   "handle", "shape"
+//   overlay.remove   "handle"
+//   overlay.clear    —
+//   overlay.grab     —
+//   overlay.release  —
+//   overlay.attach   "handle", "offset": [x, y] (optional)
+//   overlay.detach   "handle"
 //
 // `options` is the DragOptions triple, omitted when it is the default:
 //   { "steps": 16, "step_dwell_ms": 8, "path": "linear" | "cubic" }
 //
-// The 15 payload structs above are the whole sequence surface. The descriptor
-// table names 30 commands; `system.doctor`, `service.daemon`, `screen.watch`,
+// ── SHAPES (design §3.2) ─────────────────────────────────────
+//
+// A `shape` carries EXACTLY ONE geometry key and any of the styling ones:
+//
+//   { "rect":    { "x": 100, "y": 100, "w": 90, "h": 90 } }
+//   { "ellipse": { "center": [300, 200], "radius": 48 } }
+//   { "ellipse": { "center": [300, 200], "radius_x": 60, "radius_y": 40 } }
+//   { "polygon": [[0, 0], [10, 0], [10, 10]] }
+//   { "path":    [ {"move": [0, 0]}, {"line": [10, 10]},
+//                  {"bezier": [[20, 0], [30, 20], [40, 10]]}, "close" ] }
+//
+// `radius` is shorthand for equal radii, and mixing it with `radius_x`/
+// `radius_y` is an error rather than a precedence rule. `"close"` is the bare
+// string form of ClosePath, the only path command with no operand. Two
+// geometry keys, or none, is an error NAMING WHAT WAS FOUND.
+//
+//   "stroke":   { "color": "#rrggbb" | "#rrggbbaa", "width": 3 }
+//   "fill":     { "color": ... }
+//   "lifetime": "persistent" | { "ttl_ms": N } | { "fade_ms": N }
+//   "band":     "annotation" | "trail"          "z": 10
+//   "animation": { "scale"|"opacity"|"translate"|"reveal": {
+//                    "easing": "out_cubic", "duration_ms": 200, ... } }
+//
+// Both `stroke` and `fill` are optional and a shape with NEITHER is legal —
+// invisible, which is a useful thing to be able to say. Colours take those two
+// forms and no others; anything else is rejected naming both. A channel's
+// `duration_ms` is required, because §4's governing rule is that no duration
+// defaults to zero. A negative extent — `w`, `h`, any radius, a stroke width —
+// is rejected too: it draws nothing and says nothing, which is exactly the
+// failure this format is worst at surfacing.
+//
+// TWO DEVIATIONS FROM §3.2, both so that to_json is total:
+//
+//   * `path` also accepts { "commands": [ ... ], "closed": true }. The array
+//     form is the whole of §3.2 and the only form written back out while
+//     `closed` is false; the object form is the only way to spell
+//     overlay::Path::closed, which closes the LAST contour rather than the
+//     active one and which a bare array cannot carry.
+//   * SpacePoint::space is never spelled and always default. A space id is run
+//     state — a document is written before any session exists — so writing one
+//     into a document would be writing down a number that means nothing yet.
+//
+// ── HANDLES ──────────────────────────────────────────────────
+//
+// `handle` is a DOCUMENT-LEVEL NAME, exactly like a step label: run state maps
+// it to an overlay::ShapeId, and it is never serialized as one. An
+// `overlay.add` with no handle is fire-and-forget — drawable, never referenced
+// again.
+//
+// A handle used by update/remove/attach/detach BEFORE its `overlay.add`, or
+// added again WHILE STILL LIVE, is a LOADER error for the same reason a
+// dangling `after` is: it cannot resolve, so the run would fail on it rather
+// than the document failing to load. Liveness is tracked in document order and
+// a remove retires the name, so reuse AFTER a remove is legal. It is not a
+// scene simulation: `overlay.clear` does not retire handles, and a ttl or fade
+// shape that expires on its own still counts as live — §3.2 already says a
+// remove that finds nothing succeeds.
+//
+// The 23 payload structs above are the whole sequence surface. The descriptor
+// table names 38 commands; `system.doctor`, `service.daemon`, `screen.watch`,
 // `session.open`, `screen.batch`, `image.compare`, `input.drag_curve`,
 // `screen.windows`, `window.focus`, `window.place`, `system.play` and the four
-// `overlay.*` kinds resolve through command_kind() but have no payload here and
-// are rejected as "is not available as a sequence step" — a DIFFERENT message
-// from "unknown op", because they are different author mistakes.
+// `overlay.*` CLI VERBS (trail, shape, feedback, sketch — a different set from
+// the eight overlay steps, sharing none of their names) resolve through
+// command_kind() but have no payload here and are rejected as "is not
+// available as a sequence step" — a DIFFERENT message from "unknown op",
+// because they are different author mistakes.
 
 #include "grab/result.hpp"
 #include "kernel/sequence/sequence.hpp"

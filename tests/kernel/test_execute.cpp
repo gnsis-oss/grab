@@ -5,18 +5,28 @@
 // caller-driven precisely so the scheduler can be tested without a display,
 // and nothing in this file can join the display-backed intermittents.
 //
-// The pointer half of the seat is grab::testing::RecordingSeat. The executor
-// also asks for keys BY NAME, for text and for capture, which the Phase 0
-// double does not provide, so SequenceSeat wraps the recorder and adds them —
-// every pointer event asserted below still comes out of RecordingSeat itself.
+// The pointer and overlay halves of the seat are grab::testing::RecordingSeat.
+// The executor also asks for keys BY NAME, for text and for capture, which the
+// recorder does not provide, so SequenceSeat wraps it and adds them — every
+// pointer event asserted below still comes out of RecordingSeat itself, and so
+// does every overlay call.
+//
+// The overlay section asserts FORWARDING and nothing more, because forwarding
+// is this layer's whole contract: the handle-to-ShapeId map and the per-tick
+// repositioning that makes overlay.attach look like a carry live in the seat.
+// The exception is overlay.grab, which owns a pointer capture that freezes the
+// entire desktop if it outlives its run — that one is asserted hard.
 
 #include "grab/command.hpp"
+#include "grab/command_descriptor.hpp"
 #include "grab/drag.hpp"
 #include "grab/geometry/curve.hpp"
 #include "grab/geometry/point.hpp"
+#include "grab/overlay.hpp"
 #include "grab/pointer_button.hpp"
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
+#include "grab/space.hpp"
 #include "kernel/sequence/execute.hpp"
 #include "support/recording_seat.hpp"
 
@@ -40,7 +50,8 @@ namespace
     using grab::kernel::sequence::CommandState;
     using grab::kernel::sequence::ExecContext;
     using grab::sequence::Status;
-    using SeatEvent = grab::testing::SeatEvent;
+    using OverlayEvent = grab::testing::OverlayEvent;
+    using SeatEvent    = grab::testing::SeatEvent;
 
     // A fabricated origin far from zero, so a test that accidentally compares
     // against a default-constructed time_point fails rather than passes.
@@ -206,6 +217,18 @@ namespace
     set_clock( ExecContext<SequenceSeat>& context,
                SequenceSeat&              seat,
                Clock::time_point          now ) noexcept
+    {
+        context.now = now;
+        seat.set_now( now );
+    }
+
+    // The overlay tests drive RecordingSeat directly — it satisfies OverlaySeat
+    // where SequenceSeat, which forwards only the pointer, keyboard, text and
+    // capture halves, does not.
+    void
+    set_clock( ExecContext<grab::testing::RecordingSeat>& context,
+               grab::testing::RecordingSeat&              seat,
+               Clock::time_point                          now ) noexcept
     {
         context.now = now;
         seat.set_now( now );
@@ -964,8 +987,9 @@ namespace
     TEST( ExecuteSeat,
           AKeyCommandOnAPointerOnlySeatFailsInsteadOfSilentlyDoingNothing )
     {
-        // The Phase 0 double is the pointer half of the contract and no more,
-        // which is exactly the seat this has to be honest about.
+        // The recorder is the pointer and overlay halves of the contract and no
+        // more — no keys by name — which is exactly the seat this has to be
+        // honest about.
         grab::testing::RecordingSeat              seat;
         ExecContext<grab::testing::RecordingSeat> context{
             .seat   = &seat,
@@ -1039,6 +1063,907 @@ namespace
         // exit() on a step that never entered is a no-op, not a stray release.
         grab::kernel::sequence::exit( command, state, context );
         EXPECT_TRUE( seat.events().empty() );
+    }
+
+    // ── overlay steps ────────────────────────────────────────
+
+    // The pointer half and nothing else. RecordingSeat cannot play this part
+    // any more — it grew the overlay capability — and the missing-capability
+    // path needs a seat that genuinely lacks the concept rather than one that
+    // merely fails.
+    class OverlaylessSeat final
+    {
+        public:
+
+            [[nodiscard]]
+            grab::Result<void>
+            move_pointer_absolute( std::int16_t,
+                                   std::int16_t )
+            {
+                ++calls_;
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            button( std::uint8_t,
+                    bool )
+            {
+                ++calls_;
+                return {};
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            flush()
+            {
+                ++calls_;
+                return {};
+            }
+
+            [[nodiscard]]
+            std::size_t
+            calls() const noexcept
+            {
+                return calls_;
+            }
+
+        private:
+
+            std::size_t calls_{ 0U };
+    };
+
+    // Every overlay call refuses, and records that it was asked. This is what
+    // proves the grab arm marks the capture held BEFORE the round trip: a grab
+    // that reports failure may still have been granted, and the unwind has to
+    // treat a capture that MIGHT be held like one that is.
+    class FailingOverlaySeat final
+    {
+        public:
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_add( std::string_view,
+                         const grab::overlay::Shape& )
+            {
+                return refuse( OverlayEvent::Op::Add );
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_update( std::string_view,
+                            const grab::overlay::Shape& )
+            {
+                return refuse( OverlayEvent::Op::Update );
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_remove( std::string_view )
+            {
+                return refuse( OverlayEvent::Op::Remove );
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_clear()
+            {
+                return refuse( OverlayEvent::Op::Clear );
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_grab()
+            {
+                return refuse( OverlayEvent::Op::Grab );
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_release()
+            {
+                return refuse( OverlayEvent::Op::Release );
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_attach( std::string_view,
+                            std::optional<grab::geometry::Point> )
+            {
+                return refuse( OverlayEvent::Op::Attach );
+            }
+
+            [[nodiscard]]
+            grab::Result<void>
+            overlay_detach( std::string_view )
+            {
+                return refuse( OverlayEvent::Op::Detach );
+            }
+
+            [[nodiscard]]
+            const std::vector<OverlayEvent::Op>&
+            attempts() const noexcept
+            {
+                return attempts_;
+            }
+
+        private:
+
+            [[nodiscard]]
+            grab::Result<void>
+            refuse( OverlayEvent::Op op )
+            {
+                attempts_.push_back( op );
+                return grab::fail( grab::ErrorCode::ProviderFailed,
+                                   "the overlay refused this mutation" );
+            }
+
+            std::vector<OverlayEvent::Op> attempts_{};
+    };
+
+    static_assert( grab::kernel::sequence::OverlaySeat<grab::testing::RecordingSeat> );
+    static_assert( grab::kernel::sequence::OverlaySeat<FailingOverlaySeat> );
+    static_assert( !grab::kernel::sequence::OverlaySeat<OverlaylessSeat> );
+    static_assert( grab::kernel::sequence::PointerSeat<OverlaylessSeat> );
+
+    constexpr double       overlayEllipseCenterX = 300.0;
+    constexpr double       overlayEllipseCenterY = 200.0;
+    constexpr double       overlayEllipseRadius  = 48.0;
+
+    constexpr double       overlayRectX          = 100.0;
+    constexpr double       overlayRectY          = 110.0;
+    constexpr double       overlayRectWidth      = 90.0;
+    constexpr double       overlayRectHeight     = 70.0;
+
+    constexpr double       overlayPolygonX       = 12.0;
+    constexpr double       overlayPolygonY       = 34.0;
+    constexpr double       overlayPolygonSpan    = 22.0;
+
+    constexpr double       overlayPathX          = 7.0;
+    constexpr double       overlayPathY          = 9.0;
+    constexpr double       overlayPathEndX       = 17.0;
+    constexpr double       overlayPathEndY       = 19.0;
+
+    constexpr std::uint8_t overlayStrokeRed      = 78U;
+    constexpr std::uint8_t overlayStrokeGreen    = 206U;
+    constexpr std::uint8_t overlayStrokeBlue     = 169U;
+    constexpr std::uint8_t overlayStrokeAlpha    = 255U;
+    constexpr float        overlayStrokeWidth    = 3.0F;
+    constexpr std::int32_t overlayZ              = 10;
+
+    // Negative on one axis on purpose: a square picked up by its corner is held
+    // by that corner, so the offset is a real vector and not a magnitude.
+    constexpr std::int32_t overlayOffsetX     = -12;
+    constexpr std::int32_t overlayOffsetY     = 5;
+
+    constexpr std::size_t  overlayOpCount     = 8U;
+    constexpr std::size_t  oneCall            = 1U;
+    constexpr std::size_t  twoCalls           = 2U;
+    constexpr std::size_t  threeCalls         = 3U;
+    constexpr std::size_t  fourCalls          = 4U;
+    constexpr std::size_t  noCalls            = 0U;
+
+    const std::string      overlayHandle      = "c01";
+    const std::string      overlayOtherHandle = "r02";
+    const std::string      overlayNoHandle;
+
+    [[nodiscard]]
+    grab::SpacePoint
+    space_point( double x,
+                 double y )
+    {
+        return grab::SpacePoint{ .x = x, .y = y, .space = {} };
+    }
+
+    // The alternative's index rather than a literal, so a new Geometry
+    // alternative cannot silently renumber these assertions into passing
+    // against the wrong figure.
+    template<typename FigureT>
+    [[nodiscard]]
+    std::size_t
+    geometry_index()
+    {
+        return grab::overlay::Geometry{ FigureT{} }.index();
+    }
+
+    [[nodiscard]]
+    grab::overlay::Shape
+    ellipse_shape()
+    {
+        return grab::overlay::Shape{
+            .geometry =
+                grab::overlay::Ellipse{
+                                       .center =
+                        space_point( overlayEllipseCenterX, overlayEllipseCenterY ),
+                                       .radius_x = overlayEllipseRadius,
+                                       .radius_y = overlayEllipseRadius
+                },
+            .stroke =
+                grab::overlay::StrokeStyle{
+                                       .color =
+                        grab::overlay::Color{
+                            .r = overlayStrokeRed,
+                            .g = overlayStrokeGreen,
+                            .b = overlayStrokeBlue,
+                            .a = overlayStrokeAlpha
+                        }, .width_px = overlayStrokeWidth
+                },
+            .fill      = std::nullopt,
+            .lifetime  = grab::overlay::Persistent{},
+            .band      = grab::overlay::Band::Annotation,
+            .z         = overlayZ,
+            .animation = std::nullopt,
+        };
+    }
+
+    [[nodiscard]]
+    grab::overlay::Shape
+    rect_shape()
+    {
+        return grab::overlay::Shape{
+            .geometry =
+                grab::overlay::Rect{
+                    .bounds =
+                        grab::SpaceRect{
+                            .x     = overlayRectX,
+                            .y     = overlayRectY,
+                            .w     = overlayRectWidth,
+                            .h     = overlayRectHeight,
+                            .space = {}
+                        }
+                },
+            // A shape with neither stroke nor fill is legal and invisible,
+            // which is a useful thing to be able to say.
+            .stroke    = std::nullopt,
+            .fill      = std::nullopt,
+            .lifetime  = grab::overlay::Persistent{},
+            .band      = grab::overlay::Band::Annotation,
+            .z         = overlayZ,
+            .animation = std::nullopt,
+        };
+    }
+
+    [[nodiscard]]
+    grab::overlay::Shape
+    polygon_shape()
+    {
+        return grab::overlay::Shape{
+            .geometry =
+                grab::overlay::Polygon{
+                    .points =
+                        { space_point( overlayPolygonX, overlayPolygonY ),
+                          space_point( overlayPolygonX + overlayPolygonSpan,
+                                       overlayPolygonY ),
+                          space_point( overlayPolygonX,
+                                       overlayPolygonY + overlayPolygonSpan ) }
+                },
+            .stroke    = std::nullopt,
+            .fill      = std::nullopt,
+            .lifetime  = grab::overlay::Persistent{},
+            .band      = grab::overlay::Band::Trail,
+            .z         = overlayZ,
+            .animation = std::nullopt,
+        };
+    }
+
+    [[nodiscard]]
+    grab::overlay::Shape
+    path_shape()
+    {
+        return grab::overlay::Shape{
+            .geometry =
+                grab::overlay::Path{
+                                    .commands =
+                        { grab::overlay::MoveTo{
+                              .point = space_point( overlayPathX, overlayPathY )
+                          },
+                          grab::overlay::LineTo{
+                              .point = space_point( overlayPathEndX, overlayPathEndY )
+                          } },
+                                    .closed = false
+                },
+            .stroke    = std::nullopt,
+            .fill      = std::nullopt,
+            .lifetime  = grab::overlay::Persistent{},
+            .band      = grab::overlay::Band::Annotation,
+            .z         = overlayZ,
+            .animation = std::nullopt,
+        };
+    }
+
+    // All eight, so a ninth overlay op cannot be added without this list — and
+    // therefore the missing-capability assertion — noticing.
+    [[nodiscard]]
+    std::vector<grab::sequence::Command>
+    every_overlay_command()
+    {
+        std::vector<grab::sequence::Command> commands;
+        commands.emplace_back( grab::sequence::OverlayAddCommand{
+            .handle = overlayHandle,
+            .shape  = ellipse_shape(),
+        } );
+        commands.emplace_back( grab::sequence::OverlayUpdateCommand{
+            .handle = overlayHandle,
+            .shape  = rect_shape(),
+        } );
+        commands.emplace_back( grab::sequence::OverlayRemoveCommand{
+            .handle = overlayHandle,
+        } );
+        commands.emplace_back( grab::sequence::OverlayClearCommand{} );
+        commands.emplace_back( grab::sequence::OverlayGrabCommand{} );
+        commands.emplace_back( grab::sequence::OverlayReleaseCommand{} );
+        commands.emplace_back( grab::sequence::OverlayAttachCommand{
+            .handle = overlayHandle,
+            .offset = std::nullopt,
+        } );
+        commands.emplace_back( grab::sequence::OverlayDetachCommand{
+            .handle = overlayHandle,
+        } );
+        return commands;
+    }
+
+    [[nodiscard]]
+    std::size_t
+    count_overlay_ops( const grab::testing::RecordingSeat& seat,
+                       OverlayEvent::Op                    op )
+    {
+        std::size_t counted = 0U;
+        for( const auto& event : seat.overlay_events() )
+        {
+            if( event.op == op )
+            {
+                ++counted;
+            }
+        }
+        return counted;
+    }
+
+    // The descriptor row is the authority on idempotence, so the test reads it
+    // rather than restating it.
+    [[nodiscard]]
+    bool
+    descriptor_is_idempotent( grab::CommandKind kind )
+    {
+        for( const auto& descriptor : grab::list_commands() )
+        {
+            if( descriptor.kind == kind )
+            {
+                return descriptor.idempotent;
+            }
+        }
+        return false;
+    }
+
+    TEST( ExecuteOverlay,
+          AddForwardsTheHandleTheGeometryAlternativeAndItsPrincipalPoint )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{
+            grab::sequence::OverlayAddCommand{
+                                              .handle = overlayHandle,
+                                              .shape  = ellipse_shape(),
+                                              }
+        };
+
+        // Instant and not blocking: a reactor-thread mutation averages 0.02 ms,
+        // and the frame is paid by the player's per-tick flush.
+        ASSERT_EQ( grab::kernel::sequence::timing_class_of( command ),
+                   grab::sequence::TimingClass::Instant );
+        ASSERT_FALSE( grab::kernel::sequence::is_blocking( command ) );
+
+        set_clock( context, seat, fabricated_start() );
+        EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Success );
+
+        ASSERT_EQ( seat.overlay_events().size(), oneCall );
+        const auto& recorded = seat.overlay_events().front();
+        EXPECT_EQ( recorded.op, OverlayEvent::Op::Add );
+        EXPECT_EQ( recorded.handle, overlayHandle );
+        EXPECT_EQ( recorded.geometry, geometry_index<grab::overlay::Ellipse>() );
+        EXPECT_DOUBLE_EQ( recorded.x, overlayEllipseCenterX );
+        EXPECT_DOUBLE_EQ( recorded.y, overlayEllipseCenterY );
+        EXPECT_FALSE( recorded.offset.has_value() );
+        EXPECT_EQ( recorded.at, fabricated_start() );
+
+        // Instant means enter() is the whole step: there is no Running state to
+        // invent, nothing for a tick to advance, and nothing to unwind.
+        EXPECT_EQ(
+            grab::kernel::sequence::tick( command, state, context, fabricated_start() ),
+            Status::Success
+        );
+        grab::kernel::sequence::interrupt( command, state, context );
+        EXPECT_EQ( seat.overlay_events().size(), oneCall );
+        EXPECT_FALSE( state.overlay_grab_held );
+        EXPECT_FALSE( state.document_hold );
+        EXPECT_FALSE( state.held );
+    }
+
+    TEST( ExecuteOverlay,
+          AddWithNoHandleIsFireAndForgetRatherThanAnError )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{
+            grab::sequence::OverlayAddCommand{
+                                              .handle = overlayNoHandle,
+                                              .shape  = rect_shape(),
+                                              }
+        };
+
+        set_clock( context, seat, fabricated_start() );
+        EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Success );
+
+        ASSERT_EQ( seat.overlay_events().size(), oneCall );
+        const auto& recorded = seat.overlay_events().front();
+        EXPECT_TRUE( recorded.handle.empty() );
+        EXPECT_EQ( recorded.geometry, geometry_index<grab::overlay::Rect>() );
+        EXPECT_DOUBLE_EQ( recorded.x, overlayRectX );
+        EXPECT_DOUBLE_EQ( recorded.y, overlayRectY );
+    }
+
+    TEST( ExecuteOverlay,
+          UpdateReplacesTheShapeUnderTheHandleItWasGiven )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{
+            grab::sequence::OverlayUpdateCommand{
+                                                 .handle = overlayOtherHandle,
+                                                 .shape  = polygon_shape(),
+                                                 }
+        };
+
+        set_clock( context, seat, fabricated_start() );
+        EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Success );
+
+        ASSERT_EQ( seat.overlay_events().size(), oneCall );
+        const auto& recorded = seat.overlay_events().front();
+        EXPECT_EQ( recorded.op, OverlayEvent::Op::Update );
+        EXPECT_EQ( recorded.handle, overlayOtherHandle );
+        EXPECT_EQ( recorded.geometry, geometry_index<grab::overlay::Polygon>() );
+        EXPECT_DOUBLE_EQ( recorded.x, overlayPolygonX );
+        EXPECT_DOUBLE_EQ( recorded.y, overlayPolygonY );
+    }
+
+    TEST( ExecuteOverlay,
+          APathShapeArrivesWithItsFirstNamedPoint )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{
+            grab::sequence::OverlayAddCommand{
+                                              .handle = overlayHandle,
+                                              .shape  = path_shape(),
+                                              }
+        };
+
+        set_clock( context, seat, fabricated_start() );
+        EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Success );
+
+        ASSERT_EQ( seat.overlay_events().size(), oneCall );
+        const auto& recorded = seat.overlay_events().front();
+        EXPECT_EQ( recorded.geometry, geometry_index<grab::overlay::Path>() );
+        EXPECT_DOUBLE_EQ( recorded.x, overlayPathX );
+        EXPECT_DOUBLE_EQ( recorded.y, overlayPathY );
+    }
+
+    TEST( ExecuteOverlay,
+          RemoveAndDetachCarryTheirHandleAndClearCarriesNone )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        set_clock( context, seat, fabricated_start() );
+
+        CommandState                  remove_state;
+        const grab::sequence::Command remove{
+            grab::sequence::OverlayRemoveCommand{
+                                                 .handle = overlayHandle,
+                                                 }
+        };
+        EXPECT_EQ( grab::kernel::sequence::enter( remove, remove_state, context ),
+                   Status::Success );
+
+        CommandState                  detach_state;
+        const grab::sequence::Command detach{
+            grab::sequence::OverlayDetachCommand{
+                                                 .handle = overlayOtherHandle,
+                                                 }
+        };
+        EXPECT_EQ( grab::kernel::sequence::enter( detach, detach_state, context ),
+                   Status::Success );
+
+        CommandState                  clear_state;
+        const grab::sequence::Command clear{ grab::sequence::OverlayClearCommand{} };
+        EXPECT_EQ( grab::kernel::sequence::enter( clear, clear_state, context ),
+                   Status::Success );
+
+        ASSERT_EQ( seat.overlay_events().size(), threeCalls );
+        EXPECT_EQ( seat.overlay_events().at( 0U ).op, OverlayEvent::Op::Remove );
+        EXPECT_EQ( seat.overlay_events().at( 0U ).handle, overlayHandle );
+        EXPECT_EQ( seat.overlay_events().at( 0U ).geometry, OverlayEvent::noGeometry );
+        EXPECT_EQ( seat.overlay_events().at( 1U ).op, OverlayEvent::Op::Detach );
+        EXPECT_EQ( seat.overlay_events().at( 1U ).handle, overlayOtherHandle );
+        EXPECT_EQ( seat.overlay_events().at( 2U ).op, OverlayEvent::Op::Clear );
+        EXPECT_TRUE( seat.overlay_events().at( 2U ).handle.empty() );
+    }
+
+    TEST( ExecuteOverlay,
+          AttachForwardsTheOffsetItWasGiven )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{
+            grab::sequence::OverlayAttachCommand{
+                                                 .handle = overlayHandle,
+                                                 .offset =
+                    grab::geometry::Point{ .x = overlayOffsetX, .y = overlayOffsetY },
+                                                 }
+        };
+
+        set_clock( context, seat, fabricated_start() );
+        EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Success );
+
+        ASSERT_EQ( seat.overlay_events().size(), oneCall );
+        const auto& recorded = seat.overlay_events().front();
+        EXPECT_EQ( recorded.op, OverlayEvent::Op::Attach );
+        EXPECT_EQ( recorded.handle, overlayHandle );
+        ASSERT_TRUE( recorded.offset.has_value() );
+        EXPECT_EQ( recorded.offset->x, overlayOffsetX );
+        EXPECT_EQ( recorded.offset->y, overlayOffsetY );
+    }
+
+    TEST( ExecuteOverlay,
+          AttachWithNoOffsetForwardsAbsenceRatherThanZero )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{
+            grab::sequence::OverlayAttachCommand{
+                                                 .handle = overlayHandle,
+                                                 .offset = std::nullopt,
+                                                 }
+        };
+
+        set_clock( context, seat, fabricated_start() );
+        EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Success );
+
+        // Absent means "keep the gap the shape already has", which only the
+        // seat can compute. Substituting (0,0) here would teleport every
+        // picked-up shape onto the pointer's hotspot.
+        ASSERT_EQ( seat.overlay_events().size(), oneCall );
+        EXPECT_FALSE( seat.overlay_events().front().offset.has_value() );
+    }
+
+    TEST( ExecuteOverlay,
+          EveryOpThatNeedsAHandleRejectsAnEmptyOneBeforeReachingTheSeat )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        set_clock( context, seat, fabricated_start() );
+
+        std::vector<grab::sequence::Command> unnamed;
+        unnamed.emplace_back( grab::sequence::OverlayUpdateCommand{
+            .handle = overlayNoHandle,
+            .shape  = rect_shape(),
+        } );
+        unnamed.emplace_back( grab::sequence::OverlayRemoveCommand{
+            .handle = overlayNoHandle,
+        } );
+        unnamed.emplace_back( grab::sequence::OverlayAttachCommand{
+            .handle = overlayNoHandle,
+            .offset = std::nullopt,
+        } );
+        unnamed.emplace_back( grab::sequence::OverlayDetachCommand{
+            .handle = overlayNoHandle,
+        } );
+        ASSERT_EQ( unnamed.size(), fourCalls );
+
+        for( const auto& command : unnamed )
+        {
+            CommandState state;
+            EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                       Status::Failure );
+        }
+
+        // Only overlay.add may omit a handle, so none of these reached the seat
+        // at all — a step that silently targeted nothing is the failure mode
+        // this rules out.
+        EXPECT_TRUE( seat.overlay_events().empty() );
+    }
+
+    TEST( ExecuteOverlay,
+          ASeatWithoutTheOverlayCapabilityFailsEveryOverlayStepCleanly )
+    {
+        OverlaylessSeat              seat;
+        ExecContext<OverlaylessSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+
+        const auto commands = every_overlay_command();
+        ASSERT_EQ( commands.size(), overlayOpCount );
+
+        for( const auto& command : commands )
+        {
+            CommandState state;
+            EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                       Status::Failure );
+            // Including overlay.grab: the unwind of a step that never grabbed
+            // anything must not crash and must not release a capture nobody
+            // owns.
+            grab::kernel::sequence::interrupt( command, state, context );
+            EXPECT_FALSE( state.overlay_grab_held );
+        }
+
+        // Failure is reported, not simulated: the pointer half of this seat was
+        // never touched either.
+        EXPECT_EQ( seat.calls(), noCalls );
+    }
+
+    TEST( ExecuteOverlay,
+          TheFourIdempotentOpsRunTwiceWithTheSameResult )
+    {
+        EXPECT_TRUE( descriptor_is_idempotent( grab::CommandKind::OverlayRemove ) );
+        EXPECT_TRUE( descriptor_is_idempotent( grab::CommandKind::OverlayClear ) );
+        EXPECT_TRUE( descriptor_is_idempotent( grab::CommandKind::OverlayRelease ) );
+        EXPECT_TRUE( descriptor_is_idempotent( grab::CommandKind::OverlayDetach ) );
+        // The other four are Never: a second add draws a second shape.
+        EXPECT_FALSE( descriptor_is_idempotent( grab::CommandKind::OverlayAdd ) );
+        EXPECT_FALSE( descriptor_is_idempotent( grab::CommandKind::OverlayUpdate ) );
+        EXPECT_FALSE( descriptor_is_idempotent( grab::CommandKind::OverlayAttach ) );
+        EXPECT_FALSE( descriptor_is_idempotent( grab::CommandKind::OverlayGrab ) );
+
+        std::vector<grab::sequence::Command> repeatable;
+        repeatable.emplace_back( grab::sequence::OverlayRemoveCommand{
+            .handle = overlayHandle,
+        } );
+        repeatable.emplace_back( grab::sequence::OverlayClearCommand{} );
+        repeatable.emplace_back( grab::sequence::OverlayReleaseCommand{} );
+        repeatable.emplace_back( grab::sequence::OverlayDetachCommand{
+            .handle = overlayHandle,
+        } );
+        ASSERT_EQ( repeatable.size(), fourCalls );
+
+        for( const auto& command : repeatable )
+        {
+            grab::testing::RecordingSeat              seat;
+            ExecContext<grab::testing::RecordingSeat> context{
+                .seat   = &seat,
+                .timers = nullptr,
+                .now    = fabricated_start(),
+            };
+            set_clock( context, seat, fabricated_start() );
+
+            CommandState first;
+            EXPECT_EQ( grab::kernel::sequence::enter( command, first, context ),
+                       Status::Success );
+            grab::kernel::sequence::exit( command, first, context );
+
+            // Removing an already-removed handle, clearing an empty scene,
+            // releasing an ungrabbed pointer and detaching an unattached shape
+            // all converge on the same end state, so the second run succeeds
+            // exactly as the first did.
+            CommandState second;
+            EXPECT_EQ( grab::kernel::sequence::enter( command, second, context ),
+                       Status::Success );
+            grab::kernel::sequence::exit( command, second, context );
+            EXPECT_EQ( seat.overlay_events().size(), twoCalls );
+        }
+    }
+
+    // ── overlay.grab: the capture that must never outlive its run ──
+
+    TEST( ExecuteOverlayGrab,
+          AnInterruptBetweenTheGrabAndItsReleaseStillReleasesTheCapture )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{ grab::sequence::OverlayGrabCommand{} };
+
+        set_clock( context, seat, fabricated_start() );
+        ASSERT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Success );
+        EXPECT_TRUE( state.overlay_grab_held );
+
+        // Deliberately NOT document_hold and NOT held: play_command.hpp
+        // classifies a step carrying either as ErrorCode::PossiblyCommitted,
+        // which is the right verdict for a half-committed button press and a
+        // lie about a grab, which commits no input at all.
+        EXPECT_FALSE( state.document_hold );
+        EXPECT_FALSE( state.held );
+
+        const auto interruptedAt = fabricated_start() + waitDuration;
+        set_clock( context, seat, interruptedAt );
+        grab::kernel::sequence::interrupt( command, state, context );
+
+        // A pointer grab that outlives its owner freezes the entire desktop,
+        // and recovery needs another X client or a VT switch.
+        ASSERT_EQ( seat.overlay_events().size(), twoCalls );
+        EXPECT_EQ( seat.overlay_events().front().op, OverlayEvent::Op::Grab );
+        EXPECT_EQ( seat.overlay_events().back().op, OverlayEvent::Op::Release );
+        EXPECT_EQ( seat.overlay_events().back().at, interruptedAt );
+        EXPECT_FALSE( state.overlay_grab_held );
+
+        // Unwinding twice must not issue a second release.
+        grab::kernel::sequence::interrupt( command, state, context );
+        EXPECT_EQ( seat.overlay_events().size(), twoCalls );
+    }
+
+    TEST( ExecuteOverlayGrab,
+          ACompletedGrabKeepsTheCaptureAndItsReleaseStepLiftsItExactlyOnce )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        set_clock( context, seat, fabricated_start() );
+
+        CommandState                  grab_state;
+        const grab::sequence::Command grabbed{ grab::sequence::OverlayGrabCommand{} };
+        ASSERT_EQ( grab::kernel::sequence::enter( grabbed, grab_state, context ),
+                   Status::Success );
+
+        // The pair is overlay.grab → overlay.release, and the first step's own
+        // exit() must not break it — the same rule that keeps a key_down from
+        // lifting the modifier a chord is built on.
+        grab::kernel::sequence::exit( grabbed, grab_state, context );
+        EXPECT_EQ( seat.overlay_events().size(), oneCall );
+        EXPECT_TRUE( grab_state.overlay_grab_held );
+
+        CommandState                  release_state;
+        const grab::sequence::Command released{
+            grab::sequence::OverlayReleaseCommand{}
+        };
+        ASSERT_EQ( grab::kernel::sequence::enter( released, release_state, context ),
+                   Status::Success );
+        grab::kernel::sequence::exit( released, release_state, context );
+
+        // Exactly one release: the normal path must not double-release.
+        EXPECT_EQ( seat.overlay_events().size(), twoCalls );
+        EXPECT_EQ( count_overlay_ops( seat, OverlayEvent::Op::Release ), oneCall );
+        EXPECT_FALSE( release_state.overlay_grab_held );
+    }
+
+    TEST( ExecuteOverlayGrab,
+          AnUnwindAfterACompletedPairReleasesOnceMoreBecauseThatIsTheSafeSide )
+    {
+        grab::testing::RecordingSeat              seat;
+        ExecContext<grab::testing::RecordingSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        set_clock( context, seat, fabricated_start() );
+
+        CommandState                  grab_state;
+        const grab::sequence::Command grabbed{ grab::sequence::OverlayGrabCommand{} };
+        ASSERT_EQ( grab::kernel::sequence::enter( grabbed, grab_state, context ),
+                   Status::Success );
+
+        CommandState                  release_state;
+        const grab::sequence::Command released{
+            grab::sequence::OverlayReleaseCommand{}
+        };
+        ASSERT_EQ( grab::kernel::sequence::enter( released, release_state, context ),
+                   Status::Success );
+
+        // Pinned because it is a design consequence rather than an accident:
+        // the two steps hold two different CommandStates, so the release step
+        // cannot clear the grab step's flag, and a later unwind of the grab
+        // step issues one further release. overlay.release is Idempotent — it
+        // is a no-op that succeeds — while the alternative, clearing the flag
+        // on the success path, would strand the capture in every run whose
+        // release step never got to run. The asymmetry decides.
+        grab::kernel::sequence::interrupt( grabbed, grab_state, context );
+        EXPECT_EQ( count_overlay_ops( seat, OverlayEvent::Op::Release ), twoCalls );
+        EXPECT_FALSE( grab_state.overlay_grab_held );
+    }
+
+    TEST( ExecuteOverlayGrab,
+          AGrabWhoseSeatCallFailedIsStillReleasedOnTheUnwind )
+    {
+        FailingOverlaySeat              seat;
+        ExecContext<FailingOverlaySeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{ grab::sequence::OverlayGrabCommand{} };
+
+        EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Failure );
+
+        // Marked before the round trip: the server may have handed this process
+        // the pointer whatever the call reported, and a capture that MIGHT be
+        // held has to be released like one that is.
+        EXPECT_TRUE( state.overlay_grab_held );
+
+        grab::kernel::sequence::interrupt( command, state, context );
+        ASSERT_EQ( seat.attempts().size(), twoCalls );
+        EXPECT_EQ( seat.attempts().front(), OverlayEvent::Op::Grab );
+        EXPECT_EQ( seat.attempts().back(), OverlayEvent::Op::Release );
+
+        // Cleared before the attempt, so a seat that keeps refusing cannot turn
+        // exit() into an unbounded retry. The failure is logged instead.
+        EXPECT_FALSE( state.overlay_grab_held );
+        grab::kernel::sequence::interrupt( command, state, context );
+        EXPECT_EQ( seat.attempts().size(), twoCalls );
+    }
+
+    TEST( ExecuteOverlay,
+          ASeatThatRefusesAMutationIsReportedAsFailureRatherThanSuccess )
+    {
+        FailingOverlaySeat              seat;
+        ExecContext<FailingOverlaySeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{
+            grab::sequence::OverlayAddCommand{
+                                              .handle = overlayHandle,
+                                              .shape  = ellipse_shape(),
+                                              }
+        };
+
+        EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Failure );
+        ASSERT_EQ( seat.attempts().size(), oneCall );
+        EXPECT_EQ( seat.attempts().front(), OverlayEvent::Op::Add );
     }
 
 }    // namespace

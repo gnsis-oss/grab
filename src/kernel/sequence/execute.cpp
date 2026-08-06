@@ -116,6 +116,42 @@ namespace grab::kernel::sequence
             );
         }
 
+        grab::sequence::Status
+        settle_overlay( grab::CommandKind         kind,
+                        std::string_view          handle,
+                        const grab::Result<void>& outcome )
+        {
+            if( !outcome )
+            {
+                note_failure( kind, "enter", outcome.error() );
+                return grab::sequence::Status::Failure;
+            }
+            // Debug rather than verbose: enter() already records the command
+            // and its status at verbose, so this adds only the handle — which
+            // is what tells "it drew the shape I named" from "it drew a
+            // shape", and is the first thing anyone asks of a scene that came
+            // out wrong.
+            log::debug(
+                [kind, handle]( auto& event )
+                {
+                    event.tag( log::tags::sequence )
+                        .value( "command", grab::command_name( kind ) )
+                        .value( "handle", handle );
+                }
+            );
+            return grab::sequence::Status::Success;
+        }
+
+        grab::sequence::Status
+        note_missing_handle( grab::CommandKind kind )
+        {
+            return note_invalid( kind,
+                                 "handle",
+                                 "this overlay step needs the handle of a shape the "
+                                 "document already named; only overlay.add may omit "
+                                 "one, and an unhandled add is fire-and-forget" );
+        }
+
         grab::Result<void>
         validate_options( const grab::input::DragOptions& options )
         {

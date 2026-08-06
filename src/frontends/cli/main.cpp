@@ -2520,6 +2520,17 @@ namespace
             case grab::CommandKind::KeyDown :
             case grab::CommandKind::KeyUp :
             case grab::CommandKind::Wait :
+            // The overlay STEPS, which are not the overlay verbs above: a
+            // shape placed by a one-shot process disappears with it, so they
+            // only mean anything inside a run that outlives them.
+            case grab::CommandKind::OverlayAdd :
+            case grab::CommandKind::OverlayUpdate :
+            case grab::CommandKind::OverlayRemove :
+            case grab::CommandKind::OverlayClear :
+            case grab::CommandKind::OverlayGrab :
+            case grab::CommandKind::OverlayRelease :
+            case grab::CommandKind::OverlayAttach :
+            case grab::CommandKind::OverlayDetach :
                 print_error( "not available as a CLI verb; use `grab play`" );
                 return usageError;
             case grab::CommandKind::Play :

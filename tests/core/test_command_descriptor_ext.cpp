@@ -24,8 +24,8 @@ namespace
     using grab::CommandKind;
     using grab::sequence::TimingClass;
 
-    constexpr std::size_t    expectedDescriptorCount = 30U;
-    constexpr std::size_t    expectedSequenceEraRows = 11U;
+    constexpr std::size_t    expectedDescriptorCount = 38U;
+    constexpr std::size_t    expectedSequenceEraRows = 19U;
     constexpr std::ptrdiff_t expectedRowsPerKind     = 1;
 
     // Every kind whose body must run on a worker: it blocks for an unbounded,
@@ -64,6 +64,17 @@ namespace
         CommandKind::OverlayShape,
         CommandKind::OverlayFeedback,
         CommandKind::OverlaySketch,
+        // The overlay steps. A mutation from the reactor thread averages
+        // 0.02 ms; the frame is paid by the player's per-tick flush, so no
+        // overlay step owns a frame's latency and none of them blocks.
+        CommandKind::OverlayAdd,
+        CommandKind::OverlayUpdate,
+        CommandKind::OverlayRemove,
+        CommandKind::OverlayClear,
+        CommandKind::OverlayGrab,
+        CommandKind::OverlayRelease,
+        CommandKind::OverlayAttach,
+        CommandKind::OverlayDetach,
     } );
 
     // A duration the document declares or the options imply, spent as
@@ -76,7 +87,8 @@ namespace
         CommandKind::Wait,
     } );
 
-    // The eleven rows the sequence work added.
+    // The nineteen rows the sequence work added: eleven input-and-time ops,
+    // then the eight overlay steps.
     constexpr auto           sequenceEraKinds = std::to_array( {
         CommandKind::Move,
         CommandKind::Warp,
@@ -89,6 +101,32 @@ namespace
         CommandKind::KeyUp,
         CommandKind::Wait,
         CommandKind::Play,
+        CommandKind::OverlayAdd,
+        CommandKind::OverlayUpdate,
+        CommandKind::OverlayRemove,
+        CommandKind::OverlayClear,
+        CommandKind::OverlayGrab,
+        CommandKind::OverlayRelease,
+        CommandKind::OverlayAttach,
+        CommandKind::OverlayDetach,
+    } );
+
+    // The overlay steps that converge on the same end state however often they
+    // run: removing an already-removed handle, clearing an empty scene,
+    // releasing an ungrabbed pointer, detaching an unattached shape.
+    constexpr auto           idempotentOverlayKinds = std::to_array( {
+        CommandKind::OverlayRemove,
+        CommandKind::OverlayClear,
+        CommandKind::OverlayRelease,
+        CommandKind::OverlayDetach,
+    } );
+
+    // A second add draws a second shape, so it is not a repeat of the first.
+    constexpr auto           neverRetriedOverlayKinds = std::to_array( {
+        CommandKind::OverlayAdd,
+        CommandKind::OverlayUpdate,
+        CommandKind::OverlayAttach,
+        CommandKind::OverlayGrab,
     } );
 
     [[nodiscard]]
@@ -161,7 +199,7 @@ namespace
 }    // namespace
 
 TEST( CommandDescriptorExt,
-      TableHoldsThirtyRows )
+      TableHoldsThirtyEightRows )
 {
     static_assert( grab::list_commands().size() == expectedDescriptorCount );
     static_assert( grab::list_commands().size() ==
@@ -271,6 +309,42 @@ TEST( CommandDescriptorExt,
     static_assert( all_rows_are( instantKinds, TimingClass::Instant, false ) );
     static_assert( all_rows_are( timedKinds, TimingClass::Timed, false ) );
     SUCCEED();
+}
+
+TEST( CommandDescriptorExt,
+      TheOverlayStepsAreInstantMutatingAndNeverBlocking )
+{
+    // Not the four overlay.* CLI verbs: those are interactive tools with no
+    // payload, and they keep their own names.
+    static_assert( grab::command_kind( "overlay.add" ) == CommandKind::OverlayAdd );
+    static_assert( grab::command_kind( "overlay.grab" ) == CommandKind::OverlayGrab );
+    static_assert( grab::command_kind( "overlay.trail" ) == CommandKind::OverlayTrail );
+    static_assert( grab::command_name( CommandKind::OverlayDetach ) ==
+                   "overlay.detach" );
+
+    for( const auto kind : idempotentOverlayKinds )
+    {
+        const auto* const row = row_for( kind );
+        ASSERT_NE( row, nullptr ) << grab::command_name( kind );
+        SCOPED_TRACE( grab::command_name( kind ) );
+        EXPECT_EQ( row->retry, grab::RetryClass::Idempotent );
+        EXPECT_TRUE( row->idempotent );
+        EXPECT_EQ( row->mutability, grab::Mutability::Mutating );
+        EXPECT_EQ( row->timing, TimingClass::Instant );
+        EXPECT_FALSE( row->blocking );
+    }
+
+    for( const auto kind : neverRetriedOverlayKinds )
+    {
+        const auto* const row = row_for( kind );
+        ASSERT_NE( row, nullptr ) << grab::command_name( kind );
+        SCOPED_TRACE( grab::command_name( kind ) );
+        EXPECT_EQ( row->retry, grab::RetryClass::Never );
+        EXPECT_FALSE( row->idempotent );
+        EXPECT_EQ( row->mutability, grab::Mutability::Mutating );
+        EXPECT_EQ( row->timing, TimingClass::Instant );
+        EXPECT_FALSE( row->blocking );
+    }
 }
 
 TEST( CommandDescriptorExt,

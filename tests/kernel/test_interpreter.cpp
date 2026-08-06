@@ -12,9 +12,15 @@
 //   * `extra_grace_ms` under `strict` LOADS and is ignored. Rejecting it would
 //     stop one document running under all three pacing modes, which is the
 //     entire point of having modes.
+//   * A shape carries EXACTLY ONE geometry key, and a shape with neither
+//     stroke nor fill is legal — invisible, which is a useful thing to say.
+//   * An overlay `handle` is a document-level name like a label: using one
+//     before its `overlay.add`, or adding it again while it is still live, is
+//     a LOADER error, while reusing one after a remove is not.
 
 #include "grab/command.hpp"
 #include "grab/command_descriptor.hpp"
+#include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
 #include "kernel/sequence/interpreter.hpp"
@@ -46,22 +52,34 @@ namespace
 
     // ── Positions ────────────────────────────────────────────
 
-    using Half                                 = grab::sequence::StepId::Half;
+    using Half                                = grab::sequence::StepId::Half;
 
-    constexpr Half             firstIndex      = 0U;
-    constexpr Half             secondIndex     = 1U;
-    constexpr Half             thirdIndex      = 2U;
-    constexpr Half             fourthIndex     = 3U;
-    constexpr Half             fifthIndex      = 4U;
-    constexpr Half             fifteenthIndex  = 14U;
+    constexpr Half             firstIndex     = 0U;
+    constexpr Half             secondIndex    = 1U;
+    constexpr Half             thirdIndex     = 2U;
+    constexpr Half             fourthIndex    = 3U;
+    constexpr Half             fifthIndex     = 4U;
+    constexpr Half             fifteenthIndex = 14U;
 
-    constexpr std::size_t      noSteps         = 0U;
-    constexpr std::size_t      oneEdge         = 1U;
-    constexpr std::size_t      twoEdges        = 2U;
-    constexpr std::size_t      twoSteps        = 2U;
-    constexpr std::size_t      threeSteps      = 3U;
-    constexpr std::size_t      fiveSteps       = 5U;
-    constexpr std::size_t      graphFaultCount = 5U;
+    // Where the eight overlay steps sit in everyOpDocument, which runs the 15
+    // input, capture and wait ops first.
+    constexpr Half             overlayUpdateIndex = 16U;
+    constexpr Half             overlayAttachIndex = 17U;
+    constexpr Half             overlayClearIndex  = 22U;
+
+    constexpr std::size_t      noSteps            = 0U;
+    constexpr std::size_t      oneEdge            = 1U;
+    constexpr std::size_t      twoEdges           = 2U;
+    constexpr std::size_t      twoSteps           = 2U;
+    constexpr std::size_t      threeSteps         = 3U;
+    constexpr std::size_t      fiveSteps          = 5U;
+    constexpr std::size_t      graphFaultCount    = 5U;
+
+    // How many ops everyOpDocument below covers — and it is an IDENTITY with
+    // sequenceCommandCount, not a number that happens to match. Every
+    // alternative of the Command variant is loadable from JSON, so an
+    // alternative added with no parser fails here instead of passing quietly.
+    constexpr std::size_t      everyOpStepCount = grab::sequence::sequenceCommandCount;
 
     // ── Payload values the assertions expect ─────────────────
 
@@ -327,7 +345,9 @@ namespace
   ]
 })";
 
-    // One step per sequence-capable command: 15 of the descriptor table's 30.
+    // One step per loadable command: 23 of the descriptor table's 38, which is
+    // every alternative of the Command variant. The eight overlay steps are
+    // the tail of it.
     constexpr std::string_view everyOpDocument = R"({
   "schema_version": 1,
   "sequence": "every-op",
@@ -352,11 +372,254 @@ namespace
       "extra_grace_ms": 400 },
     { "id": "wait",    "op": "time.wait",      "ms": 250, "on_error": "continue" },
     { "id": "shot",    "op": "screen.capture", "out": "a.png",
-      "after": ["click", "type"], "on_error": "goto:warp" }
+      "after": ["click", "type"], "on_error": "goto:warp" },
+    { "id": "oadd",     "op": "overlay.add",    "handle": "c01",
+      "shape": { "ellipse": { "center": [300, 200], "radius": 48 },
+                 "stroke": { "color": "#4ecea9", "width": 3 },
+                 "fill": { "color": "#4ecea933" }, "z": 10 } },
+    { "id": "oupdate",  "op": "overlay.update", "handle": "c01",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "lifetime": { "ttl_ms": 750 }, "band": "trail",
+                 "animation": { "opacity": { "easing": "out_cubic",
+                                             "duration_ms": 200,
+                                             "from": 0.0, "to": 1.0 } } } },
+    { "id": "oattach",  "op": "overlay.attach", "handle": "c01",
+      "offset": [-4, -6] },
+    { "id": "odetach",  "op": "overlay.detach", "handle": "c01" },
+    { "id": "ograb",    "op": "overlay.grab" },
+    { "id": "orelease", "op": "overlay.release" },
+    { "id": "oremove",  "op": "overlay.remove", "handle": "c01" },
+    { "id": "oclear",   "op": "overlay.clear" }
+  ]
+})";
+
+    // ── Overlay values the assertions expect ─────────────────
+
+    constexpr double           rectX               = 100.0;
+    constexpr double           rectY               = 100.0;
+    constexpr double           rectWidth           = 90.0;
+    constexpr double           rectHeight          = 90.0;
+    constexpr double           ellipseCenterX      = 300.0;
+    constexpr double           ellipseCenterY      = 200.0;
+    constexpr double           ellipseRadius       = 48.0;
+    constexpr double           ellipseRadiusX      = 60.0;
+    constexpr double           ellipseRadiusY      = 40.0;
+    constexpr float            strokeWidth         = 3.0F;
+    constexpr std::int32_t     shapeZ              = 10;
+    constexpr std::int32_t     attachOffsetX       = -4;
+    constexpr std::int32_t     attachOffsetY       = -6;
+
+    constexpr std::size_t      polygonPointCount   = 3U;
+    constexpr std::size_t      pathCommandCount    = 4U;
+    constexpr std::size_t      closedPathCommands  = 2U;
+    constexpr std::size_t      bezierControlCount  = 3U;
+    constexpr std::size_t      fourSteps           = 4U;
+
+    constexpr std::uint8_t     strokeRed           = 0X4EU;
+    constexpr std::uint8_t     strokeGreen         = 0XCEU;
+    constexpr std::uint8_t     strokeBlue          = 0XA9U;
+    constexpr std::uint8_t     opaqueAlphaValue    = 0XFFU;
+    constexpr std::uint8_t     fillAlphaValue      = 0X33U;
+
+    constexpr std::int64_t     ttlMilliseconds     = 750;
+    constexpr std::int64_t     fadeMilliseconds    = 250;
+    constexpr std::int64_t     channelMilliseconds = 200;
+    constexpr double           scaleFrom           = 0.5;
+    constexpr double           scaleTo             = 1.0;
+    constexpr double           opacityFrom         = 0.0;
+    constexpr double           opacityTo           = 1.0;
+    constexpr double           translateDx         = 12.0;
+    constexpr double           translateDy         = -8.0;
+    constexpr double           revealFrom          = 0.0;
+    constexpr double           revealTo            = 1.0;
+
+    constexpr std::string_view liveHandle          = "c01";
+
+    // ── Overlay message fragments ────────────────────────────
+
+    constexpr std::string_view geometryCountPhrase = "exactly one geometry key";
+    constexpr std::string_view foundNonePhrase     = "found none";
+    constexpr std::string_view rectKeyName         = "rect";
+    constexpr std::string_view ellipseKeyName      = "ellipse";
+    constexpr std::string_view colorFormsPhrase    = "'#rrggbb' or '#rrggbbaa'";
+    constexpr std::string_view beforeAddPhrase     = "before any overlay.add creates it";
+    constexpr std::string_view stillLivePhrase     = "while it is still live";
+    constexpr std::string_view negativePhrase      = "must not be negative";
+    constexpr std::string_view shapePointer        = "/steps/0/shape";
+    constexpr std::string_view colorPointer        = "/steps/0/shape/stroke/color";
+    constexpr std::string_view radiusPointer       = "/steps/0/shape/ellipse/radius";
+    constexpr std::string_view handlePointer       = "/steps/0/handle";
+    constexpr std::string_view secondHandlePointer = "/steps/1/handle";
+    constexpr std::string_view radiusKeyText       = R"("radius")";
+    constexpr std::string_view radiusXKeyText      = R"("radius_x")";
+    constexpr std::string_view handleKeyText       = R"("handle")";
+    constexpr std::string_view closedKeyText       = R"("closed")";
+
+    // ── Overlay documents ────────────────────────────────────
+
+    // One add per Geometry alternative, spelled exactly as design §3.2 does.
+    constexpr std::string_view overlayGeometriesDocument = R"({
+  "steps": [
+    { "id": "r", "op": "overlay.add", "handle": "rect-01",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } },
+    { "id": "e", "op": "overlay.add", "handle": "ellipse-01",
+      "shape": { "ellipse": { "center": [300, 200], "radius": 48 } } },
+    { "id": "o", "op": "overlay.add", "handle": "ellipse-02",
+      "shape": { "ellipse": { "center": [300, 200],
+                              "radius_x": 60, "radius_y": 40 } } },
+    { "id": "p", "op": "overlay.add", "handle": "polygon-01",
+      "shape": { "polygon": [[0, 0], [10, 0], [10, 10]] } },
+    { "id": "q", "op": "overlay.add", "handle": "path-01",
+      "shape": { "path": [ {"move": [0, 0]}, {"line": [10, 10]},
+                           {"bezier": [[20, 0], [30, 20], [40, 10]]}, "close" ] } }
+  ]
+})";
+
+    // The one deviation from §3.2's shape grammar: a path may also be written
+    // as an object, which is the only way to spell overlay::Path::closed. The
+    // array form of §3.2 cannot carry it, and a to_json that cannot write a
+    // value its own type holds is a hole in the round trip.
+    constexpr std::string_view closedPathDocument       = R"({
+  "steps": [
+    { "id": "c", "op": "overlay.add", "handle": "c1",
+      "shape": { "path": { "commands": [ {"move": [0, 0]}, {"line": [10, 10]} ],
+                           "closed": true } } }
+  ]
+})";
+
+    constexpr std::string_view ellipseShorthandDocument = R"({
+  "steps": [
+    { "id": "e", "op": "overlay.add", "handle": "e1",
+      "shape": { "ellipse": { "center": [300, 200], "radius": 48 } } }
+  ]
+})";
+
+    constexpr std::string_view overlayColorsDocument    = R"({
+  "steps": [
+    { "id": "c", "op": "overlay.add", "handle": "c1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "stroke": { "color": "#4ecea9", "width": 3 },
+                 "fill": { "color": "#4ecea933" }, "z": 10 } }
+  ]
+})";
+
+    constexpr std::string_view overlayLifetimesDocument = R"({
+  "steps": [
+    { "id": "p", "op": "overlay.add", "handle": "p1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "lifetime": "persistent" } },
+    { "id": "t", "op": "overlay.add", "handle": "t1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "lifetime": { "ttl_ms": 750 } } },
+    { "id": "f", "op": "overlay.add", "handle": "f1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "lifetime": { "fade_ms": 250 } } }
+  ]
+})";
+
+    constexpr std::string_view overlayAnimationDocument = R"({
+  "steps": [
+    { "id": "s", "op": "overlay.add", "handle": "s1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "animation": { "scale": { "easing": "in_quad",
+                                           "duration_ms": 200,
+                                           "from": 0.5, "to": 1.0 } } } },
+    { "id": "o", "op": "overlay.add", "handle": "o1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "animation": { "opacity": { "easing": "out_cubic",
+                                             "duration_ms": 200,
+                                             "from": 0.0, "to": 1.0 } } } },
+    { "id": "t", "op": "overlay.add", "handle": "t1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "animation": { "translate": { "easing": "linear",
+                                               "duration_ms": 200,
+                                               "dx": 12.0, "dy": -8.0 } } } },
+    { "id": "v", "op": "overlay.add", "handle": "v1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "animation": { "reveal": { "easing": "in_out_cubic",
+                                            "duration_ms": 200,
+                                            "axis": "y", "from_edge": "max",
+                                            "from": 0.0, "to": 1.0 } } } }
+  ]
+})";
+
+    // Neither stroke nor fill: legal, invisible, and a useful thing to be able
+    // to say. A handle is optional too — this shape is fire-and-forget.
+    constexpr std::string_view unstyledShapeDocument   = R"({
+  "steps": [
+    { "id": "u", "op": "overlay.add",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } }
+  ]
+})";
+
+    constexpr std::string_view twoGeometryKeysDocument = R"({
+  "steps": [
+    { "id": "two", "op": "overlay.add", "handle": "t1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "ellipse": { "center": [300, 200], "radius": 48 } } }
+  ]
+})";
+
+    constexpr std::string_view noGeometryKeyDocument   = R"({
+  "steps": [
+    { "id": "none", "op": "overlay.add", "handle": "n1",
+      "shape": { "stroke": { "color": "#4ecea9", "width": 3 } } }
+  ]
+})";
+
+    constexpr std::string_view badColorDocument        = R"({
+  "steps": [
+    { "id": "bad", "op": "overlay.add", "handle": "b1",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "stroke": { "color": "4ecea9", "width": 3 } } }
+  ]
+})";
+
+    constexpr std::string_view negativeRadiusDocument  = R"({
+  "steps": [
+    { "id": "neg", "op": "overlay.add", "handle": "n1",
+      "shape": { "ellipse": { "center": [300, 200], "radius": -48 } } }
+  ]
+})";
+
+    constexpr std::string_view handleBeforeAddDocument = R"({
+  "steps": [
+    { "id": "early", "op": "overlay.update", "handle": "c01",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } },
+    { "id": "late", "op": "overlay.add", "handle": "c01",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } }
+  ]
+})";
+
+    constexpr std::string_view duplicateHandleDocument = R"({
+  "steps": [
+    { "id": "first", "op": "overlay.add", "handle": "c01",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } },
+    { "id": "second", "op": "overlay.add", "handle": "c01",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } }
+  ]
+})";
+
+    // A remove retires the name, so the third step is a NEW shape wearing an
+    // old label rather than a collision.
+    constexpr std::string_view reusedHandleDocument = R"({
+  "steps": [
+    { "id": "first", "op": "overlay.add", "handle": "c01",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } },
+    { "id": "gone", "op": "overlay.remove", "handle": "c01" },
+    { "id": "again", "op": "overlay.add", "handle": "c01",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } }
   ]
 })";
 
     // ── Helpers ──────────────────────────────────────────────
+
+    [[nodiscard]]
+    const grab::overlay::Shape&
+    added_shape( const grab::sequence::Step& step )
+    {
+        return std::get<grab::sequence::OverlayAddCommand>( step.command ).shape;
+    }
 
     [[nodiscard]]
     constexpr grab::sequence::StepId
@@ -557,7 +820,7 @@ namespace
     {
         const auto parsed = parse( everyOpDocument );
         ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
-        ASSERT_EQ( parsed->steps().size(), grab::sequence::sequenceCommandCount );
+        ASSERT_EQ( parsed->steps().size(), everyOpStepCount );
 
         std::vector<grab::CommandKind> kinds;
         kinds.reserve( parsed->steps().size() );
@@ -915,8 +1178,350 @@ namespace
         ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
 
         const auto steps = parsed->steps();
-        ASSERT_EQ( steps.size(), grab::sequence::sequenceCommandCount );
+        ASSERT_EQ( steps.size(), everyOpStepCount );
         EXPECT_EQ( steps[fifteenthIndex].after.size(), twoEdges );
+    }
+
+    // ── Overlay geometry ─────────────────────────────────────
+
+    TEST( Interpreter,
+          EveryGeometryAlternativeParsesAndRoundTrips )
+    {
+        const auto parsed = parse( overlayGeometriesDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto steps = parsed->steps();
+        ASSERT_EQ( steps.size(), fiveSteps );
+
+        const auto& rect =
+            std::get<grab::overlay::Rect>( added_shape( steps[firstIndex] ).geometry );
+        EXPECT_EQ( rect.bounds.x, rectX );
+        EXPECT_EQ( rect.bounds.y, rectY );
+        EXPECT_EQ( rect.bounds.w, rectWidth );
+        EXPECT_EQ( rect.bounds.h, rectHeight );
+
+        const auto& circle = std::get<grab::overlay::Ellipse>(
+            added_shape( steps[secondIndex] ).geometry
+        );
+        EXPECT_EQ( circle.center.x, ellipseCenterX );
+        EXPECT_EQ( circle.center.y, ellipseCenterY );
+
+        const auto& oval = std::get<grab::overlay::Ellipse>(
+            added_shape( steps[thirdIndex] ).geometry
+        );
+        EXPECT_EQ( oval.radius_x, ellipseRadiusX );
+        EXPECT_EQ( oval.radius_y, ellipseRadiusY );
+
+        const auto& polygon = std::get<grab::overlay::Polygon>(
+            added_shape( steps[fourthIndex] ).geometry
+        );
+        ASSERT_EQ( polygon.points.size(), polygonPointCount );
+
+        const auto& path =
+            std::get<grab::overlay::Path>( added_shape( steps[fifthIndex] ).geometry );
+        ASSERT_EQ( path.commands.size(), pathCommandCount );
+        EXPECT_TRUE(
+            std::holds_alternative<grab::overlay::MoveTo>( path.commands[firstIndex] )
+        );
+        EXPECT_TRUE(
+            std::holds_alternative<grab::overlay::LineTo>( path.commands[secondIndex] )
+        );
+        const auto& bezier =
+            std::get<grab::overlay::BezierTo>( path.commands[thirdIndex] );
+        EXPECT_EQ( bezier.control.size(), bezierControlCount );
+
+        // The bare string form of ClosePath, the only path command with no
+        // operand.
+        EXPECT_TRUE( std::holds_alternative<grab::overlay::ClosePath>(
+            path.commands[fourthIndex]
+        ) );
+        // A ClosePath COMMAND closes the active contour; Path::closed closes
+        // the last one. The array form spells the first and not the second.
+        EXPECT_FALSE( path.closed );
+
+        expect_round_trips( overlayGeometriesDocument );
+    }
+
+    TEST( Interpreter,
+          TheRadiusShorthandExpandsToEqualRadiiAndIsWrittenBackAsShorthand )
+    {
+        const auto parsed = parse( ellipseShorthandDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto& circle = std::get<grab::overlay::Ellipse>(
+            added_shape( parsed->steps()[firstIndex] ).geometry
+        );
+        EXPECT_EQ( circle.radius_x, ellipseRadius );
+        EXPECT_EQ( circle.radius_y, ellipseRadius );
+        EXPECT_EQ( circle.radius_x, circle.radius_y );
+
+        // Equal radii write the shorthand back out, so the spelling a document
+        // used is the spelling it keeps.
+        const auto text = to_json( *parsed );
+        ASSERT_TRUE( text.has_value() ) << text.error().message;
+        EXPECT_TRUE( mentions( *text, radiusKeyText ) ) << *text;
+        EXPECT_FALSE( mentions( *text, radiusXKeyText ) ) << *text;
+
+        expect_round_trips( ellipseShorthandDocument );
+    }
+
+    TEST( Interpreter,
+          AClosedPathTakesTheObjectFormAndRoundTrips )
+    {
+        const auto parsed = parse( closedPathDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto& path = std::get<grab::overlay::Path>(
+            added_shape( parsed->steps()[firstIndex] ).geometry
+        );
+        ASSERT_EQ( path.commands.size(), closedPathCommands );
+        EXPECT_TRUE( path.closed );
+
+        // Closed paths write the object form; open ones keep §3.2's bare
+        // array, which is what every hand-written document uses.
+        expect_round_trips( closedPathDocument );
+
+        const auto text = to_json( *parsed );
+        ASSERT_TRUE( text.has_value() ) << text.error().message;
+        EXPECT_TRUE( mentions( *text, closedKeyText ) ) << *text;
+    }
+
+    TEST( Interpreter,
+          TwoGeometryKeysAreRejectedNamingBoth )
+    {
+        const std::string message = rejection_of( twoGeometryKeysDocument );
+        ASSERT_FALSE( message.empty() );
+        EXPECT_TRUE( mentions( message, geometryCountPhrase ) ) << message;
+        EXPECT_TRUE( mentions( message, rectKeyName ) ) << message;
+        EXPECT_TRUE( mentions( message, ellipseKeyName ) ) << message;
+        EXPECT_TRUE( mentions( message, shapePointer ) ) << message;
+    }
+
+    TEST( Interpreter,
+          AShapeWithNoGeometryKeyIsRejected )
+    {
+        const std::string message = rejection_of( noGeometryKeyDocument );
+        ASSERT_FALSE( message.empty() );
+        EXPECT_TRUE( mentions( message, geometryCountPhrase ) ) << message;
+        EXPECT_TRUE( mentions( message, foundNonePhrase ) ) << message;
+        EXPECT_TRUE( mentions( message, shapePointer ) ) << message;
+    }
+
+    TEST( Interpreter,
+          ANegativeRadiusIsRejectedAtItsOwnPointer )
+    {
+        const std::string message = rejection_of( negativeRadiusDocument );
+        ASSERT_FALSE( message.empty() );
+        EXPECT_TRUE( mentions( message, negativePhrase ) ) << message;
+        EXPECT_TRUE( mentions( message, radiusPointer ) ) << message;
+    }
+
+    // ── Overlay styling ──────────────────────────────────────
+
+    TEST( Interpreter,
+          BothColorFormsLoadAndTheShortOneSurvivesTheRoundTrip )
+    {
+        const auto parsed = parse( overlayColorsDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto& shape = added_shape( parsed->steps()[firstIndex] );
+        ASSERT_TRUE( shape.stroke.has_value() );
+        ASSERT_TRUE( shape.fill.has_value() );
+
+        EXPECT_EQ( shape.stroke->color.r, strokeRed );
+        EXPECT_EQ( shape.stroke->color.g, strokeGreen );
+        EXPECT_EQ( shape.stroke->color.b, strokeBlue );
+        // Three channels mean opaque, which is what #rrggbb means everywhere
+        // else in grab.
+        EXPECT_EQ( shape.stroke->color.a, opaqueAlphaValue );
+        EXPECT_EQ( shape.stroke->width_px, strokeWidth );
+
+        EXPECT_EQ( shape.fill->color.r, strokeRed );
+        EXPECT_EQ( shape.fill->color.a, fillAlphaValue );
+        EXPECT_EQ( shape.z, shapeZ );
+
+        expect_round_trips( overlayColorsDocument );
+    }
+
+    TEST( Interpreter,
+          AColorThatIsNeitherFormIsRejectedNamingBothForms )
+    {
+        const std::string message = rejection_of( badColorDocument );
+        ASSERT_FALSE( message.empty() );
+        EXPECT_TRUE( mentions( message, colorFormsPhrase ) ) << message;
+        EXPECT_TRUE( mentions( message, colorPointer ) ) << message;
+    }
+
+    TEST( Interpreter,
+          AShapeWithNeitherStrokeNorFillIsLegal )
+    {
+        // Legal and invisible, which is a useful thing to be able to say — a
+        // shape can exist to be attached, measured or updated later.
+        const auto parsed = parse( unstyledShapeDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto& shape = added_shape( parsed->steps()[firstIndex] );
+        EXPECT_FALSE( shape.stroke.has_value() );
+        EXPECT_FALSE( shape.fill.has_value() );
+        EXPECT_TRUE(
+            std::holds_alternative<grab::overlay::Persistent>( shape.lifetime )
+        );
+        EXPECT_EQ( shape.band, grab::overlay::Band::Annotation );
+        EXPECT_FALSE( shape.animation.has_value() );
+
+        expect_round_trips( unstyledShapeDocument );
+    }
+
+    TEST( Interpreter,
+          AllThreeLifetimesLoadAndRoundTrip )
+    {
+        const auto parsed = parse( overlayLifetimesDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto steps = parsed->steps();
+        ASSERT_EQ( steps.size(), threeSteps );
+
+        EXPECT_TRUE( std::holds_alternative<grab::overlay::Persistent>(
+            added_shape( steps[firstIndex] ).lifetime
+        ) );
+
+        const auto& ttl =
+            std::get<grab::overlay::Ttl>( added_shape( steps[secondIndex] ).lifetime );
+        EXPECT_EQ( ttl.duration, std::chrono::milliseconds{ ttlMilliseconds } );
+
+        const auto& fade =
+            std::get<grab::overlay::Fade>( added_shape( steps[thirdIndex] ).lifetime );
+        EXPECT_EQ( fade.duration, std::chrono::milliseconds{ fadeMilliseconds } );
+
+        expect_round_trips( overlayLifetimesDocument );
+    }
+
+    TEST( Interpreter,
+          EveryAnimationChannelLoadsOnItsOwn )
+    {
+        const auto parsed = parse( overlayAnimationDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto steps = parsed->steps();
+        ASSERT_EQ( steps.size(), fourSteps );
+
+        const auto& scaled = added_shape( steps[firstIndex] ).animation;
+        ASSERT_TRUE( scaled.has_value() );
+        ASSERT_TRUE( scaled->scale.has_value() );
+        EXPECT_FALSE( scaled->opacity.has_value() );
+        EXPECT_EQ( scaled->scale->easing, grab::overlay::Easing::InQuad );
+        EXPECT_EQ( scaled->scale->duration,
+                   std::chrono::milliseconds{ channelMilliseconds } );
+        EXPECT_EQ( scaled->scale->from, scaleFrom );
+        EXPECT_EQ( scaled->scale->to, scaleTo );
+
+        const auto& faded = added_shape( steps[secondIndex] ).animation;
+        ASSERT_TRUE( faded.has_value() );
+        ASSERT_TRUE( faded->opacity.has_value() );
+        EXPECT_EQ( faded->opacity->easing, grab::overlay::Easing::OutCubic );
+        EXPECT_EQ( faded->opacity->from, opacityFrom );
+        EXPECT_EQ( faded->opacity->to, opacityTo );
+
+        const auto& moved = added_shape( steps[thirdIndex] ).animation;
+        ASSERT_TRUE( moved.has_value() );
+        ASSERT_TRUE( moved->translate.has_value() );
+        EXPECT_EQ( moved->translate->easing, grab::overlay::Easing::Linear );
+        EXPECT_EQ( moved->translate->dx, translateDx );
+        EXPECT_EQ( moved->translate->dy, translateDy );
+
+        const auto& revealed = added_shape( steps[fourthIndex] ).animation;
+        ASSERT_TRUE( revealed.has_value() );
+        ASSERT_TRUE( revealed->reveal.has_value() );
+        EXPECT_EQ( revealed->reveal->easing, grab::overlay::Easing::InOutCubic );
+        EXPECT_EQ( revealed->reveal->axis, grab::overlay::Axis::Y );
+        EXPECT_EQ( revealed->reveal->from_edge, grab::overlay::Edge::Max );
+        EXPECT_EQ( revealed->reveal->from, revealFrom );
+        EXPECT_EQ( revealed->reveal->to, revealTo );
+
+        expect_round_trips( overlayAnimationDocument );
+    }
+
+    // ── Overlay handles ──────────────────────────────────────
+
+    TEST( Interpreter,
+          AHandleUsedBeforeItsAddIsRejected )
+    {
+        // Structural, exactly like a dangling `after`: the handle cannot
+        // resolve to a ShapeId, so the run would fail on it instead of the
+        // document failing to load.
+        const std::string message = rejection_of( handleBeforeAddDocument );
+        ASSERT_FALSE( message.empty() );
+        EXPECT_TRUE( mentions( message, beforeAddPhrase ) ) << message;
+        EXPECT_TRUE( mentions( message, liveHandle ) ) << message;
+        EXPECT_TRUE( mentions( message, handlePointer ) ) << message;
+    }
+
+    TEST( Interpreter,
+          AHandleAddedTwiceWhileLiveIsRejected )
+    {
+        const std::string message = rejection_of( duplicateHandleDocument );
+        ASSERT_FALSE( message.empty() );
+        EXPECT_TRUE( mentions( message, stillLivePhrase ) ) << message;
+        EXPECT_TRUE( mentions( message, liveHandle ) ) << message;
+        EXPECT_TRUE( mentions( message, secondHandlePointer ) ) << message;
+    }
+
+    TEST( Interpreter,
+          AHandleReusedAfterItsRemoveIsLegal )
+    {
+        const auto parsed = parse( reusedHandleDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+        ASSERT_EQ( parsed->steps().size(), threeSteps );
+
+        expect_round_trips( reusedHandleDocument );
+    }
+
+    TEST( Interpreter,
+          AnAddWithNoHandleIsLegalAndWritesNoHandle )
+    {
+        const auto parsed = parse( unstyledShapeDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto& add = std::get<grab::sequence::OverlayAddCommand>(
+            parsed->steps()[firstIndex].command
+        );
+        EXPECT_TRUE( add.handle.empty() );
+
+        // Fire-and-forget: drawable, never referenced again, and no handle key
+        // invented for it on the way out.
+        const auto text = to_json( *parsed );
+        ASSERT_TRUE( text.has_value() ) << text.error().message;
+        EXPECT_FALSE( mentions( *text, handleKeyText ) ) << *text;
+    }
+
+    TEST( Interpreter,
+          OverlayPayloadsSurviveTheRoundTrip )
+    {
+        const auto parsed = parse( everyOpDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto steps = parsed->steps();
+        ASSERT_EQ( steps.size(), everyOpStepCount );
+
+        const auto& update = std::get<grab::sequence::OverlayUpdateCommand>(
+            steps[overlayUpdateIndex].command
+        );
+        EXPECT_EQ( update.handle, liveHandle );
+        EXPECT_EQ( update.shape.band, grab::overlay::Band::Trail );
+        EXPECT_EQ( std::get<grab::overlay::Ttl>( update.shape.lifetime ).duration,
+                   std::chrono::milliseconds{ ttlMilliseconds } );
+
+        const auto& attach = std::get<grab::sequence::OverlayAttachCommand>(
+            steps[overlayAttachIndex].command
+        );
+        ASSERT_TRUE( attach.offset.has_value() );
+        EXPECT_EQ( attach.offset->x, attachOffsetX );
+        EXPECT_EQ( attach.offset->y, attachOffsetY );
+
+        // overlay.clear, grab and release carry no payload at all, so the only
+        // thing to preserve is which one they are.
+        EXPECT_EQ( grab::sequence::kind_of( steps[overlayClearIndex].command ),
+                   grab::CommandKind::OverlayClear );
     }
 
     // ── load() ───────────────────────────────────────────────

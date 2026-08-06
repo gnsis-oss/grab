@@ -22,7 +22,11 @@
 // path here that assumes an operation is instantaneous:
 //
 //   Instant   warp, click, click_at, press, release, scroll, type, key,
-//             key_down, key_up   — enter() does the work and returns Success.
+//             key_down, key_up, and all eight overlay ops — enter() does the
+//             work and returns Success. A reactor-thread overlay mutation
+//             averages 0.02 ms and add_many of 56 shapes costs 1.1 ms, so an
+//             overlay step never owns a frame's latency: the frame is paid by
+//             the flush() the player issues per tick.
 //   Timed     wait, move, follow, drag  — enter() returns Running; tick()
 //             returns Running until the deadline, emitting paced waypoints.
 //   Opaque    capture — enter() returns Running and tick() polls; it finishes
@@ -36,6 +40,7 @@
 #include "grab/command_descriptor.hpp"
 #include "grab/drag.hpp"
 #include "grab/geometry/point.hpp"
+#include "grab/overlay.hpp"
 #include "grab/pointer_button.hpp"
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
@@ -128,6 +133,53 @@ namespace grab::kernel::sequence
             } -> std::same_as<std::optional<grab::Result<void>>>;
         };
 
+    // Drawing, and the pointer capture a modal drawing tool needs. A seat that
+    // does not satisfy this fails every overlay step with a logged missing
+    // capability, exactly as the pointer, keyboard, text and capture halves do
+    // — a step that silently does nothing is the failure mode this avoids.
+    //
+    // THE SEAM IS BY HANDLE, NOT BY overlay::ShapeId. A document names a shape
+    // before any scene exists, so the handle-to-ShapeId map is run state and
+    // belongs to the seat; putting a ShapeId in the document would put run
+    // state on an immutable value.
+    //
+    // overlay_grab() inherits everything Overlay::capture_pointer carries: arm
+    // it when the tool becomes armed rather than at button-press, and THE
+    // CALLER OWNS THE CAPTURE. A pointer grab that outlives its owner freezes
+    // the whole desktop, which is a worse failure than a held button, so the
+    // unwind path must reach overlay_release() however the run ends — see
+    // CommandState::overlay_grab_held, which is what makes that happen.
+    template<typename SeatT>
+    concept OverlaySeat = requires( SeatT&                               seat,
+                                    std::string_view                     handle,
+                                    const grab::overlay::Shape&          shape,
+                                    std::optional<grab::geometry::Point> offset ) {
+        {
+            seat.overlay_add( handle, shape )
+        } -> std::same_as<grab::Result<void>>;
+        {
+            seat.overlay_update( handle, shape )
+        } -> std::same_as<grab::Result<void>>;
+        {
+            seat.overlay_remove( handle )
+        } -> std::same_as<grab::Result<void>>;
+        {
+            seat.overlay_clear()
+        } -> std::same_as<grab::Result<void>>;
+        {
+            seat.overlay_grab()
+        } -> std::same_as<grab::Result<void>>;
+        {
+            seat.overlay_release()
+        } -> std::same_as<grab::Result<void>>;
+        {
+            seat.overlay_attach( handle, offset )
+        } -> std::same_as<grab::Result<void>>;
+        {
+            seat.overlay_detach( handle )
+        } -> std::same_as<grab::Result<void>>;
+    };
+
     template<typename SeatT>
     struct ExecContext
     {
@@ -161,6 +213,28 @@ namespace grab::kernel::sequence
             // so exit() releases it only when `interrupted` says no later step
             // will ever run.
             bool                                  document_hold{ false };
+            // An explicit, document-owned hold of the POINTER CAPTURE, set by
+            // overlay.grab and lifted by overlay.release. It behaves exactly
+            // like document_hold — released by exit() only when `interrupted`
+            // says no later step will do it — and it is a SEPARATE FLAG on
+            // purpose, for two reasons:
+            //
+            //   1. play_command.hpp classifies any step with `held ||
+            //      document_hold` as ErrorCode::PossiblyCommitted. That is the
+            //      right verdict for a half-committed button press and the
+            //      wrong one for a grab, which commits no input at all.
+            //   2. What is at stake differs by an order of magnitude. A
+            //      stranded button reaches the next application; a stranded
+            //      pointer grab freezes the whole desktop, and recovery needs
+            //      another X client or a VT switch.
+            //
+            // Set BEFORE the seat call, like the two above: past that point the
+            // server may have handed this process the pointer whatever the
+            // round trip reports, and a capture that MIGHT be held has to be
+            // released like one that is. overlay.release is Idempotent, so a
+            // redundant release costs nothing and a missed one costs the
+            // desktop; the asymmetry decides.
+            bool                                  overlay_grab_held{ false };
             // Set by the runner before exit() when the run is being UNWOUND —
             // interrupt, abort, or a skip over a running step — rather than
             // completing normally. Use interrupt() below and it is set for
@@ -229,6 +303,24 @@ namespace grab::kernel::sequence
         note_release( grab::CommandKind kind,
                       std::string_view  what,
                       bool              succeeded );
+
+        // One overlay mutation, reported. Every overlay op is Instant, so the
+        // seat call IS the step: there is no deadline to set, no waypoint to
+        // resume from, and nothing for a tick() to advance.
+        [[nodiscard]]
+        grab::sequence::Status
+        settle_overlay( grab::CommandKind         kind,
+                        std::string_view          handle,
+                        const grab::Result<void>& outcome );
+
+        // Every overlay op but add REQUIRES a handle: an overlay.add with an
+        // empty one is fire-and-forget by design — drawable, never referenced
+        // again — while an empty handle anywhere else names no shape at all.
+        // The loader rejects that case too, but this layer is also reached by
+        // splice() and by the CLI adapter, neither of which passes through it.
+        [[nodiscard]]
+        grab::sequence::Status
+        note_missing_handle( grab::CommandKind kind );
 
         [[nodiscard]]
         grab::Result<void>
@@ -939,6 +1031,220 @@ namespace grab::kernel::sequence
         }
 
         // ---------------------------------------------------------------
+        // The overlay arms. All eight are Instant and none is Blocking: the
+        // mutation itself averages 0.02 ms from the reactor thread, and the
+        // frame it becomes visible in is paid by the player's per-tick flush
+        // rather than by the step. So enter() returns Success or Failure,
+        // there is no Running state to invent, and only overlay.grab has an
+        // exit() of its own.
+        //
+        // What is NOT here, deliberately: the handle-to-ShapeId map, the
+        // per-tick repositioning that makes overlay.attach look like a carry,
+        // and the real Overlay adapter. All three are run state, and the seat
+        // already sees every waypoint — move_pointer_absolute is called once
+        // per waypoint — so attachment tracking belongs there. These arms
+        // forward the handle and the offset through and report what the seat
+        // answers; that is the whole of their job.
+        // ---------------------------------------------------------------
+
+        template<typename SeatT>
+        [[nodiscard]]
+        grab::sequence::Status
+        enter_command( const grab::sequence::OverlayAddCommand& command,
+                       CommandState&,
+                       ExecContext<SeatT>& context )
+        {
+            if constexpr( !OverlaySeat<SeatT> )
+            {
+                return note_unavailable( grab::CommandKind::OverlayAdd, "overlay" );
+            }
+            else
+            {
+                // The one op that may omit its handle: an unhandled add is
+                // fire-and-forget, which is a useful thing to be able to say
+                // and not an error to be corrected.
+                return settle_overlay( grab::CommandKind::OverlayAdd,
+                                       command.handle,
+                                       context.seat->overlay_add( command.handle,
+                                                                  command.shape ) );
+            }
+        }
+
+        template<typename SeatT>
+        [[nodiscard]]
+        grab::sequence::Status
+        enter_command( const grab::sequence::OverlayUpdateCommand& command,
+                       CommandState&,
+                       ExecContext<SeatT>& context )
+        {
+            if constexpr( !OverlaySeat<SeatT> )
+            {
+                return note_unavailable( grab::CommandKind::OverlayUpdate, "overlay" );
+            }
+            else
+            {
+                if( command.handle.empty() )
+                {
+                    return note_missing_handle( grab::CommandKind::OverlayUpdate );
+                }
+                return settle_overlay( grab::CommandKind::OverlayUpdate,
+                                       command.handle,
+                                       context.seat->overlay_update( command.handle,
+                                                                     command.shape ) );
+            }
+        }
+
+        template<typename SeatT>
+        [[nodiscard]]
+        grab::sequence::Status
+        enter_command( const grab::sequence::OverlayRemoveCommand& command,
+                       CommandState&,
+                       ExecContext<SeatT>& context )
+        {
+            if constexpr( !OverlaySeat<SeatT> )
+            {
+                return note_unavailable( grab::CommandKind::OverlayRemove, "overlay" );
+            }
+            else
+            {
+                if( command.handle.empty() )
+                {
+                    return note_missing_handle( grab::CommandKind::OverlayRemove );
+                }
+                // Idempotent: a ttl or fade lifetime expires a shape from the
+                // scene itself, so a remove may find nothing. The seat reports
+                // that as success, and this arm does not second-guess it.
+                return settle_overlay( grab::CommandKind::OverlayRemove,
+                                       command.handle,
+                                       context.seat->overlay_remove( command.handle ) );
+            }
+        }
+
+        template<typename SeatT>
+        [[nodiscard]]
+        grab::sequence::Status
+        enter_command( const grab::sequence::OverlayClearCommand&,
+                       CommandState&,
+                       ExecContext<SeatT>& context )
+        {
+            if constexpr( !OverlaySeat<SeatT> )
+            {
+                return note_unavailable( grab::CommandKind::OverlayClear, "overlay" );
+            }
+            else
+            {
+                return settle_overlay( grab::CommandKind::OverlayClear,
+                                       {},
+                                       context.seat->overlay_clear() );
+            }
+        }
+
+        template<typename SeatT>
+        [[nodiscard]]
+        grab::sequence::Status
+        enter_command( const grab::sequence::OverlayGrabCommand&,
+                       CommandState&       state,
+                       ExecContext<SeatT>& context )
+        {
+            if constexpr( !OverlaySeat<SeatT> )
+            {
+                return note_unavailable( grab::CommandKind::OverlayGrab, "overlay" );
+            }
+            else
+            {
+                // THE CALLER OWNS THE CAPTURE. Marked before the call, and
+                // deliberately not through document_hold — see
+                // CommandState::overlay_grab_held for both reasons. Without
+                // this line a run interrupted between overlay.grab and
+                // overlay.release leaves the pointer grabbed, which freezes
+                // the desktop for everyone, not just for grab.
+                state.overlay_grab_held = true;
+                return settle_overlay( grab::CommandKind::OverlayGrab,
+                                       {},
+                                       context.seat->overlay_grab() );
+            }
+        }
+
+        template<typename SeatT>
+        [[nodiscard]]
+        grab::sequence::Status
+        enter_command( const grab::sequence::OverlayReleaseCommand&,
+                       CommandState&       state,
+                       ExecContext<SeatT>& context )
+        {
+            if constexpr( !OverlaySeat<SeatT> )
+            {
+                return note_unavailable( grab::CommandKind::OverlayRelease, "overlay" );
+            }
+            else
+            {
+                // A release step ends with the capture down whatever it found,
+                // so its own state carries no grab into the unwind. This
+                // clears its OWN flag and cannot clear the grab step's, which
+                // lives in a different CommandState: a run unwound after a
+                // completed grab/release pair therefore issues one further,
+                // harmless release. overlay.release is Idempotent precisely so
+                // that trade is available.
+                state.overlay_grab_held = false;
+                return settle_overlay( grab::CommandKind::OverlayRelease,
+                                       {},
+                                       context.seat->overlay_release() );
+            }
+        }
+
+        template<typename SeatT>
+        [[nodiscard]]
+        grab::sequence::Status
+        enter_command( const grab::sequence::OverlayAttachCommand& command,
+                       CommandState&,
+                       ExecContext<SeatT>& context )
+        {
+            if constexpr( !OverlaySeat<SeatT> )
+            {
+                return note_unavailable( grab::CommandKind::OverlayAttach, "overlay" );
+            }
+            else
+            {
+                if( command.handle.empty() )
+                {
+                    return note_missing_handle( grab::CommandKind::OverlayAttach );
+                }
+                // The offset is forwarded exactly as the document spelled it,
+                // absence included: nullopt means "keep the gap the shape
+                // already has", which is the shape's position minus the
+                // pointer's at attach time and is knowable only where the
+                // scene is — in the seat.
+                return settle_overlay( grab::CommandKind::OverlayAttach,
+                                       command.handle,
+                                       context.seat->overlay_attach( command.handle,
+                                                                     command.offset ) );
+            }
+        }
+
+        template<typename SeatT>
+        [[nodiscard]]
+        grab::sequence::Status
+        enter_command( const grab::sequence::OverlayDetachCommand& command,
+                       CommandState&,
+                       ExecContext<SeatT>& context )
+        {
+            if constexpr( !OverlaySeat<SeatT> )
+            {
+                return note_unavailable( grab::CommandKind::OverlayDetach, "overlay" );
+            }
+            else
+            {
+                if( command.handle.empty() )
+                {
+                    return note_missing_handle( grab::CommandKind::OverlayDetach );
+                }
+                return settle_overlay( grab::CommandKind::OverlayDetach,
+                                       command.handle,
+                                       context.seat->overlay_detach( command.handle ) );
+            }
+        }
+
+        // ---------------------------------------------------------------
         // tick(): only the Timed and Opaque classes have one. The generic
         // overload covers the Instant class, which finished at enter().
         // ---------------------------------------------------------------
@@ -1077,7 +1383,7 @@ namespace grab::kernel::sequence
         }
 
         // ---------------------------------------------------------------
-        // exit(): the neutralization path. Only three commands can leave
+        // exit(): the neutralization path. Only four commands can leave
         // anything down, and the generic overload says so for the rest.
         // ---------------------------------------------------------------
 
@@ -1162,6 +1468,47 @@ namespace grab::kernel::sequence
                 if( !released )
                 {
                     note_failure( grab::CommandKind::KeyDown,
+                                  "neutralize",
+                                  released.error() );
+                }
+            }
+        }
+
+        // The one overlay op with an exit(), and the one hold in this file
+        // whose escape is worse than a stranded button: a pointer grab that
+        // outlives its owner freezes the WHOLE DESKTOP, and recovery needs
+        // another X client or a VT switch.
+        //
+        // The rule is §6.1's, unchanged — an explicit hold the document owns
+        // is released only on unwind, because overlay.grab and overlay.release
+        // are a pair and the first step's own exit() must not break it, any
+        // more than a key_down's exit() may break a chord. `interrupted` is
+        // the only thing that proves the release step will never run.
+        template<typename SeatT>
+        void
+        exit_command( const grab::sequence::OverlayGrabCommand&,
+                      CommandState&       state,
+                      ExecContext<SeatT>& context )
+        {
+            if constexpr( OverlaySeat<SeatT> )
+            {
+                if( !state.overlay_grab_held || !state.interrupted )
+                {
+                    return;
+                }
+                // Cleared before the attempt, like the drag's button: a
+                // failing seat must not turn exit() into an unbounded retry.
+                // The failure is logged, which is what a NeutralizationOutcome
+                // reports upwards — and a failed release here is the single
+                // worst thing this layer can report.
+                state.overlay_grab_held = false;
+                auto released           = context.seat->overlay_release();
+                note_release( grab::CommandKind::OverlayGrab,
+                              "pointer_capture",
+                              released.has_value() );
+                if( !released )
+                {
+                    note_failure( grab::CommandKind::OverlayGrab,
                                   "neutralize",
                                   released.error() );
                 }

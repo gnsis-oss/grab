@@ -43,6 +43,14 @@ namespace
         "input.key_up",
         "time.wait",
         "system.play",
+        "overlay.add",
+        "overlay.update",
+        "overlay.remove",
+        "overlay.clear",
+        "overlay.grab",
+        "overlay.release",
+        "overlay.attach",
+        "overlay.detach",
     } );
 
 }    // namespace
