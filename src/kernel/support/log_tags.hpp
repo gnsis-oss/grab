@@ -14,6 +14,11 @@ namespace grab::log::tags
 
     // Scheduling
     inline constexpr std::string_view reactor = "reactor";
+    inline constexpr std::string_view timer   = "timer";
+
+    // Command sequences: loading a document, and playing one
+    inline constexpr std::string_view sequence = "sequence";
+    inline constexpr std::string_view player   = "player";
 
     // Input observation
     inline constexpr std::string_view events = "events";

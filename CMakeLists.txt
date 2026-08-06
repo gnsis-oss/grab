@@ -124,6 +124,12 @@ add_library(grab_kernel STATIC
     src/kernel/capture/damage_hint_auditor.cpp
     src/kernel/capture/inject_gate.cpp
     src/kernel/scheduling/pacing_governor.cpp
+    src/kernel/scheduling/timer_thread.cpp
+    src/kernel/sequence/sequence.cpp
+    src/kernel/sequence/sequence_ops.cpp
+    src/kernel/sequence/interpreter.cpp
+    src/kernel/sequence/execute.cpp
+    src/kernel/sequence/player.cpp
     src/kernel/capture/tile_differ.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp

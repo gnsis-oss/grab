@@ -21,6 +21,20 @@ add_executable(grab_core_tests
     cli/watch_daemon_test.cpp
     cli/windows_command_test.cpp
     cli/command_table_test.cpp
+    cli/play_command_test.cpp
+    core/test_sequence_types.cpp
+    core/test_command.cpp
+    core/test_command_descriptor_ext.cpp
+    kernel/test_topological_order.cpp
+    kernel/test_waypoints.cpp
+    kernel/test_reactor_timing.cpp
+    kernel/test_drift.cpp
+    kernel/test_sequence.cpp
+    kernel/test_sequence_ops.cpp
+    kernel/test_timer_thread.cpp
+    kernel/test_interpreter.cpp
+    kernel/test_execute.cpp
+    kernel/test_player.cpp
     config/test_batch_manifest.cpp
     config/test_environment.cpp
     config/test_load.cpp
@@ -256,11 +270,21 @@ gtest_discover_tests(grab_driver_webextension_tests)
 option(GRAB_TEST_PROVISION_XVFB
     "Auto-provision Xvfb displays for X-backed tests via a CTest fixture" ON)
 
+# The two tolerance-based timing suites are labelled so a loaded machine can
+# exclude them with `ctest -LE timing`: they assert scheduler accuracy in
+# microseconds, which a busy box will not deliver. They are labelled through a
+# third discovery pass because gtest_discover_tests adds its tests at test
+# time, where set_tests_properties() at configure time cannot see them.
+set(GRAB_TIMING_TEST_FILTER "ReactorTiming.*:TimerThreadTiming.*")
+
 if(GRAB_TEST_PROVISION_XVFB)
     gtest_discover_tests(grab_core_tests TEST_FILTER "Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference:Config*.*")
     gtest_discover_tests(grab_core_tests
-        TEST_FILTER "-Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference:Config*.*"
+        TEST_FILTER "-Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference:Config*.*:${GRAB_TIMING_TEST_FILTER}"
         PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
+    gtest_discover_tests(grab_core_tests
+        TEST_FILTER "${GRAB_TIMING_TEST_FILTER}"
+        PROPERTIES LABELS "timing" FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
     add_test(NAME grab_xvfb_setup
         COMMAND ${CMAKE_COMMAND} -E env XVFB_PIDFILE=${CMAKE_BINARY_DIR}/grab-xvfb.pids
                 sh ${CMAKE_CURRENT_SOURCE_DIR}/xvfb_fixture.sh start)
@@ -287,7 +311,10 @@ if(GRAB_TEST_PROVISION_XVFB)
         DISCOVERY_MODE PRE_TEST
         PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
 else()
-    gtest_discover_tests(grab_core_tests)
+    gtest_discover_tests(grab_core_tests TEST_FILTER "-${GRAB_TIMING_TEST_FILTER}")
+    gtest_discover_tests(grab_core_tests
+        TEST_FILTER "${GRAB_TIMING_TEST_FILTER}"
+        PROPERTIES LABELS "timing")
     gtest_discover_tests(grab_integration_tests DISCOVERY_MODE PRE_TEST)
     gtest_discover_tests(grab_driver_x11_tests DISCOVERY_MODE PRE_TEST)
     gtest_discover_tests(grab_client_tests DISCOVERY_MODE PRE_TEST)

@@ -3,6 +3,7 @@
 active_kind_probe.hpp
 capability.hpp
 capture.hpp
+command.hpp
 command_descriptor.hpp
 config.hpp
 context.hpp
@@ -34,6 +35,7 @@ relation.hpp
 result.hpp
 role.hpp
 screen.hpp
+sequence_types.hpp
 session.hpp
 space.hpp
 trace.hpp

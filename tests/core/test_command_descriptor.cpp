@@ -32,6 +32,17 @@ namespace
         "overlay.shape",
         "overlay.feedback",
         "overlay.sketch",
+        "input.move",
+        "input.warp",
+        "input.follow",
+        "input.press",
+        "input.release",
+        "input.scroll",
+        "input.click_at",
+        "input.key_down",
+        "input.key_up",
+        "time.wait",
+        "system.play",
     } );
 
 }    // namespace

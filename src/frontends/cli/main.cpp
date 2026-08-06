@@ -2514,6 +2514,26 @@ namespace
                 return grab::cli::run_feedback_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::OverlaySketch :
                 return grab::cli::run_sketch_command( cli_args.subspan( 1 ) );
+            // Sequence-only ops. They are real descriptor rows so a sequence
+            // document can name them, but they are not CLI verbs: a one-shot
+            // process per waypoint is exactly the shape `grab play` exists to
+            // replace.
+            case grab::CommandKind::Move :
+            case grab::CommandKind::Warp :
+            case grab::CommandKind::Follow :
+            case grab::CommandKind::Press :
+            case grab::CommandKind::Release :
+            case grab::CommandKind::Scroll :
+            case grab::CommandKind::ClickAt :
+            case grab::CommandKind::KeyDown :
+            case grab::CommandKind::KeyUp :
+            case grab::CommandKind::Wait :
+                print_error( "not available as a CLI verb; use `grab play`" );
+                return usageError;
+            case grab::CommandKind::Play :
+                // Phase 2 replaces this with play_command.cpp.
+                print_error( "grab play is not implemented yet" );
+                return runtimeError;
             case grab::CommandKind::Count :
                 break;
         }
