@@ -18,15 +18,15 @@ namespace grab::diag
     {
 
         // A frame budget of 16.7 ms, matching the overlay's 60 FPS governor.
-        constexpr auto          frameBudget = std::chrono::nanoseconds{ 16'666'667 };
+        constexpr auto   frameBudget = std::chrono::nanoseconds{ 16'666'667 };
 
-        // An event more than this far ahead of the calibration point is not
-        // plausibly the same clock domain — treat the calibration as stale
-        // rather than reporting a nonsense latency.
-        constexpr std::uint32_t maximumServerSkewMs = 60'000U;
+        // An event that resolves this far from now, in either direction, is
+        // not plausibly the input this frame reflects — treat the correlation
+        // as stale rather than reporting a nonsense latency.
+        constexpr auto   maximumServerSkew = std::chrono::milliseconds{ 60'000 };
 
-        constexpr double        p50Fraction         = 0.50;
-        constexpr double        p95Fraction         = 0.95;
+        constexpr double p50Fraction       = 0.50;
+        constexpr double p95Fraction       = 0.95;
 
         struct Store
         {
@@ -107,6 +107,20 @@ namespace grab::diag
             };
         }
 
+        // Difference between two readings of the server's 32-bit millisecond
+        // counter, as a signed span. Unsigned subtraction wraps exactly as the
+        // counter does, so casting the wrapped difference to int32 recovers a
+        // forward *or* backward delta of up to ±24.8 days with no rollover
+        // special case — and without mistaking an event 5 ms in the past for
+        // one 49.7 days in the future.
+        [[nodiscard]]
+        std::int64_t
+        server_step_ms( std::uint32_t from,
+                        std::uint32_t to ) noexcept
+        {
+            return static_cast<std::int32_t>( to - from );
+        }
+
         // maybe_unused because at a compile ceiling of Off every emitter lambda
         // in log_report is discarded, leaving this with no caller — which is
         // the intended outcome, not a mistake.
@@ -123,11 +137,32 @@ namespace grab::diag
     // ── ServerClock ────────────────────────────────────────
 
     void
-    ServerClock::calibrate( std::uint32_t server_ms ) noexcept
+    ServerClock::calibrate( std::uint32_t                         server_ms,
+                            std::chrono::steady_clock::time_point observed_at ) noexcept
     {
-        base_steady_    = std::chrono::steady_clock::now();
-        base_server_ms_ = server_ms;
-        calibrated_     = true;
+        if( !calibrated_ )
+        {
+            origin_            = observed_at;
+            elapsed_server_ms_ = 0;
+            last_server_ms_    = server_ms;
+            calibrated_        = true;
+            offsets_.feed( std::chrono::nanoseconds::zero() );
+            return;
+        }
+
+        elapsed_server_ms_ += server_step_ms( last_server_ms_, server_ms );
+        last_server_ms_     = server_ms;
+
+        // The residual this sample contributes: how far the local clock has
+        // moved beyond the server's own account of the same interval. A wild
+        // sample distorts one residual and nothing else — the next sample's
+        // step subtracts the same error back out, and the median discards the
+        // one that was wrong.
+        const auto residual =
+            ( observed_at - origin_ ) - std::chrono::milliseconds{ elapsed_server_ms_ };
+        offsets_.feed(
+            std::chrono::duration_cast<std::chrono::nanoseconds>( residual )
+        );
     }
 
     std::optional<std::chrono::steady_clock::time_point>
@@ -137,15 +172,24 @@ namespace grab::diag
         {
             return std::nullopt;
         }
-        // Unsigned subtraction wraps, which is exactly what the server's
-        // 32-bit millisecond counter does, so a forward difference across a
-        // wrap comes out right without special-casing it.
-        const std::uint32_t delta_ms = server_ms - base_server_ms_;
-        if( delta_ms > maximumServerSkewMs )
+
+        const auto elapsed_ms =
+            elapsed_server_ms_ + server_step_ms( last_server_ms_, server_ms );
+        const auto instant =
+            origin_ + std::chrono::milliseconds{ elapsed_ms } + offsets_.shift();
+
+        // Staleness is a question about the local clock, not about the
+        // calibration point: an event is worth reporting a latency for when it
+        // resolves to an instant near now. Measuring it from the first sample
+        // instead would make a session's own age the disqualifier, so that
+        // every event past minute one resolved to nothing.
+        const auto now  = std::chrono::steady_clock::now();
+        const auto skew = instant > now ? instant - now : now - instant;
+        if( skew > maximumServerSkew )
         {
             return std::nullopt;
         }
-        return base_steady_ + std::chrono::milliseconds{ delta_ms };
+        return instant;
     }
 
     // ── Samples ────────────────────────────────────────────

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "sequence": "extra-grace-under-strict",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "first",  "op": "input.warp",  "to": [5, 5],        "extra_grace_ms": 750 },
+    { "id": "second", "op": "input.click", "after": ["first"],  "extra_grace_ms": 1200 },
+    { "id": "third",  "op": "time.wait",   "ms": 10,
+      "after": ["second"], "extra_grace_ms": 0 },
+    { "id": "fourth", "op": "input.type",  "text": "ignored grace",
+      "after": ["third"],  "extra_grace_ms": 65535 }
+  ]
+}

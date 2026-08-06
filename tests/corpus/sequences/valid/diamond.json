@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "sequence": "diamond",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "a", "op": "input.warp", "to": [100, 100] },
+    { "id": "b", "op": "input.click", "after": ["a"] },
+    { "id": "c", "op": "screen.capture", "out": "diamond-c.png", "after": ["a"] },
+    { "id": "d", "op": "input.type", "text": "joined", "after": ["b", "c"] }
+  ]
+}

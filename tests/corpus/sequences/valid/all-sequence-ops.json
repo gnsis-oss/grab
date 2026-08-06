@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "sequence": "all-sequence-ops",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "warp",     "op": "input.warp",     "to": [10, 20] },
+    { "id": "move",     "op": "input.move",     "to": [120, 240] },
+    { "id": "follow",   "op": "input.follow",
+      "curve": [[120, 240], [200, 100], [300, 260], [400, 240]] },
+    { "id": "click",    "op": "input.click" },
+    { "id": "click_at", "op": "input.click_at", "at": [400, 240] },
+    { "id": "press",    "op": "input.press" },
+    { "id": "release",  "op": "input.release" },
+    { "id": "scroll",   "op": "input.scroll",   "dx": 0, "dy": 3 },
+    { "id": "drag",     "op": "input.drag",     "from": [400, 240], "to": [560, 320] },
+    { "id": "type",     "op": "input.type",     "text": "all ops" },
+    { "id": "key",      "op": "input.key",      "key": "Return" },
+    { "id": "key_down", "op": "input.key_down", "key": "Shift_L" },
+    { "id": "key_up",   "op": "input.key_up",   "key": "Shift_L" },
+    { "id": "wait",     "op": "time.wait",      "ms": 50 },
+    { "id": "capture",  "op": "screen.capture", "out": "all-ops.png" }
+  ]
+}

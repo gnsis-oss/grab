@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "sequence": "login-flow",
+  "pacing": { "mode": "grace", "grace_ms": 80 },
+  "steps": [
+    { "id": "move",  "op": "input.move",     "to": [640, 400] },
+    { "id": "wait",  "op": "time.wait",      "ms": 250 },
+    { "id": "click", "op": "input.click",    "button": "left" },
+    { "id": "shot",  "op": "screen.capture", "out": "a.png", "after": ["click"] },
+    { "id": "type",  "op": "input.type",     "text": "hi",   "after": ["click"],
+      "extra_grace_ms": 400 }
+  ]
+}

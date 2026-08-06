@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "sequence": "chord-ctrl-c",
+  "pacing": { "mode": "grace", "grace_ms": 20 },
+  "steps": [
+    { "id": "ctrl_down", "op": "input.key_down", "key": "Control_L" },
+    { "id": "c",         "op": "input.key",      "key": "c", "after": ["ctrl_down"] },
+    { "id": "ctrl_up",   "op": "input.key_up",   "key": "Control_L", "after": ["c"] }
+  ]
+}

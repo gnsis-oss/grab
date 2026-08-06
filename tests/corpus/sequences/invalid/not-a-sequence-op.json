@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "sequence": "not-a-sequence-op",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "fine",   "op": "input.warp", "to": [1, 2] },
+    { "id": "doctor", "op": "system.doctor" }
+  ]
+}

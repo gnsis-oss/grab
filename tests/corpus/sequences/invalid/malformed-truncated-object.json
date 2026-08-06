@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "sequence": "malformed-truncated-object",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "first",  "op": "input.warp",  "to": [3, 4] },
+    { "id": "second", "op": "input.click", "after": ["first"

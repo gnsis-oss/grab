@@ -1,0 +1,8 @@
+{
+  schema_version: 1,
+  sequence: "malformed-unquoted-key",
+  pacing: { mode: "strict", grace_ms: 0 },
+  steps: [
+    { id: "only", op: "input.click" }
+  ]
+}

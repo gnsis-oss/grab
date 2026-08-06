@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "sequence": "unicode-type",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "ascii",          "op": "input.type", "text": "plain ascii baseline" },
+    { "id": "latin_2byte",    "op": "input.type", "text": "Grüße, naïve façade — Ærøskøbing" },
+    { "id": "greek_cyrillic", "op": "input.type", "text": "Ελληνικά Кириллица" },
+    { "id": "cjk_3byte",      "op": "input.type", "text": "日本語テキスト 中文字符 한국어" },
+    { "id": "precomposed",    "op": "input.type", "text": "é à ö ñ ç" },
+    { "id": "decomposed",     "op": "input.type", "text": "é à ö ñ ç" },
+    { "id": "stacked_marks",  "op": "input.type", "text": "ẕ̧́̈" },
+    { "id": "emoji_4byte",    "op": "input.type", "text": "👍🏽 🧑🏿‍🚀 👨‍👩‍👧‍👦 🇯🇵" },
+    { "id": "rtl_arabic",     "op": "input.type", "text": "مرحبا بالعالم" },
+    { "id": "rtl_hebrew",     "op": "input.type", "text": "שלום עולם" },
+    { "id": "bidi_mixed",     "op": "input.type", "text": "start مرحبا 123 end" },
+    { "id": "bidi_override",  "op": "input.type", "text": "before ‮reversed‬ after" },
+    { "id": "zero_width",     "op": "input.type", "text": "a​b‍c﻿d" },
+    { "id": "escapes",        "op": "input.type", "text": "tab\there\nnewline\\backslash\"quote\"" },
+    { "id": "u_escapes",      "op": "input.type", "text": "\u0065\u0301 \u00e9 \u4e2d\u6587" },
+    { "id": "surrogate_pair", "op": "input.type", "text": "\ud83d\udc4d\ud83c\udffd" }
+  ]
+}
