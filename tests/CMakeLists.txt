@@ -99,6 +99,7 @@ target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMA
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
 target_compile_definitions(grab_core_tests PRIVATE
     GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs"
+    GRAB_SEQUENCE_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus/sequences"
     GRAB_PROFILES_DIR="${CMAKE_SOURCE_DIR}/profiles")
 include(GoogleTest)
 

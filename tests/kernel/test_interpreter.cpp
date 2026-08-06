@@ -1578,4 +1578,42 @@ namespace
             << parsed.error().message;
     }
 
+    // Every VALID corpus document must survive load -> to_json -> load.
+    //
+    // The round-trip cases above use inline literals, which means the documents
+    // that would actually break a serializer were covered nowhere: linear-500
+    // (500 steps, implicit edges), unicode-type (NFD, ZWJ, RTL, surrogate-pair
+    // escapes) and every shape document. A literal duplicated from a corpus file
+    // also drifts from it silently, because nothing keeps the two in sync.
+    TEST( Interpreter,
+          EveryValidCorpusDocumentRoundTrips )
+    {
+        const std::filesystem::path validDir =
+            std::filesystem::path{ GRAB_SEQUENCE_CORPUS_DIR } / "valid";
+        ASSERT_TRUE( std::filesystem::is_directory( validDir ) ) << validDir.string();
+
+        std::size_t checked = 0U;
+        for( const auto& entry : std::filesystem::directory_iterator{ validDir } )
+        {
+            if( !entry.is_regular_file() || entry.path().extension() != ".json" )
+            {
+                continue;
+            }
+
+            std::ifstream input{ entry.path(), std::ios::binary };
+            ASSERT_TRUE( input ) << entry.path().string();
+            const std::string document{
+                std::istreambuf_iterator<char>{ input },
+                std::istreambuf_iterator<char>{},
+            };
+
+            SCOPED_TRACE( entry.path().filename().string() );
+            expect_round_trips( document );
+            ++checked;
+        }
+
+        // A glob that silently matches nothing would make this test vacuous.
+        EXPECT_GT( checked, 0U );
+    }
+
 }    // namespace
