@@ -1,6 +1,8 @@
 #include "kernel/scheduling/timer_thread.hpp"
+#include "kernel/support/diag.hpp"
 #include "kernel/support/log.hpp"
 #include "kernel/support/log_tags.hpp"
+#include "kernel/support/step_diag.hpp"
 
 // clang-format off
 #include <algorithm>
@@ -13,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <poll.h>
+#include <string_view>
 #include <sys/eventfd.h>
 #include <sys/timerfd.h>
 #include <sys/types.h>
@@ -45,11 +48,19 @@ namespace grab::kernel::scheduling
 
         constexpr std::int64_t       nanosecondsPerSecond = 1'000'000'000;
 
+        // What it costs to time a call is two clock reads plus a lock
+        // acquisition, so the per-call tallies are gated and vanish below
+        // Verbose. Wake latency and the counters are NOT gated: run() already
+        // reads the clock to decide what expired and already holds the lock
+        // over the vectors being measured, so they are obtained for nothing.
+        constexpr grab::log::Level   callTimingLevel = grab::log::Level::Verbose;
+        constexpr bool         callTimingEnabled = grab::log::enabled( callTimingLevel );
+
         // An itimerspec whose it_value is {0,0} DISARMS the timer, so a
         // deadline at or before the CLOCK_MONOTONIC epoch must be nudged to the
         // smallest representable positive absolute time instead of being
         // silently turned into "never".
-        constexpr std::int64_t       earliestArmableNanoseconds = 1;
+        constexpr std::int64_t earliestArmableNanoseconds = 1;
 
         [[nodiscard]]
         constexpr int
@@ -142,6 +153,17 @@ namespace grab::kernel::scheduling
             void
             stop() noexcept;
 
+            void
+            snapshot_instrument( grab::diag::Instrument& into ) const noexcept;
+
+            [[nodiscard]]
+            ScheduleCounters
+            counters() const noexcept;
+
+            [[nodiscard]]
+            std::chrono::nanoseconds
+            worst_wake_latency() const noexcept;
+
         private:
 
             struct Entry
@@ -149,6 +171,28 @@ namespace grab::kernel::scheduling
                     Token                                 token{};
                     std::chrono::steady_clock::time_point deadline{};
             };
+
+            // Records a per-call duration, taking the ONE mutex to do it.
+            // Compiled out below callTimingLevel, lock included. Never called
+            // with mutex_ already held -- the whole point of doing it here
+            // rather than through a diag::Measure at function scope is that a
+            // Measure would record on destruction, which is after the caller's
+            // scoped_lock has already been released.
+            void
+            record_call( std::string_view         name,
+                         std::chrono::nanoseconds elapsed ) noexcept
+            {
+                if constexpr( callTimingEnabled )
+                {
+                    const std::scoped_lock lock{ mutex_ };
+                    instrument_.record( name, elapsed );
+                }
+                else
+                {
+                    static_cast<void>( name );
+                    static_cast<void>( elapsed );
+                }
+            }
 
             // The internal thread body. It waits, it moves expired tokens into
             // due_, and it makes wake_fd_ readable. It calls nothing the caller
@@ -177,21 +221,38 @@ namespace grab::kernel::scheduling
             drain_eventfd( int descriptor ) const noexcept;
 
             void
-                               drain_timer_fd() const noexcept;
+                                   drain_timer_fd() const noexcept;
 
             // One mutex, and only one: every piece of shared state below is
             // under it. A second lock is what produced grab's only real TSan
             // finding (the EventBus / StateSnapshotProvider inversion), so
             // there is no second lock to order against.
-            mutable std::mutex mutex_;
+            mutable std::mutex     mutex_;
 
             // The frontier is 2–10 timers wide (design §4.8), so a flat vector
             // with a linear scan beats a heap and keeps cancel() O(n) without a
             // side index.
-            std::vector<Entry> armed_;
-            std::vector<Token> due_;
-            Token              next_token_ = firstToken;
-            bool               stopping_   = false;
+            std::vector<Entry>     armed_;
+            std::vector<Token>     due_;
+            Token                  next_token_ = firstToken;
+            bool                   stopping_   = false;
+
+            // Everything the class knows about its own accuracy, under the
+            // same mutex as the state it is measured from -- so a snapshot is
+            // never half a run behind the queue it describes.
+            grab::diag::Instrument instrument_{};
+            ScheduleCounters       counters_{};
+
+            // The deadline the timerfd is currently programmed for, as last
+            // decided by collect_due_locked. Kept because "did this arm() beat
+            // the wait already in flight" is otherwise an O(n) rescan of
+            // armed_ on the hot path, and because the answer must be about
+            // what the TIMER is set to rather than about what is merely queued.
+            std::optional<std::chrono::steady_clock::time_point> timer_armed_for_{};
+
+            // stop() is idempotent and the destructor calls it again, so the
+            // summary needs its own latch or a run reports itself twice.
+            bool                                                 summarised_ = false;
 
             // Set once during construction, before worker_ exists, and read
             // unsynchronised afterwards: thread creation is the happens-before
@@ -281,7 +342,11 @@ namespace grab::kernel::scheduling
     TimerThread::Token
     TimerThread::Impl::arm( std::chrono::steady_clock::time_point deadline )
     {
-        Token token = firstToken;
+        const grab::diag::Scope<callTimingLevel> timing;
+
+        Token                                    token  = firstToken;
+        std::size_t                              depth  = noEntries;
+        bool                                     nearer = false;
         {
             const std::scoped_lock lock{ mutex_ };
             token        = next_token_;
@@ -291,6 +356,20 @@ namespace grab::kernel::scheduling
                 return token;
             }
             armed_.push_back( Entry{ .token = token, .deadline = deadline } );
+
+            // Measured here rather than after the lock is dropped: a depth
+            // read outside it would be a different queue than the one this
+            // arm() joined.
+            depth  = armed_.size();
+            nearer = timer_armed_for_.has_value() && deadline < *timer_armed_for_;
+
+            ++counters_.arms;
+            counters_.armedDepthTotal += static_cast<std::uint64_t>( depth );
+            counters_.deepestArmed     = std::max( counters_.deepestArmed, depth );
+            if( nearer )
+            {
+                ++counters_.nearerRearms;
+            }
         }
 
         // Level-triggered and written after the state change, so a thread
@@ -304,19 +383,30 @@ namespace grab::kernel::scheduling
             {
                 event.tag( grab::log::tags::timer )
                     .value( "op", "arm" )
-                    .value( "token", token );
+                    .value( "token", token )
+                    .value( "deadline_ns",
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                deadline.time_since_epoch()
+                            )
+                                .count() )
+                    .value( "armed", depth )
+                    .value( "nearer", nearer );
             }
         );
+        record_call( timer_tally::arm, timing.elapsed() );
         return token;
     }
 
     void
     TimerThread::Impl::cancel( Token token )
     {
-        std::size_t disarmed    = noEntries;
-        std::size_t undelivered = noEntries;
+        const grab::diag::Scope<callTimingLevel> timing;
+
+        std::size_t                              disarmed    = noEntries;
+        std::size_t                              undelivered = noEntries;
         {
             const std::scoped_lock lock{ mutex_ };
+            ++counters_.cancels;
             disarmed = std::erase_if( armed_,
                                       [token]( const Entry& entry )
                                       {
@@ -340,6 +430,7 @@ namespace grab::kernel::scheduling
                     .value( "undelivered", undelivered );
             }
         );
+        record_call( timer_tally::cancel, timing.elapsed() );
     }
 
     int
@@ -351,10 +442,35 @@ namespace grab::kernel::scheduling
     std::vector<TimerThread::Token>
     TimerThread::Impl::drain()
     {
-        std::vector<Token>     taken;
-        const std::scoped_lock lock{ mutex_ };
-        taken.swap( due_ );
-        drain_eventfd( wake_fd_ );
+        const grab::diag::Scope<callTimingLevel> timing;
+
+        std::vector<Token>                       taken;
+        {
+            const std::scoped_lock lock{ mutex_ };
+
+            const std::size_t      depth = due_.size();
+            ++counters_.drains;
+            counters_.dueDepthTotal += static_cast<std::uint64_t>( depth );
+            counters_.deepestDue     = std::max( counters_.deepestDue, depth );
+            if( depth == noEntries )
+            {
+                // A wake that delivered nothing. The syscall, the lock and the
+                // round trip were spent either way, so this is the honest
+                // count of what the pacing loop paid for nothing.
+                ++counters_.spuriousDrains;
+            }
+
+            taken.swap( due_ );
+            drain_eventfd( wake_fd_ );
+
+            if constexpr( callTimingEnabled )
+            {
+                // Recorded inside the lock rather than through record_call:
+                // the lock is already held, and re-taking it would price the
+                // second acquisition into the first one's measurement.
+                instrument_.record( timer_tally::drain, timing.elapsed() );
+            }
+        }
         return taken;
     }
 
@@ -378,6 +494,75 @@ namespace grab::kernel::scheduling
                 // Nothing left to do at teardown; noexcept is the contract.
             }
         }
+
+        // The one line a human gets for free, without asking for --trace or
+        // reading a single verbose record: did the deadlines hold. Emitted
+        // once -- stop() is idempotent and the destructor calls it again.
+        ScheduleCounters totals{};
+        auto             worst = std::chrono::nanoseconds::zero();
+        auto             mean  = std::chrono::nanoseconds::zero();
+        {
+            const std::scoped_lock lock{ mutex_ };
+            if( summarised_ )
+            {
+                return;
+            }
+            summarised_ = true;
+            totals      = counters_;
+            for( const auto& tally : instrument_.tallies() )
+            {
+                if( tally.name == timer_tally::wakeLatency )
+                {
+                    worst = tally.longest;
+                    mean  = tally.mean();
+                }
+            }
+        }
+
+        grab::log::nominal(
+            [&totals, worst, mean]( auto& event )
+            {
+                event.tag( grab::log::tags::timer )
+                    .value( "op", "summary" )
+                    .value( "arms", totals.arms )
+                    .value( "fires", totals.fires )
+                    .value( "cancels", totals.cancels )
+                    .value( "drains", totals.drains )
+                    .value( "spurious", totals.spuriousDrains )
+                    .value( "rearms", totals.nearerRearms )
+                    .value( "deepest_armed", totals.deepestArmed )
+                    .value( "worst_wake_ns", worst.count() )
+                    .value( "mean_wake_ns", mean.count() );
+            }
+        );
+    }
+
+    void
+    TimerThread::Impl::snapshot_instrument( grab::diag::Instrument& into ) const noexcept
+    {
+        const std::scoped_lock lock{ mutex_ };
+        into = instrument_;
+    }
+
+    ScheduleCounters
+    TimerThread::Impl::counters() const noexcept
+    {
+        const std::scoped_lock lock{ mutex_ };
+        return counters_;
+    }
+
+    std::chrono::nanoseconds
+    TimerThread::Impl::worst_wake_latency() const noexcept
+    {
+        const std::scoped_lock lock{ mutex_ };
+        for( const auto& tally : instrument_.tallies() )
+        {
+            if( tally.name == timer_tally::wakeLatency )
+            {
+                return tally.longest;
+            }
+        }
+        return std::chrono::nanoseconds::zero();
     }
 
     void
@@ -441,19 +626,48 @@ namespace grab::kernel::scheduling
     std::optional<std::chrono::steady_clock::time_point>
     TimerThread::Impl::collect_due_locked( std::chrono::steady_clock::time_point now )
     {
+        // WAKE LATENCY IS MEASURED HERE, AND COSTS NOTHING. `now` was read
+        // once by run() to decide what expired at all, so the gap between a
+        // token's requested deadline and the instant this thread noticed it
+        // had passed is a subtraction of two values already in hand -- no
+        // extra clock read on the hot path, which is why it is unconditional.
+        //
+        // It cannot be negative: the predicate only collects entries whose
+        // deadline is at or before `now`.
+        //
         // erase_if applies the predicate exactly once per element, in order,
         // which is what makes collecting the expired tokens inside it correct
         // rather than merely convenient.
-        const auto expired = std::erase_if( armed_,
-                                            [&]( const Entry& entry )
-                                            {
-                                                if( entry.deadline > now )
-                                                {
-                                                    return false;
-                                                }
-                                                due_.push_back( entry.token );
-                                                return true;
-                                            } );
+        auto       worst = std::chrono::nanoseconds::zero();
+        const auto expired =
+            std::erase_if( armed_,
+                           [&]( const Entry& entry )
+                           {
+                               if( entry.deadline > now )
+                               {
+                                   return false;
+                               }
+                               const auto latency =
+                                   std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       now - entry.deadline
+                                   );
+                               instrument_.record( timer_tally::wakeLatency, latency );
+                               worst = std::max( worst, latency );
+                               ++counters_.fires;
+
+                               grab::log::verbose(
+                                   [&entry, latency]( auto& event )
+                                   {
+                                       event.tag( grab::log::tags::timer )
+                                           .value( "op", "fire" )
+                                           .value( "token", entry.token )
+                                           .value( "latency_ns", latency.count() );
+                                   }
+                               );
+
+                               due_.push_back( entry.token );
+                               return true;
+                           } );
 
         if( expired > noEntries )
         {
@@ -464,7 +678,8 @@ namespace grab::kernel::scheduling
                     event.tag( grab::log::tags::timer )
                         .value( "op", "expire" )
                         .value( "count", expired )
-                        .value( "armed", armed_.size() );
+                        .value( "armed", armed_.size() )
+                        .value( "worst_ns", worst.count() );
                 }
             );
         }
@@ -472,8 +687,12 @@ namespace grab::kernel::scheduling
         const auto earliest = std::ranges::min_element( armed_, {}, &Entry::deadline );
         if( earliest == armed_.end() )
         {
+            timer_armed_for_.reset();
             return std::nullopt;
         }
+        // What the caller is about to program the timerfd with, which is the
+        // only thing a later arm() can meaningfully be "nearer" than.
+        timer_armed_for_ = earliest->deadline;
         return earliest->deadline;
     }
 
@@ -603,6 +822,25 @@ namespace grab::kernel::scheduling
     TimerThread::stop() noexcept
     {
         impl_->stop();
+    }
+
+    const grab::diag::Instrument&
+    TimerThread::instrument() const noexcept
+    {
+        impl_->snapshot_instrument( snapshot_ );
+        return snapshot_;
+    }
+
+    ScheduleCounters
+    TimerThread::counters() const noexcept
+    {
+        return impl_->counters();
+    }
+
+    std::chrono::nanoseconds
+    TimerThread::worst_wake_latency() const noexcept
+    {
+        return impl_->worst_wake_latency();
     }
 
 }    // namespace grab::kernel::scheduling

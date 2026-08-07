@@ -25,6 +25,9 @@
 #include "grab/sequence_types.hpp"
 #include "kernel/sequence/interpreter.hpp"
 #include "kernel/sequence/sequence.hpp"
+#include "kernel/sequence/sequence_ops.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/step_diag.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -1614,6 +1617,263 @@ namespace
 
         // A glob that silently matches nothing would make this test vacuous.
         EXPECT_GT( checked, 0U );
+    }
+
+    // ── load instrumentation ──────────────────────────────
+    //
+    // Loading is where a 500-step document becomes a graph, and until now
+    // nothing said how long any part of that took or how big the result was.
+    // Both are asserted here as structured values.
+
+    constexpr bool loadTimingCompiledIn =
+        grab::diag::Measure<grab::log::Level::Nominal>::enabled;
+
+    // A diamond that also carries a handle and a paced move, so one document
+    // exercises every counter: root -> {move, wait} -> tail.
+    constexpr std::string_view          instrumentedDocument = R"({
+  "sequence": "instrumented",
+  "steps": [
+    { "id": "root", "op": "overlay.add", "handle": "c01",
+      "shape": { "rect": { "x": 0, "y": 0, "w": 10, "h": 10 } } },
+    { "id": "left", "op": "input.move", "to": [10, 10],
+      "options": { "steps": 8, "step_dwell_ms": 5 }, "after": ["root"] },
+    { "id": "right", "op": "time.wait", "ms": 250, "after": ["root"] },
+    { "id": "tail", "op": "overlay.remove", "handle": "c01",
+      "after": ["left", "right"] }
+  ]
+})";
+
+    constexpr std::string_view          instrumentedFileName = "instrumented.json";
+    constexpr std::uint64_t             onePass              = 1U;
+    constexpr std::uint64_t             twoPasses            = 2U;
+    constexpr std::uint64_t             fourStepPasses       = 4U;
+    constexpr std::size_t               noTallies            = 0U;
+    constexpr std::size_t               oneHandle            = 1U;
+    constexpr std::size_t               fourLabels           = 4U;
+    constexpr std::size_t               fourEdges            = 4U;
+    constexpr std::size_t               diamondDepth         = 3U;
+    constexpr std::size_t               diamondFanOut        = 2U;
+    constexpr std::size_t               diamondFanIn         = 2U;
+    constexpr std::size_t               oneDeclared          = 1U;
+    constexpr std::size_t               threeUndeclared      = 3U;
+    constexpr std::size_t               oneDerivable         = 1U;
+    constexpr std::chrono::milliseconds diamondWait{ 250 };
+    constexpr std::chrono::milliseconds diamondMove{ 40 };
+
+    // linear-500.json: 500 steps, no `after` anywhere, so the implicit
+    // document-order edges make it one chain of 499 edges and depth 500.
+    constexpr std::string_view          linearCorpusName    = "linear-500.json";
+    constexpr std::size_t               linearSteps         = 500U;
+    constexpr std::size_t               linearEdges         = 499U;
+    constexpr std::size_t               linearDepth         = 500U;
+    constexpr std::size_t               linearLabels        = 50U;
+    constexpr std::size_t               linearWaits         = 100U;
+    constexpr std::size_t               linearUndeclared    = 400U;
+    constexpr std::size_t               linearChainWidth    = 1U;
+    constexpr std::uint64_t             linearPayloadPasses = 500U;
+
+    // Phases the LOADER owns. build, graph, topology and labels are asserted
+    // in test_sequence.cpp, which is where build() lives.
+    constexpr auto                      loaderPhases = std::to_array( {
+        grab::kernel::sequence::phase::document,
+        grab::kernel::sequence::phase::json,
+        grab::kernel::sequence::phase::labels,
+        grab::kernel::sequence::phase::step,
+        grab::kernel::sequence::phase::payload,
+        grab::kernel::sequence::phase::handles,
+        grab::kernel::sequence::phase::after,
+        grab::kernel::sequence::phase::graph,
+        grab::kernel::sequence::phase::topology,
+        grab::kernel::sequence::phase::build,
+    } );
+
+    [[nodiscard]]
+    const grab::diag::Tally*
+    tally_for( const grab::diag::Instrument& instrument,
+               std::string_view              name )
+    {
+        for( const auto& tally : instrument.tallies() )
+        {
+            if( tally.name == name )
+            {
+                return &tally;
+            }
+        }
+        return nullptr;
+    }
+
+    TEST( Interpreter,
+          ParsingTalliesEveryLoadPhase )
+    {
+        grab::kernel::sequence::reset_load_instrument();
+
+        const auto parsed = parse( instrumentedDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto& instrument = grab::kernel::sequence::load_instrument();
+        EXPECT_FALSE( instrument.overflowed() );
+
+        if constexpr( !loadTimingCompiledIn )
+        {
+            EXPECT_EQ( instrument.tallies().size(), noTallies );
+            return;
+        }
+
+        for( const auto name : loaderPhases )
+        {
+            const auto* const tally = tally_for( instrument, name );
+            ASSERT_NE( tally, nullptr ) << name;
+            EXPECT_GE( tally->calls, onePass ) << name;
+            EXPECT_LE( tally->shortest, tally->longest ) << name;
+        }
+
+        // The per-step phases are measured once per step, which is what gives
+        // them a min and a max: one pathological payload among four cheap ones
+        // shows up as a max far from the mean instead of vanishing into a sum.
+        for( const auto name :
+             { grab::kernel::sequence::phase::step,
+               grab::kernel::sequence::phase::payload,
+               grab::kernel::sequence::phase::handles,
+               grab::kernel::sequence::phase::after } )
+        {
+            const auto* const tally = tally_for( instrument, name );
+            ASSERT_NE( tally, nullptr ) << name;
+            EXPECT_EQ( tally->calls, fourStepPasses ) << name;
+        }
+
+        // A step's iteration contains its payload, handle and `after` work,
+        // so what is left over is the scaffolding — and the nesting has to
+        // hold for that subtraction to mean anything.
+        const auto* const perStep =
+            tally_for( instrument, grab::kernel::sequence::phase::step );
+        const auto* const payloads =
+            tally_for( instrument, grab::kernel::sequence::phase::payload );
+        const auto* const named =
+            tally_for( instrument, grab::kernel::sequence::phase::handles );
+        const auto* const edges =
+            tally_for( instrument, grab::kernel::sequence::phase::after );
+        ASSERT_NE( perStep, nullptr );
+        ASSERT_NE( payloads, nullptr );
+        ASSERT_NE( named, nullptr );
+        ASSERT_NE( edges, nullptr );
+        EXPECT_GE( perStep->total, payloads->total + named->total + edges->total );
+
+        // Label indexing happens twice per load and is tallied under one name:
+        // the loader's pre-pass, which lets `after` name a step further down,
+        // and build()'s own duplicate check.
+        const auto* const labelPasses =
+            tally_for( instrument, grab::kernel::sequence::phase::labels );
+        ASSERT_NE( labelPasses, nullptr );
+        EXPECT_EQ( labelPasses->calls, twoPasses );
+
+        // The document phase is the wall time and must cover the JSON parse
+        // and the build it contains. It is NOT their sum — the tallies nest.
+        const auto* const whole =
+            tally_for( instrument, grab::kernel::sequence::phase::document );
+        const auto* const json =
+            tally_for( instrument, grab::kernel::sequence::phase::json );
+        const auto* const built =
+            tally_for( instrument, grab::kernel::sequence::phase::build );
+        ASSERT_NE( whole, nullptr );
+        ASSERT_NE( json, nullptr );
+        ASSERT_NE( built, nullptr );
+        EXPECT_EQ( whole->calls, onePass );
+        EXPECT_GE( whole->total, json->total + built->total );
+    }
+
+    // load() reads bytes before it parses them, and the two are timed apart:
+    // a document off a cold filesystem and one that is expensive to interpret
+    // look identical from outside load().
+    TEST( Interpreter,
+          LoadTalliesTheFileReadSeparately )
+    {
+        const auto path = scratch_file( instrumentedFileName );
+        {
+            std::ofstream output{ path, std::ios::binary };
+            ASSERT_TRUE( output.is_open() ) << path.string();
+            output << instrumentedDocument;
+        }
+
+        grab::kernel::sequence::reset_load_instrument();
+        const auto      loaded = load( path );
+        std::error_code error;
+        std::filesystem::remove( path, error );
+        ASSERT_TRUE( loaded.has_value() ) << loaded.error().message;
+
+        if constexpr( loadTimingCompiledIn )
+        {
+            const auto* const read =
+                tally_for( grab::kernel::sequence::load_instrument(),
+                           grab::kernel::sequence::phase::read );
+            ASSERT_NE( read, nullptr );
+            EXPECT_EQ( read->calls, onePass );
+        }
+        else
+        {
+            EXPECT_EQ( grab::kernel::sequence::load_instrument().tallies().size(),
+                       noTallies );
+        }
+    }
+
+    // The statistics the nominal record is built from, asserted as values.
+    // A diamond separates depth from step count and fan-out from edge count,
+    // and the paced move is the step whose duration planned() refuses to
+    // derive even though its own options fix it at 8 x 5 ms.
+    TEST( Interpreter,
+          LoadingProducesTheDocumentStatistics )
+    {
+        const auto parsed = parse( instrumentedDocument );
+        ASSERT_TRUE( parsed.has_value() ) << parsed.error().message;
+
+        const auto stats = grab::kernel::sequence::statistics( *parsed );
+        EXPECT_EQ( stats.steps, fourSteps );
+        EXPECT_EQ( stats.edges, fourEdges );
+        EXPECT_EQ( stats.labels, fourLabels );
+        EXPECT_EQ( stats.handles, oneHandle );
+        EXPECT_EQ( stats.depth, diamondDepth );
+        EXPECT_EQ( stats.max_fan_out, diamondFanOut );
+        EXPECT_EQ( stats.max_fan_in, diamondFanIn );
+        EXPECT_EQ( stats.declared_durations, oneDeclared );
+        EXPECT_EQ( stats.undeclared_durations, threeUndeclared );
+        EXPECT_EQ( stats.derivable_durations, oneDerivable );
+        EXPECT_EQ( stats.declared_total, std::chrono::nanoseconds{ diamondWait } );
+        EXPECT_EQ( stats.derivable_total, std::chrono::nanoseconds{ diamondMove } );
+    }
+
+    // The 500-step corpus document, which is the one that says whether the
+    // counters mean anything at scale: no `after` anywhere, so the implicit
+    // document-order edges make it a single chain with no parallelism at all.
+    TEST( Interpreter,
+          StatisticsOfTheFiveHundredStepCorpusDocument )
+    {
+        const std::filesystem::path path =
+            std::filesystem::path{ GRAB_SEQUENCE_CORPUS_DIR } /
+            "valid" /
+            linearCorpusName;
+        ASSERT_TRUE( std::filesystem::is_regular_file( path ) ) << path.string();
+
+        grab::kernel::sequence::reset_load_instrument();
+        const auto loaded = load( path );
+        ASSERT_TRUE( loaded.has_value() ) << loaded.error().message;
+
+        const auto stats = grab::kernel::sequence::statistics( *loaded );
+        EXPECT_EQ( stats.steps, linearSteps );
+        EXPECT_EQ( stats.edges, linearEdges );
+        EXPECT_EQ( stats.depth, linearDepth );
+        EXPECT_EQ( stats.labels, linearLabels );
+        EXPECT_EQ( stats.max_fan_out, linearChainWidth );
+        EXPECT_EQ( stats.max_fan_in, linearChainWidth );
+        EXPECT_EQ( stats.declared_durations, linearWaits );
+        EXPECT_EQ( stats.undeclared_durations, linearUndeclared );
+
+        if constexpr( loadTimingCompiledIn )
+        {
+            const auto* const payload =
+                tally_for( grab::kernel::sequence::load_instrument(),
+                           grab::kernel::sequence::phase::payload );
+            ASSERT_NE( payload, nullptr );
+            EXPECT_EQ( payload->calls, linearPayloadPasses );
+        }
     }
 
 }    // namespace

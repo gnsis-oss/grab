@@ -10,8 +10,10 @@
 #include "grab/space.hpp"
 #include "kernel/sequence/interpreter.hpp"
 #include "kernel/sequence/sequence.hpp"
+#include "kernel/sequence/sequence_ops.hpp"
 #include "kernel/support/log.hpp"
 #include "kernel/support/log_tags.hpp"
+#include "kernel/support/step_diag.hpp"
 
 #include <algorithm>
 #include <array>
@@ -382,6 +384,25 @@ namespace grab::kernel::sequence
                 std::string_view pointer,
                 std::string_view reason )
         {
+            // Every rejection in the loader funnels through here, so this one
+            // call site is the whole of "why did this document not load" —
+            // pointer, subject and reason, before any caller has a chance to
+            // wrap or lose it. Verbose rather than nominal: on a document
+            // being iterated by hand this fires once, but a caller probing
+            // several candidate documents wants it opt-in.
+            log::verbose(
+                [&scope, pointer, reason]( auto& event )
+                {
+                    event.tag( log::tags::sequence )
+                        .value( "rejected", pointer )
+                        .value( "origin",
+                                scope.origin.empty() ? std::string_view{ "<memory>" }
+                                                     : scope.origin )
+                        .value( "subject", scope.subject )
+                        .value( "reason", reason );
+                }
+            );
+
             std::string message{ scope.origin };
             message.append( pointer );
             message.append( ": " );
@@ -3332,6 +3353,15 @@ namespace grab::kernel::sequence
         parse_document( std::string_view json,
                         std::string_view origin )
         {
+            diag::Instrument& instrument = detail::load_instrument_storage();
+            // The wall time of a load, against which every phase below is a
+            // share. It is NOT the sum of them — build's own tally already
+            // contains the graph and topology ones.
+            const diag::Measure<log::Level::Nominal> documentTiming{
+                instrument,
+                phase::document
+            };
+
             const Scope scope{
                 .origin  = origin,
                 .pointer = std::string{ documentBase },
@@ -3339,13 +3369,23 @@ namespace grab::kernel::sequence
             };
 
             Json document;
-            try
             {
-                document = Json::parse( json.begin(), json.end() );
-            }
-            catch( const Json::parse_error& error )
-            {
-                return reject( scope, rootPointer, error.what() );
+                // nlohmann's own parse of the raw bytes, timed apart from
+                // everything grab does with the result: a document that is
+                // slow to LOAD and one that is slow to INTERPRET want
+                // different fixes.
+                const diag::Measure<log::Level::Nominal> jsonTiming{
+                    instrument,
+                    phase::json
+                };
+                try
+                {
+                    document = Json::parse( json.begin(), json.end() );
+                }
+                catch( const Json::parse_error& error )
+                {
+                    return reject( scope, rootPointer, error.what() );
+                }
             }
 
             if( !document.is_object() )
@@ -3415,41 +3455,47 @@ namespace grab::kernel::sequence
             // down the document as long as the result is still acyclic.
             LabelMap                 labels;
             std::vector<std::string> stepLabels( stepNodes.size() );
-            for( std::size_t index = 0U; index < stepNodes.size(); ++index )
             {
-                const Json&       node    = stepNodes.at( index );
-                const std::string pointer = step_pointer( index );
-                if( !node.is_object() )
+                const diag::Measure<log::Level::Nominal> labelTiming{
+                    instrument,
+                    phase::labels
+                };
+                for( std::size_t index = 0U; index < stepNodes.size(); ++index )
                 {
-                    return reject( scope, pointer, "must be an object" );
-                }
+                    const Json&       node    = stepNodes.at( index );
+                    const std::string pointer = step_pointer( index );
+                    if( !node.is_object() )
+                    {
+                        return reject( scope, pointer, "must be an object" );
+                    }
 
-                const std::string idName = json_key( fieldId );
-                if( !node.contains( idName ) )
-                {
-                    continue;
+                    const std::string idName = json_key( fieldId );
+                    if( !node.contains( idName ) )
+                    {
+                        continue;
+                    }
+                    const std::string idPointer = child_pointer( pointer, fieldId );
+                    const Json&       value     = node.at( idName );
+                    if( !value.is_string() )
+                    {
+                        return reject( scope, idPointer, "must be a string" );
+                    }
+                    auto label = value.get<std::string>();
+                    if( label.empty() )
+                    {
+                        return reject( scope, idPointer, "must not be empty" );
+                    }
+                    if( !labels.emplace( label, index ).second )
+                    {
+                        // An ambiguous `after` target is unresolvable, not
+                        // merely bad style.
+                        std::string reason{ "duplicate step label '" };
+                        reason.append( label );
+                        reason.append( "'" );
+                        return reject( scope, idPointer, reason );
+                    }
+                    stepLabels[index] = std::move( label );
                 }
-                const std::string idPointer = child_pointer( pointer, fieldId );
-                const Json&       value     = node.at( idName );
-                if( !value.is_string() )
-                {
-                    return reject( scope, idPointer, "must be a string" );
-                }
-                auto label = value.get<std::string>();
-                if( label.empty() )
-                {
-                    return reject( scope, idPointer, "must not be empty" );
-                }
-                if( !labels.emplace( label, index ).second )
-                {
-                    // An ambiguous `after` target is unresolvable, not merely
-                    // bad style.
-                    std::string reason{ "duplicate step label '" };
-                    reason.append( label );
-                    reason.append( "'" );
-                    return reject( scope, idPointer, reason );
-                }
-                stepLabels[index] = std::move( label );
             }
 
             std::vector<grab::sequence::Step> steps;
@@ -3462,6 +3508,16 @@ namespace grab::kernel::sequence
             HandleSet liveHandles;
             for( std::size_t index = 0U; index < stepNodes.size(); ++index )
             {
+                // The whole iteration, so that what is left after subtracting
+                // payload, handles and after is the SCAFFOLDING each step
+                // pays: two heap strings for a JSON pointer and a designation
+                // that only an error message would read, the op lookup, the
+                // error policy and the extra grace.
+                const diag::Measure<log::Level::Nominal> stepTiming{
+                    instrument,
+                    phase::step
+                };
+
                 const Json& node = stepNodes.at( index );
                 const Scope stepScope{
                     .origin  = origin,
@@ -3495,20 +3551,48 @@ namespace grab::kernel::sequence
                     return reject( stepScope, opPointer, reason );
                 }
 
-                auto command = parse_payload( stepScope, node, *kind );
+                // One Measure per step rather than one around the loop, so the
+                // tally carries min/max/mean per step and a single pathological
+                // payload — a 4000-point polygon among 500 clicks — shows up as
+                // a max far from the mean instead of vanishing into a total.
+                auto command = [&]
+                {
+                    const diag::Measure<log::Level::Nominal> payloadTiming{
+                        instrument,
+                        phase::payload
+                    };
+                    return parse_payload( stepScope, node, *kind );
+                }();
                 if( !command.has_value() )
                 {
                     return std::unexpected( command.error() );
                 }
 
-                const auto handles = track_handles( stepScope, *command, liveHandles );
+                const auto handles = [&]
+                {
+                    const diag::Measure<log::Level::Nominal> handleTiming{
+                        instrument,
+                        phase::handles
+                    };
+                    return track_handles( stepScope, *command, liveHandles );
+                }();
                 if( !handles.has_value() )
                 {
                     return std::unexpected( handles.error() );
                 }
 
-                auto after =
-                    parse_after( stepScope, node, index, labels, stepNodes.size() );
+                auto after = [&]
+                {
+                    const diag::Measure<log::Level::Nominal> afterTiming{
+                        instrument,
+                        phase::after
+                    };
+                    return parse_after( stepScope,
+                                        node,
+                                        index,
+                                        labels,
+                                        stepNodes.size() );
+                }();
                 if( !after.has_value() )
                 {
                     return std::unexpected( after.error() );
@@ -3534,12 +3618,23 @@ namespace grab::kernel::sequence
                     return std::unexpected( extra.error() );
                 }
 
+                // Per step, and deliberately not nominal: on linear-500 this is
+                // 500 lines, which is what "make the algorithm explicit" means
+                // and exactly why it is not the default. Nothing here is built
+                // for the record — `op` and the pointer are strings the parse
+                // already owns, and the rest are integers.
                 log::verbose(
-                    [&stepScope, &op, index]( auto& event )
+                    [&stepScope, &op, kind, index]( auto& event )
                     {
                         event.tag( log::tags::sequence )
                             .value( "step", index )
                             .value( "op", *op )
+                            .value( "kind", grab::command_name( *kind ) )
+                            // The PACKED word, not the index: `step` above is
+                            // already the index, and (0, generation 1) packs
+                            // to 65536, which reads as a mistake unless the
+                            // key says what it is.
+                            .value( "id_bits", step_id_at( index ).bits() )
                             .value( "at", stepScope.pointer );
                     }
                 );
@@ -3566,15 +3661,37 @@ namespace grab::kernel::sequence
                 return reject( scope, stepsPointer, built.error().message );
             }
 
+            // What the document turned out to BE. Every figure is computed
+            // inside the sink lambda, so a run with nominal off pays for none
+            // of it — statistics() is an O(V + E) walk, which is not something
+            // to do unconditionally on the strength of a log line nobody
+            // asked for.
+            //
+            // `derivable` is the one to read against `undeclared`: those are
+            // the steps whose duration their OWN options already fix, yet
+            // which planned() reports as unestimated. On a motion-heavy
+            // document they are most of the run.
             log::nominal(
                 [&origin, &built, &json]( auto& event )
                 {
+                    const auto stats = statistics( *built );
                     event.tag( log::tags::sequence )
                         .value( "parsed",
                                 origin.empty() ? std::string_view{ "<memory>" }
                                                : origin )
                         .value( "bytes", json.size() )
-                        .value( "steps", built->steps().size() );
+                        .value( "steps", stats.steps )
+                        .value( "edges", stats.edges )
+                        .value( "labels", stats.labels )
+                        .value( "handles", stats.handles )
+                        .value( "fan_out", stats.max_fan_out )
+                        .value( "fan_in", stats.max_fan_in )
+                        .value( "depth", stats.depth )
+                        .value( "declared", stats.declared_durations )
+                        .value( "undeclared", stats.undeclared_durations )
+                        .value( "derivable", stats.derivable_durations )
+                        .value( "declared_ns", stats.declared_total.count() )
+                        .value( "derivable_ns", stats.derivable_total.count() );
                 }
             );
 
@@ -3603,10 +3720,20 @@ namespace grab::kernel::sequence
                                    ( missing ? "file not found" : "cannot open file" ) );
         }
 
-        const std::string text{
-            std::istreambuf_iterator<char>{ input },
-            std::istreambuf_iterator<char>{}
-        };
+        // Timed apart from the parse because a document read off a slow or
+        // cold filesystem and one that is expensive to interpret look
+        // identical from outside load().
+        const std::string text = [&input]
+        {
+            const diag::Measure<log::Level::Nominal> readTiming{
+                detail::load_instrument_storage(),
+                phase::read
+            };
+            return std::string{
+                std::istreambuf_iterator<char>{ input },
+                std::istreambuf_iterator<char>{}
+            };
+        }();
         return parse_document( text, path.string() + ": " );
     }
 

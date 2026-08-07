@@ -10,11 +10,16 @@
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
 #include "kernel/sequence/sequence.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/step_diag.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <set>
 #include <string>
 #include <string_view>
@@ -377,6 +382,178 @@ namespace
         EXPECT_EQ( ancestors[1], step_id( secondIndex ) );
         EXPECT_EQ( std::ranges::find( ancestors, step_id( thirdIndex ) ),
                    ancestors.end() );
+    }
+
+    // ── load instrumentation ──────────────────────────────
+    //
+    // build() is where a document becomes a graph, and until now nothing said
+    // how long any part of that took. The tallies below are the answer, and
+    // they are asserted as STRUCTURED VALUES — a name, a call count, an
+    // ordering between nested phases — never as log prose.
+
+    // Whether the compile ceiling includes the level the load path measures
+    // at. Below it diag::Measure is an empty type with no clock reads, so
+    // every assertion in here has two correct answers and the tests state
+    // both rather than only the one this build happens to produce.
+    constexpr bool loadTimingCompiledIn =
+        grab::diag::Measure<grab::log::Level::Nominal>::enabled;
+
+    constexpr std::uint64_t    oneCall        = 1U;
+    constexpr std::size_t      noTallies      = 0U;
+    constexpr std::size_t      oneTally       = 1U;
+    constexpr std::string_view probeName      = "probe";
+    constexpr std::string_view otherProbeName = "probe.other";
+
+    // What a Measure carries when it is not measuring: where to record and
+    // under what name, and NOTHING ELSE. The clock member is
+    // [[no_unique_address]] and disappears below the ceiling, which is the
+    // whole reason a per-step timer is affordable — so it is asserted at
+    // compile time, in both directions, rather than described in a comment.
+    constexpr std::size_t      timerStateSize =
+        sizeof( grab::diag::Instrument* ) + sizeof( std::string_view );
+
+    static_assert(
+        loadTimingCompiledIn
+            ? sizeof( grab::diag::Measure<grab::log::Level::Nominal> ) > timerStateSize
+            : sizeof( grab::diag::Measure<grab::log::Level::Nominal> ) == timerStateSize,
+        "a compiled-out Measure must carry no clock, and an enabled one must"
+    );
+
+    // The phases build() owns. `document`, `json`, `payload` and the rest
+    // belong to the loader and are asserted in test_interpreter.cpp.
+    constexpr auto buildPhases = std::to_array( {
+        grab::kernel::sequence::phase::build,
+        grab::kernel::sequence::phase::labels,
+        grab::kernel::sequence::phase::graph,
+        grab::kernel::sequence::phase::topology,
+    } );
+
+    [[nodiscard]]
+    const grab::diag::Tally*
+    tally_for( const grab::diag::Instrument& instrument,
+               std::string_view              name )
+    {
+        for( const auto& tally : instrument.tallies() )
+        {
+            if( tally.name == name )
+            {
+                return &tally;
+            }
+        }
+        return nullptr;
+    }
+
+    TEST( Sequence,
+          BuildTalliesEveryPhaseItOwns )
+    {
+        grab::kernel::sequence::reset_load_instrument();
+
+        auto built = build(
+            { click_step( firstLabel, {} ),
+              click_step( secondLabel, { step_id( firstIndex ) } ) }
+        );
+        ASSERT_TRUE( built.has_value() ) << built.error().message;
+
+        const auto& instrument = grab::kernel::sequence::load_instrument();
+        // A dropped name would make every count below a floor rather than a
+        // measurement, so this has to be checked, not assumed.
+        EXPECT_FALSE( instrument.overflowed() );
+
+        if constexpr( !loadTimingCompiledIn )
+        {
+            EXPECT_EQ( instrument.tallies().size(), noTallies );
+            return;
+        }
+
+        for( const auto name : buildPhases )
+        {
+            const auto* const tally = tally_for( instrument, name );
+            ASSERT_NE( tally, nullptr ) << name;
+            EXPECT_EQ( tally->calls, oneCall ) << name;
+            // Invariants that hold at any clock resolution. Asserting a
+            // positive duration would be asserting the speed of the machine.
+            EXPECT_LE( tally->shortest, tally->longest ) << name;
+            EXPECT_EQ( tally->mean(), tally->total ) << name;
+        }
+
+        // build contains graph and topology, so its total must cover both.
+        // This is what says the nesting in the report is real rather than
+        // four unrelated numbers that happen to share a prefix.
+        const auto* const whole =
+            tally_for( instrument, grab::kernel::sequence::phase::build );
+        const auto* const graph =
+            tally_for( instrument, grab::kernel::sequence::phase::graph );
+        const auto* const topology =
+            tally_for( instrument, grab::kernel::sequence::phase::topology );
+        ASSERT_NE( whole, nullptr );
+        ASSERT_NE( graph, nullptr );
+        ASSERT_NE( topology, nullptr );
+        EXPECT_GE( whole->total, graph->total + topology->total );
+    }
+
+    // The instrument accumulates until someone empties it. That is deliberate
+    // — splice() calls build(), so an automatic reset would erase the splice's
+    // own tally halfway through it — which makes reset() the only way to open
+    // a measurement window, and therefore worth testing.
+    TEST( Sequence,
+          ResettingTheLoadInstrumentEmptiesIt )
+    {
+        grab::kernel::sequence::reset_load_instrument();
+        auto first = build( { click_step( firstLabel, {} ) } );
+        ASSERT_TRUE( first.has_value() ) << first.error().message;
+
+        if constexpr( loadTimingCompiledIn )
+        {
+            const auto* const before =
+                tally_for( grab::kernel::sequence::load_instrument(),
+                           grab::kernel::sequence::phase::build );
+            ASSERT_NE( before, nullptr );
+            EXPECT_EQ( before->calls, oneCall );
+        }
+
+        grab::kernel::sequence::reset_load_instrument();
+        EXPECT_EQ( grab::kernel::sequence::load_instrument().tallies().size(),
+                   noTallies );
+        EXPECT_FALSE( grab::kernel::sequence::load_instrument().overflowed() );
+    }
+
+    // The contract that makes instrumenting a hot path acceptable: below the
+    // compile ceiling the timer is an EMPTY TYPE, reads no clock, and leaves
+    // the instrument exactly as it found it. Both branches are live — the
+    // second one is what a -DGRAB_LOG_LEVEL=off build runs.
+    TEST( Sequence,
+          AnInstrumentIsUntouchedWhenTheLevelExcludesIt )
+    {
+        grab::diag::Instrument instrument;
+        {
+            const grab::diag::Measure<grab::log::Level::Nominal> timing{
+                instrument,
+                probeName
+            };
+        }
+
+        if constexpr( loadTimingCompiledIn )
+        {
+            ASSERT_EQ( instrument.tallies().size(), oneTally );
+            EXPECT_EQ( instrument.tallies()[0].name, probeName );
+            EXPECT_EQ( instrument.tallies()[0].calls, oneCall );
+        }
+        else
+        {
+            EXPECT_EQ( instrument.tallies().size(), noTallies );
+            EXPECT_EQ( instrument.total(), std::chrono::nanoseconds::zero() );
+        }
+
+        // Distinct names take distinct slots either way, so a report can never
+        // silently merge two phases.
+        {
+            const grab::diag::Measure<grab::log::Level::Nominal> timing{
+                instrument,
+                otherProbeName
+            };
+        }
+        EXPECT_EQ( instrument.tallies().size(),
+                   loadTimingCompiledIn ? oneTally + oneTally : noTallies );
     }
 
 }    // namespace

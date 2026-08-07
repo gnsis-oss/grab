@@ -7,10 +7,13 @@
 #include "kernel/identity/id_factory.hpp"
 #include "kernel/sequence/player.hpp"
 #include "kernel/sequence/sequence.hpp"
+#include "kernel/sequence/sequence_ops.hpp"
 #include "kernel/support/log.hpp"
 #include "kernel/support/log_tags.hpp"
+#include "kernel/support/step_diag.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -68,6 +71,128 @@ namespace grab::kernel::sequence
         {
             return base + std::chrono::duration_cast<Clock::duration>( grace );
         }
+
+        // ── introspection helpers ──────────────────────────────
+        //
+        // Everything here is called from INSIDE a sink lambda, so none of it
+        // runs unless the record is actually being emitted. Nothing allocates:
+        // a log record built out of std::strings would be a per-step
+        // allocation on the pump path, which is the one thing this facility
+        // exists to keep out.
+        //
+        // THEY ARE ALL `[[maybe_unused]]`, AND THAT IS THE PROOF. At
+        // `-DGRAB_LOG_LEVEL=off` every emitter lambda in this file is
+        // discarded by `if constexpr` before it is instantiated, so nothing
+        // references these at all and clang's
+        // -Wunneeded-internal-declaration fires on each of them — under the
+        // tree's global -Werror, loudly. The attribute is what lets the build
+        // state that outcome instead of failing on it; it is not covering up
+        // an unused helper, it is the shape of a helper that exists only to
+        // feed records the ceiling threw away.
+
+        constexpr std::size_t stepStatusSlots =
+            static_cast<std::size_t>( grab::sequence::StepStatus::Count );
+
+        [[nodiscard,
+          maybe_unused]]
+        constexpr std::string_view
+        outcome_name( grab::NeutralizationOutcome outcome ) noexcept
+        {
+            switch( outcome )
+            {
+                case grab::NeutralizationOutcome::NotAttempted :
+                    return "not_attempted";
+                case grab::NeutralizationOutcome::NothingHeld :
+                    return "nothing_held";
+                case grab::NeutralizationOutcome::Released :
+                    return "released";
+                case grab::NeutralizationOutcome::Failed :
+                    return "failed";
+            }
+            return "";
+        }
+
+        // A steady_clock time_point has an ARBITRARY EPOCH, so the only honest
+        // thing to print is its own count — never a wall date. Microseconds
+        // because a fabricated test clock starts at zero and a real one does
+        // not fit a readable decimal in nanoseconds.
+        [[nodiscard,
+          maybe_unused]]
+        std::int64_t
+        stamp_us( TimePoint at ) noexcept
+        {
+            return static_cast<std::int64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    at.time_since_epoch()
+                )
+                    .count()
+            );
+        }
+
+        [[nodiscard,
+          maybe_unused]]
+        std::int64_t
+        micros( std::chrono::nanoseconds span ) noexcept
+        {
+            return static_cast<std::int64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>( span ).count()
+            );
+        }
+
+        // The step's label as a VIEW. step_name() above builds a std::string
+        // and belongs in error messages, which are already allocating; a log
+        // line is not allowed to.
+        [[nodiscard,
+          maybe_unused]]
+        std::string_view
+        label_of( const grab::sequence::Step* step ) noexcept
+        {
+            return step == nullptr ? std::string_view{}
+                                   : std::string_view{ step->label };
+        }
+
+        // TWO AXES, ONE DISPATCH: the pump phase and the CommandKind. Both
+        // names are `constexpr std::string_view`s, so Instrument's
+        // pointer-first lookup hits without a content compare and no string is
+        // built per step.
+        //
+        // The kind is resolved inside an `if constexpr`, so a build whose
+        // ceiling excludes the timers does not even visit the command variant.
+        class Dispatch final
+        {
+            public:
+
+                Dispatch( grab::diag::Instrument&     into,
+                          std::string_view            phase_name,
+                          const grab::sequence::Step& step ) noexcept :
+                    phase_( into,
+                            phase_name ),
+                    op_( into,
+                         kind_name( step ) )
+                {
+                }
+
+            private:
+
+                [[nodiscard]]
+                static std::string_view
+                kind_name( const grab::sequence::Step& step ) noexcept
+                {
+                    if constexpr( grab::diag::Measure<measureLevel>::enabled )
+                    {
+                        return grab::command_name(
+                            grab::sequence::kind_of( step.command )
+                        );
+                    }
+                    else
+                    {
+                        return {};
+                    }
+                }
+
+                grab::diag::Measure<measureLevel> phase_;
+                grab::diag::Measure<measureLevel> op_;
+        };
 
     }    // namespace
 
@@ -214,33 +339,122 @@ namespace grab::kernel::sequence
     }
 
     void
-    Player::drop_from_frontier( grab::sequence::StepId id )
+    Player::set_status( grab::sequence::StepId     id,
+                        grab::sequence::StepStatus next,
+                        TimePoint                  now )
     {
-        const auto found = std::ranges::find( frontier_, id );
-        if( found != frontier_.end() )
+        const auto index = index_of( id );
+        if( index >= status_.size() )
         {
-            frontier_.erase( found );
+            return;
         }
+        const auto previous = status_[index];
+        status_[index]      = next;
+        if( previous == next )
+        {
+            return;
+        }
+
+        log::verbose(
+            [this, id, index, previous, next, now]( auto& event )
+            {
+                event.tag( log::tags::player )
+                    .value( "step", index )
+                    .value( "label", label_of( program_->find( id ) ) )
+                    .value( "from", grab::sequence::step_status_name( previous ) )
+                    .value( "to", grab::sequence::step_status_name( next ) )
+                    .value( "now_us", stamp_us( now ) );
+            }
+        );
     }
 
     void
+    Player::set_state( grab::sequence::PlayState next )
+    {
+        if( state_ == next )
+        {
+            return;
+        }
+        const auto previous = state_;
+        state_              = next;
+
+        log::verbose(
+            [this, previous, next]( auto& event )
+            {
+                event.tag( log::tags::player )
+                    .value( "state_from", grab::sequence::play_state_name( previous ) )
+                    .value( "state_to", grab::sequence::play_state_name( next ) )
+                    .value( "frontier", frontier_.size() )
+                    .value( "now_us", stamp_us( last_now_ ) );
+            }
+        );
+    }
+
+    void
+    Player::admit_to_frontier( grab::sequence::StepId id,
+                               TimePoint              ready_at )
+    {
+        const auto index = index_of( id );
+        if( index < runs_.size() )
+        {
+            runs_[index].ready_at = ready_at;
+        }
+        frontier_.push_back( id );
+        deepest_frontier_ = std::max( deepest_frontier_, frontier_.size() );
+
+        log::verbose(
+            [this, id, index, ready_at]( auto& event )
+            {
+                event.tag( log::tags::player )
+                    .value( "admitted", index )
+                    .value( "label", label_of( program_->find( id ) ) )
+                    .value( "ready_us", stamp_us( ready_at ) )
+                    .value( "frontier", frontier_.size() );
+            }
+        );
+    }
+
+    void
+    Player::drop_from_frontier( grab::sequence::StepId id )
+    {
+        const auto found = std::ranges::find( frontier_, id );
+        if( found == frontier_.end() )
+        {
+            return;
+        }
+        frontier_.erase( found );
+
+        log::verbose(
+            [this, id]( auto& event )
+            {
+                event.tag( log::tags::player )
+                    .value( "retired", index_of( id ) )
+                    .value( "label", label_of( program_->find( id ) ) )
+                    .value( "status",
+                            grab::sequence::step_status_name( status_of( id ) ) )
+                    .value( "frontier", frontier_.size() );
+            }
+        );
+    }
+
+    grab::NeutralizationOutcome
     Player::neutralize( grab::sequence::StepId id,
                         TimePoint              now )
     {
         const auto index = index_of( id );
         if( index >= runs_.size() )
         {
-            return;
+            return grab::NeutralizationOutcome::NotAttempted;
         }
         auto& run = runs_[index];
         if( !run.entered || run.exited )
         {
-            return;
+            return grab::NeutralizationOutcome::NotAttempted;
         }
         const auto* const step = program_->find( id );
         if( step == nullptr )
         {
-            return;
+            return grab::NeutralizationOutcome::NotAttempted;
         }
 
         // A Blocking body runs on a worker, so join it before exit(). It costs
@@ -250,8 +464,12 @@ namespace grab::kernel::sequence
         {
             runner_->join( *step );
         }
-        const auto outcome = runner_->exit( *step, now );
-        run.exited         = true;
+        grab::NeutralizationOutcome outcome{ grab::NeutralizationOutcome::NotAttempted };
+        {
+            const Dispatch timer{ instrument_, phase::playExit, *step };
+            outcome = runner_->exit( *step, now );
+        }
+        run.exited = true;
 
         if( outcome == grab::NeutralizationOutcome::Failed )
         {
@@ -269,13 +487,18 @@ namespace grab::kernel::sequence
         }
 
         log::verbose(
-            [&step, outcome]( auto& event )
+            [step, outcome, now]( auto& event )
             {
                 event.tag( log::tags::player )
                     .value( "neutralized", step->id.index() )
-                    .value( "outcome", outcome );
+                    .value( "label", label_of( step ) )
+                    .value( "outcome", outcome_name( outcome ) )
+                    .value( "released",
+                            outcome == grab::NeutralizationOutcome::Released )
+                    .value( "now_us", stamp_us( now ) );
             }
         );
+        return outcome;
     }
 
     void
@@ -305,32 +528,35 @@ namespace grab::kernel::sequence
         }
     }
 
-    void
+    grab::NeutralizationOutcome
     Player::reap_holds( grab::sequence::StepId id )
     {
         const auto* const step = program_->find( id );
         if( step == nullptr )
         {
-            return;
+            return grab::NeutralizationOutcome::NotAttempted;
         }
         const auto outcome = runner_->release_holds( *step );
         record_neutralization( outcome );
 
         log::verbose(
-            [&step, outcome]( auto& event )
+            [step, outcome]( auto& event )
             {
                 event.tag( log::tags::player )
                     .value( "reaped", step->id.index() )
-                    .value( "outcome", outcome );
+                    .value( "label", label_of( step ) )
+                    .value( "outcome", outcome_name( outcome ) )
+                    .value( "released",
+                            outcome == grab::NeutralizationOutcome::Released );
             }
         );
+        return outcome;
     }
 
     void
     Player::admit_successors( grab::sequence::StepId id,
                               TimePoint              now )
     {
-        ( void )now;
         const auto index = index_of( id );
         if( index + 1U >= successor_offsets_.size() )
         {
@@ -360,12 +586,14 @@ namespace grab::kernel::sequence
             // completion, never from an absolute schedule — the pump does not
             // catch up.
             TimePoint eligible{};
-            bool      ready = true;
+            bool      ready   = true;
+            auto      blocker = grab::sequence::StepId{};
             for( const auto predecessor : step->after )
             {
                 if( !is_terminal( predecessor ) )
                 {
-                    ready = false;
+                    ready   = false;
+                    blocker = predecessor;
                     break;
                 }
                 eligible =
@@ -373,13 +601,57 @@ namespace grab::kernel::sequence
             }
             if( !ready )
             {
+                // "Blocked" with no reason is the log line people curse at, so
+                // this names the predecessor that is still non-terminal and
+                // what it is doing instead.
+                log::verbose(
+                    [this, successor, blocker]( auto& event )
+                    {
+                        event.tag( log::tags::player )
+                            .value( "blocked", index_of( successor ) )
+                            .value( "label", label_of( program_->find( successor ) ) )
+                            .value( "waiting_on", index_of( blocker ) )
+                            .value( "waiting_on_label",
+                                    label_of( program_->find( blocker ) ) )
+                            .value(
+                                "waiting_on_status",
+                                grab::sequence::step_status_name( status_of( blocker ) )
+                            );
+                    }
+                );
                 continue;
             }
 
-            status_[successor_index] = grab::sequence::StepStatus::Ready;
-            runs_[successor_index].ready_at =
-                add_grace( eligible, grace_before( *step, pacing ) );
-            frontier_.push_back( successor );
+            const auto grace    = grace_before( *step, pacing );
+            const auto ready_at = add_grace( eligible, grace );
+            set_status( successor, grab::sequence::StepStatus::Ready, now );
+            admit_to_frontier( successor, ready_at );
+
+            if( grace > std::chrono::nanoseconds::zero() )
+            {
+                // Grace ACTUALLY APPLIED, with the mode that authorised it:
+                // extra_grace is read only under Precise, so a report that
+                // printed the step's own field unconditionally would explain a
+                // delay that never happened.
+                log::verbose(
+                    [this, successor, step, pacing, grace, ready_at]( auto& event )
+                    {
+                        const auto extra =
+                            pacing.mode == grab::sequence::PacingMode::Precise
+                                ? micros( step->extra_grace )
+                                : std::int64_t{ 0 };
+                        event.tag( log::tags::player )
+                            .value( "graced", index_of( successor ) )
+                            .value( "label", label_of( step ) )
+                            .value( "mode",
+                                    grab::sequence::pacing_mode_name( pacing.mode ) )
+                            .value( "base_grace_us", micros( pacing.grace ) )
+                            .value( "extra_grace_us", extra )
+                            .value( "total_grace_us", micros( grace ) )
+                            .value( "ready_us", stamp_us( ready_at ) );
+                    }
+                );
+            }
         }
     }
 
@@ -398,11 +670,12 @@ namespace grab::kernel::sequence
             // A clean completion still exits — that is what releases anything
             // the body holds — but it is not neutralization, so the run keeps
             // reporting NotAttempted.
+            const Dispatch timer{ instrument_, phase::playExit, *step };
             ( void )runner_->exit( *step, now );
             run.exited = true;
         }
-        status_[index] = grab::sequence::StepStatus::Succeeded;
-        last_finish_   = std::max( last_finish_, now );
+        set_status( id, grab::sequence::StepStatus::Succeeded, now );
+        last_finish_ = std::max( last_finish_, now );
         drop_from_frontier( id );
         admit_successors( id, now );
     }
@@ -418,9 +691,9 @@ namespace grab::kernel::sequence
 
         run.call_duration       = now - run.entered_at;
         run.finished_at         = now;
-        neutralize( id, now );
-        status_[index] = grab::sequence::StepStatus::Failed;
-        last_finish_   = std::max( last_finish_, now );
+        ( void )neutralize( id, now );
+        set_status( id, grab::sequence::StepStatus::Failed, now );
+        last_finish_ = std::max( last_finish_, now );
         drop_from_frontier( id );
 
         if( step == nullptr )
@@ -459,7 +732,7 @@ namespace grab::kernel::sequence
                             grab::fail( grab::ErrorCode::NoMatch, std::move( message ) )
                                 .error();
                         unwind( now );
-                        state_ = grab::sequence::PlayState::Interrupted;
+                        set_state( grab::sequence::PlayState::Interrupted );
                         return;
                     }
                     auto jumped = jump_to( *target );
@@ -467,7 +740,7 @@ namespace grab::kernel::sequence
                     {
                         failure_ = jumped.error();
                         unwind( now );
-                        state_ = grab::sequence::PlayState::Interrupted;
+                        set_state( grab::sequence::PlayState::Interrupted );
                     }
                     return;
                 }
@@ -483,7 +756,7 @@ namespace grab::kernel::sequence
         message.append( " failed and its policy is abort" );
         failure_ = grab::fail( code, std::move( message ) ).error();
         unwind( now );
-        state_ = grab::sequence::PlayState::Interrupted;
+        set_state( grab::sequence::PlayState::Interrupted );
     }
 
     void
@@ -510,14 +783,40 @@ namespace grab::kernel::sequence
             return;
         }
 
-        auto code = runner_->last_error( *step );
-        if( may_retry( *step, code ) && run.retries < maxRetriesPerStep )
+        auto       code = runner_->last_error( *step );
+        const bool retrying =
+            may_retry( *step, code ) && run.retries < maxRetriesPerStep;
+
+        // The RetryClass COLUMN is what was consulted, so it is what the log
+        // names. It is resolved inside the sink so a run with logging off does
+        // not walk the descriptor table on its failure path.
+        log::verbose(
+            [step, code, retrying, &run]( auto& event )
+            {
+                event.tag( log::tags::player )
+                    .value( "retry_decision", step->id.index() )
+                    .value( "label", label_of( step ) )
+                    .value( "error", grab::name_of( code ) )
+                    .value( "retry_class",
+                            grab::detail::retry_class_name
+                                .text_of( retry_class_of_step( *step ), "" ) )
+                    .value( "attempts", run.retries )
+                    .value( "limit", maxRetriesPerStep )
+                    .value( "verdict", retrying ? "retry" : "give_up" );
+            }
+        );
+
+        if( retrying )
         {
             run.retries += 1U;
-            neutralize( id, now );
-            run.exited       = false;
-            run.entered_at   = now;
-            const auto again = runner_->enter( *step, now );
+            ( void )neutralize( id, now );
+            run.exited     = false;
+            run.entered_at = now;
+            auto again     = grab::sequence::Status::Running;
+            {
+                const Dispatch timer{ instrument_, phase::playEnter, *step };
+                again = runner_->enter( *step, now );
+            }
             if( again == grab::sequence::Status::Running )
             {
                 return;
@@ -535,6 +834,22 @@ namespace grab::kernel::sequence
     void
     Player::unwind( TimePoint now )
     {
+        log::verbose(
+            [this, now]( auto& event )
+            {
+                event.tag( log::tags::player )
+                    .value( "unwind", program_->name() )
+                    .value( "entered", entry_order_.size() )
+                    .value( "frontier", frontier_.size() )
+                    .value( "now_us", stamp_us( now ) );
+            }
+        );
+
+        // The order IS the contract, so it is logged as an ordinal rather than
+        // left to be inferred from the record order of a log that may be
+        // interleaved with another thread's.
+        std::size_t reaped = 0U;
+
         // Reverse entry order, so a step that pressed on top of another
         // releases first.
         for( std::size_t position = entry_order_.size(); position-- > 0U; )
@@ -549,6 +864,7 @@ namespace grab::kernel::sequence
             {
                 continue;
             }
+            reaped += 1U;
             if( runs_[index].exited )
             {
                 // succeed() exits a cleanly-completed step, so neutralize()
@@ -558,14 +874,40 @@ namespace grab::kernel::sequence
                 // is deliberately not a second exit(): that contract is
                 // exactly-once, and calling it twice would double-release the
                 // implicit case.
-                reap_holds( id );
+                const auto outcome = reap_holds( id );
+                log::verbose(
+                    [this, id, index, reaped, outcome]( auto& event )
+                    {
+                        event.tag( log::tags::player )
+                            .value( "unwound", index )
+                            .value( "label", label_of( program_->find( id ) ) )
+                            .value( "order", reaped )
+                            .value( "path", "release_holds" )
+                            .value( "released",
+                                    outcome == grab::NeutralizationOutcome::Released )
+                            .value( "outcome", outcome_name( outcome ) );
+                    }
+                );
                 continue;
             }
             runs_[index].call_duration = now - runs_[index].entered_at;
-            neutralize( id, now );
+            const auto outcome         = neutralize( id, now );
+            log::verbose(
+                [this, id, index, reaped, outcome]( auto& event )
+                {
+                    event.tag( log::tags::player )
+                        .value( "unwound", index )
+                        .value( "label", label_of( program_->find( id ) ) )
+                        .value( "order", reaped )
+                        .value( "path", "exit" )
+                        .value( "released",
+                                outcome == grab::NeutralizationOutcome::Released )
+                        .value( "outcome", outcome_name( outcome ) );
+                }
+            );
             if( !terminal_status( status_[index] ) )
             {
-                status_[index]           = grab::sequence::StepStatus::Skipped;
+                set_status( id, grab::sequence::StepStatus::Skipped, now );
                 runs_[index].finished_at = now;
             }
         }
@@ -577,11 +919,129 @@ namespace grab::kernel::sequence
             const auto index = index_of( id );
             if( index < status_.size() && !terminal_status( status_[index] ) )
             {
-                status_[index]           = grab::sequence::StepStatus::Skipped;
+                set_status( id, grab::sequence::StepStatus::Skipped, now );
                 runs_[index].finished_at = now;
             }
         }
         frontier_.clear();
+    }
+
+    void
+    Player::report_run()
+    {
+        // Once per run, and only for a run that actually ended. Called from
+        // the tail of pump(), interrupt() and skip() rather than from
+        // set_state(), because a summary emitted from inside the transition
+        // would print a `pump` tally missing the very pump that produced it.
+        if( reported_ )
+        {
+            return;
+        }
+        if( state_ !=
+            grab::sequence::PlayState::Done &&
+            state_ != grab::sequence::PlayState::Interrupted )
+        {
+            return;
+        }
+        reported_ = true;
+
+        log::nominal(
+            [this]( auto& event )
+            {
+                std::array<std::size_t, stepStatusSlots> counts{};
+                for( const auto status : status_ )
+                {
+                    const auto slot = static_cast<std::size_t>( status );
+                    if( slot < counts.size() )
+                    {
+                        counts[slot] += 1U;
+                    }
+                }
+
+                // The longest single step is the first thing anyone wants
+                // after "how long did it take", and the label is what makes it
+                // actionable — an index alone sends the reader back to the
+                // document to find out what it was.
+                std::chrono::nanoseconds longest{};
+                std::string_view         longest_label{};
+                std::size_t              longest_step = 0U;
+                for( const auto& step : program_->steps() )
+                {
+                    const auto slot = index_of( step.id );
+                    if( slot >= runs_.size() || runs_[slot].call_duration <= longest )
+                    {
+                        continue;
+                    }
+                    longest       = runs_[slot].call_duration;
+                    longest_step  = slot;
+                    longest_label = step.label;
+                }
+
+                event.tag( log::tags::player )
+                    .value( "summary", program_->name() )
+                    .value( "state", grab::sequence::play_state_name( state_ ) )
+                    .value( "steps", status_.size() )
+                    .value( "succeeded",
+                            counts[static_cast<std::size_t>(
+                                grab::sequence::StepStatus::Succeeded
+                            )] )
+                    .value( "failed",
+                            counts[static_cast<std::size_t>(
+                                grab::sequence::StepStatus::Failed
+                            )] )
+                    .value( "skipped",
+                            counts[static_cast<std::size_t>(
+                                grab::sequence::StepStatus::Skipped
+                            )] )
+                    .value( "pending",
+                            counts[static_cast<std::size_t>(
+                                grab::sequence::StepStatus::Pending
+                            )] )
+                    .value( "ready",
+                            counts[static_cast<std::size_t>(
+                                grab::sequence::StepStatus::Ready
+                            )] )
+                    .value( "running",
+                            counts[static_cast<std::size_t>(
+                                grab::sequence::StepStatus::Running
+                            )] )
+                    // planned() is the critical path over DECLARED durations
+                    // and grace; steps that declare nothing contribute zero to
+                    // it, so it is a floor and never a forecast. Against
+                    // elapsed_us it is the whole point of the pair: a run far
+                    // past its floor was waiting on the application, not on
+                    // the schedule.
+                    //
+                    // It is computed HERE, inside the sink, so a run with
+                    // logging off never walks the graph for it. The cost of
+                    // that placement is one `ops.planned` tally in the LOAD
+                    // instrument per summarised run — an observer effect, and
+                    // small, but real: that instrument's call count for
+                    // `ops.planned` is one higher when player logging is on.
+                    .value( "planned_us", micros( planned( *program_ ) ) )
+                    .value( "elapsed_us", micros( elapsed() ) )
+                    .value( "longest_step", longest_step )
+                    .value( "longest_label", longest_label )
+                    .value( "longest_us", micros( longest ) )
+                    .value( "deepest_frontier", deepest_frontier_ )
+                    .value( "neutralization", outcome_name( neutralization_ ) )
+                    // An instrument that dropped a name has stopped being a
+                    // full accounting, and a report that did not say so would
+                    // be read as one.
+                    .value( "instrument",
+                            instrument_.overflowed() ? "overflowed_incomplete"
+                                                     : "complete" )
+                    .value( "phase_unit", "ns" );
+
+                // Per NAME, never summed: the phase axis and the CommandKind
+                // axis both time the same dispatches, so a total over every
+                // tally would double-count by construction.
+                for( const auto& tally : instrument_.tallies() )
+                {
+                    event.value( tally.name, tally.total.count() );
+                }
+            }
+        );
     }
 
     grab::Result<void>
@@ -645,9 +1105,9 @@ namespace grab::kernel::sequence
             if( runs_[index].entered && !runs_[index].exited )
             {
                 runs_[index].call_duration = now - runs_[index].entered_at;
-                neutralize( ancestor, now );
+                ( void )neutralize( ancestor, now );
             }
-            status_[index]           = grab::sequence::StepStatus::Skipped;
+            set_status( ancestor, grab::sequence::StepStatus::Skipped, now );
             runs_[index].finished_at = now;
         }
 
@@ -668,29 +1128,36 @@ namespace grab::kernel::sequence
             if( runs_[index].entered && !runs_[index].exited )
             {
                 runs_[index].call_duration = now - runs_[index].entered_at;
-                neutralize( member, now );
-                status_[index]           = grab::sequence::StepStatus::Skipped;
+                ( void )neutralize( member, now );
+                set_status( member, grab::sequence::StepStatus::Skipped, now );
                 runs_[index].finished_at = now;
                 continue;
             }
-            status_[index] = grab::sequence::StepStatus::Pending;
+            set_status( member, grab::sequence::StepStatus::Pending, now );
         }
 
         frontier_.clear();
-        frontier_.push_back( target );
 
         const auto target_index = index_of( target );
         if( status_[target_index] != grab::sequence::StepStatus::Running )
         {
-            status_[target_index] = grab::sequence::StepStatus::Ready;
-            runs_[target_index].ready_at =
-                add_grace( now, grace_before( *step, program_->pacing() ) );
+            set_status( target, grab::sequence::StepStatus::Ready, now );
+            admit_to_frontier( target,
+                               add_grace( now,
+                                          grace_before( *step, program_->pacing() ) ) );
+        }
+        else
+        {
+            admit_to_frontier( target, runs_[target_index].ready_at );
         }
 
         log::nominal(
-            [&step]( auto& event )
+            [step, now]( auto& event )
             {
-                event.tag( log::tags::player ).value( "goto", step->id.index() );
+                event.tag( log::tags::player )
+                    .value( "goto", step->id.index() )
+                    .value( "label", label_of( step ) )
+                    .value( "now_us", stamp_us( now ) );
             }
         );
         return {};
@@ -701,7 +1168,7 @@ namespace grab::kernel::sequence
     {
         if( state_ == grab::sequence::PlayState::Paused )
         {
-            state_ = grab::sequence::PlayState::Playing;
+            set_state( grab::sequence::PlayState::Playing );
             return {};
         }
         if( state_ == grab::sequence::PlayState::Playing )
@@ -715,18 +1182,16 @@ namespace grab::kernel::sequence
                                "player to replay the document" );
         }
 
-        state_ = grab::sequence::PlayState::Playing;
+        set_state( grab::sequence::PlayState::Playing );
         for( const auto& step : program_->steps() )
         {
             if( !step.after.empty() )
             {
                 continue;
             }
-            const auto index = index_of( step.id );
-            status_[index]   = grab::sequence::StepStatus::Ready;
+            set_status( step.id, grab::sequence::StepStatus::Ready, last_now_ );
             // Roots start immediately: grace is the gap between steps.
-            runs_[index].ready_at = last_now_;
-            frontier_.push_back( step.id );
+            admit_to_frontier( step.id, last_now_ );
         }
 
         log::nominal(
@@ -752,7 +1217,7 @@ namespace grab::kernel::sequence
             return grab::fail( grab::ErrorCode::InvalidArgument,
                                "nothing is playing, so there is nothing to pause" );
         }
-        state_ = grab::sequence::PlayState::Paused;
+        set_state( grab::sequence::PlayState::Paused );
         return {};
     }
 
@@ -770,7 +1235,8 @@ namespace grab::kernel::sequence
         // Grace does NOT apply here: a held button must not wait out a grace
         // period before being released.
         unwind( last_now_ );
-        state_ = grab::sequence::PlayState::Interrupted;
+        set_state( grab::sequence::PlayState::Interrupted );
+        report_run();
         return {};
     }
 
@@ -801,9 +1267,9 @@ namespace grab::kernel::sequence
             if( runs_[index].entered && !runs_[index].exited )
             {
                 runs_[index].call_duration = now - runs_[index].entered_at;
-                neutralize( id, now );
+                ( void )neutralize( id, now );
             }
-            status_[index]           = grab::sequence::StepStatus::Skipped;
+            set_status( id, grab::sequence::StepStatus::Skipped, now );
             runs_[index].finished_at = now;
         }
         for( const auto id : scratch_ )
@@ -812,8 +1278,9 @@ namespace grab::kernel::sequence
         }
         if( state_ == grab::sequence::PlayState::Playing && frontier_.empty() )
         {
-            state_ = grab::sequence::PlayState::Done;
+            set_state( grab::sequence::PlayState::Done );
         }
+        report_run();
         return {};
     }
 
@@ -858,63 +1325,30 @@ namespace grab::kernel::sequence
             return {};
         }
 
-        const bool        failed_before = failure_.has_value();
+        const bool failed_before = failure_.has_value();
 
-        // Bounded because every iteration that makes progress moves at least
-        // one step through enter or through completion, and each step does
-        // both at most once per retry.
-        const std::size_t limit = ( 2U * status_.size() ) + 2U;
-        for( std::size_t iteration = 0U; iteration < limit; ++iteration )
         {
-            bool progressed = false;
+            // The whole call, so `pump - (enter + tick + exit)` is what the
+            // scheduler spent on its own behalf. It closes before the Done
+            // check below, which is what lets the run summary print a `pump`
+            // tally that already includes the pump that ended the run.
+            const diag::Measure<measureLevel> pump_timer{ instrument_, phase::playPump };
 
-            scratch_.assign( frontier_.begin(), frontier_.end() );
-            for( const auto id : scratch_ )
+            // Bounded because every iteration that makes progress moves at
+            // least one step through enter or through completion, and each
+            // step does both at most once per retry.
+            const std::size_t                 limit = ( 2U * status_.size() ) + 2U;
+            for( std::size_t iteration = 0U; iteration < limit; ++iteration )
             {
-                const auto index = index_of( id );
-                if( index >=
-                    status_.size() ||
-                    status_[index] != grab::sequence::StepStatus::Running )
-                {
-                    continue;
-                }
-                const auto* const step = program_->find( id );
-                if( step == nullptr )
-                {
-                    continue;
-                }
-                const auto due = runner_->next_tick( *step );
-                if( due.has_value() && *due > now )
-                {
-                    continue;
-                }
-                const auto status = runner_->tick( *step, now );
-                if( status != grab::sequence::Status::Running )
-                {
-                    on_status( id, status, now );
-                    progressed = true;
-                }
-                if( state_ !=
-                    grab::sequence::PlayState::Playing &&
-                    state_ != grab::sequence::PlayState::Paused )
-                {
-                    break;
-                }
-            }
+                bool progressed = false;
 
-            // Paused admits NO new steps, but the running ones above still run
-            // to completion: pausing mid-drag would strand a held button.
-            if( state_ == grab::sequence::PlayState::Playing )
-            {
                 scratch_.assign( frontier_.begin(), frontier_.end() );
                 for( const auto id : scratch_ )
                 {
                     const auto index = index_of( id );
                     if( index >=
                         status_.size() ||
-                        status_[index] !=
-                        grab::sequence::StepStatus::Ready ||
-                        runs_[index].ready_at > now )
+                        status_[index] != grab::sequence::StepStatus::Running )
                     {
                         continue;
                     }
@@ -923,39 +1357,102 @@ namespace grab::kernel::sequence
                     {
                         continue;
                     }
-
-                    status_[index]          = grab::sequence::StepStatus::Running;
-                    runs_[index].entered    = true;
-                    runs_[index].exited     = false;
-                    runs_[index].entered_at = now;
-                    runs_[index].declared   = runner_->declared_duration( *step );
-                    entry_order_.push_back( id );
-                    if( !anything_entered_ )
+                    const auto due = runner_->next_tick( *step );
+                    if( due.has_value() && *due > now )
                     {
-                        anything_entered_ = true;
-                        first_entry_      = now;
+                        continue;
                     }
-                    progressed        = true;
-
-                    const auto status = runner_->enter( *step, now );
-                    on_status( id, status, now );
-
-                    if( state_ != grab::sequence::PlayState::Playing )
+                    auto status = grab::sequence::Status::Running;
+                    {
+                        const Dispatch timer{ instrument_, phase::playTick, *step };
+                        status = runner_->tick( *step, now );
+                    }
+                    if( status != grab::sequence::Status::Running )
+                    {
+                        on_status( id, status, now );
+                        progressed = true;
+                    }
+                    if( state_ !=
+                        grab::sequence::PlayState::Playing &&
+                        state_ != grab::sequence::PlayState::Paused )
                     {
                         break;
                     }
                 }
-            }
 
-            if( !progressed )
-            {
-                break;
-            }
-            if( state_ !=
-                grab::sequence::PlayState::Playing &&
-                state_ != grab::sequence::PlayState::Paused )
-            {
-                break;
+                // Paused admits NO new steps, but the running ones above still
+                // run to completion: pausing mid-drag would strand a held
+                // button.
+                if( state_ == grab::sequence::PlayState::Playing )
+                {
+                    scratch_.assign( frontier_.begin(), frontier_.end() );
+                    for( const auto id : scratch_ )
+                    {
+                        const grab::sequence::Step* step = nullptr;
+                        {
+                            // The ADMISSION DECISION, and nothing else: this
+                            // scope closes before enter() so the two are
+                            // separable in the report. Every `continue` below
+                            // leaves it through the destructor, so a rejected
+                            // candidate is still charged for the look.
+                            const diag::Measure<measureLevel> scan_timer{
+                                instrument_,
+                                phase::playReadyScan,
+                            };
+
+                            const auto index = index_of( id );
+                            if( index >=
+                                status_.size() ||
+                                status_[index] !=
+                                grab::sequence::StepStatus::Ready ||
+                                runs_[index].ready_at > now )
+                            {
+                                continue;
+                            }
+                            step = program_->find( id );
+                            if( step == nullptr )
+                            {
+                                continue;
+                            }
+
+                            set_status( id, grab::sequence::StepStatus::Running, now );
+                            runs_[index].entered    = true;
+                            runs_[index].exited     = false;
+                            runs_[index].entered_at = now;
+                            runs_[index].declared = runner_->declared_duration( *step );
+                            entry_order_.push_back( id );
+                            if( !anything_entered_ )
+                            {
+                                anything_entered_ = true;
+                                first_entry_      = now;
+                            }
+                            progressed = true;
+                        }
+
+                        auto status = grab::sequence::Status::Running;
+                        {
+                            const Dispatch timer{ instrument_, phase::playEnter, *step };
+                            status = runner_->enter( *step, now );
+                        }
+                        on_status( id, status, now );
+
+                        if( state_ != grab::sequence::PlayState::Playing )
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if( !progressed )
+                {
+                    break;
+                }
+                if( state_ !=
+                    grab::sequence::PlayState::Playing &&
+                    state_ != grab::sequence::PlayState::Paused )
+                {
+                    break;
+                }
             }
         }
 
@@ -964,20 +1461,9 @@ namespace grab::kernel::sequence
         // on them.
         if( state_ == grab::sequence::PlayState::Playing && frontier_.empty() )
         {
-            state_ = grab::sequence::PlayState::Done;
-            log::nominal(
-                [this]( auto& event )
-                {
-                    event.tag( log::tags::player )
-                        .value( "done", program_->name() )
-                        .value( "elapsed_us",
-                                std::chrono::duration_cast<std::chrono::microseconds>(
-                                    elapsed()
-                                )
-                                    .count() );
-                }
-            );
+            set_state( grab::sequence::PlayState::Done );
         }
+        report_run();
 
         if( failure_.has_value() && !failed_before )
         {
@@ -1166,6 +1652,18 @@ namespace grab::kernel::sequence
     Player::program() const noexcept
     {
         return program_;
+    }
+
+    const diag::Instrument&
+    Player::instrument() const noexcept
+    {
+        return instrument_;
+    }
+
+    std::size_t
+    Player::deepest_frontier() const noexcept
+    {
+        return deepest_frontier_;
     }
 
 }    // namespace grab::kernel::sequence

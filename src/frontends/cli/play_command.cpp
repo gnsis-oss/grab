@@ -61,30 +61,182 @@ namespace grab::cli
         constexpr std::string_view graceFlag      = "--grace-ms";
         constexpr std::string_view dryRunFlag     = "--dry-run";
         constexpr std::string_view reportFlag     = "--report";
+        constexpr std::string_view traceFlag      = "--trace";
         constexpr std::string_view flagPrefix     = "-";
         constexpr std::string_view singleStepName = "cli";
 
+        // ── Report formatting ─────────────────────────────────
+        //
+        // Two decimals and a unit chosen by magnitude, computed in integers.
+        // std::to_chars over a double would need a precision and a rounding
+        // mode argued about; the report is read by a human deciding what to
+        // optimise, and 8.42 s tells them what 8.4213977 s does not.
+        constexpr std::int64_t     nanosecondsPerMicrosecond = 1'000;
+        constexpr std::int64_t     nanosecondsPerMillisecond = 1'000'000;
+        constexpr std::int64_t     nanosecondsPerSecond      = 1'000'000'000;
+        constexpr std::int64_t     hundredths                = 100;
+        constexpr std::int64_t     tenths                    = 10;
+
+        // Column stops. Left-aligned, because the names are the thing being
+        // scanned and a right-aligned name column reads as ragged.
+        constexpr std::size_t      nameColumn  = 4U;
+        constexpr std::size_t      countColumn = 28U;
+        constexpr std::size_t      totalColumn = 42U;
+        constexpr std::size_t      meanColumn  = 56U;
+        constexpr std::size_t      maxColumn   = 74U;
+
+        constexpr std::uint64_t    noCalls     = 0U;
+        constexpr std::uint64_t    oneCall     = 1U;
+
+        [[nodiscard]]
+        std::string
+        format_duration( std::chrono::nanoseconds value )
+        {
+            const std::int64_t count   = value.count();
+
+            std::int64_t       divisor = nanosecondsPerSecond;
+            std::string_view   unit    = "s";
+            if( count < nanosecondsPerMicrosecond )
+            {
+                // Sub-microsecond, or negative if a caller ever hands one over.
+                // Printing "0.00 us" would hide both.
+                return std::to_string( count ) + " ns";
+            }
+            if( count < nanosecondsPerMillisecond )
+            {
+                divisor = nanosecondsPerMicrosecond;
+                unit    = "us";
+            }
+            else if( count < nanosecondsPerSecond )
+            {
+                divisor = nanosecondsPerMillisecond;
+                unit    = "ms";
+            }
+
+            const std::int64_t whole    = count / divisor;
+            const std::int64_t fraction = ( ( count % divisor ) * hundredths ) / divisor;
+
+            std::string        text     = std::to_string( whole );
+            text.push_back( '.' );
+            if( fraction < tenths )
+            {
+                text.push_back( '0' );
+            }
+            text.append( std::to_string( fraction ) );
+            text.push_back( ' ' );
+            text.append( unit );
+            return text;
+        }
+
+        // Pads the CURRENT line out to `column`, or appends a single space if
+        // it is already past it. Measuring from the last newline is what keeps
+        // the columns aligned in a report built by appending.
+        void
+        pad_to( std::string& text,
+                std::size_t  column )
+        {
+            const auto        newline = text.rfind( '\n' );
+            const std::size_t start   = newline == std::string::npos ? 0U : newline + 1U;
+            const std::size_t width   = text.size() - start;
+            if( width < column )
+            {
+                text.append( column - width, ' ' );
+                return;
+            }
+            text.push_back( ' ' );
+        }
+
+        // "1 call" / "48 calls" -- the unit is a parameter because the same
+        // renderer prints calls, steps and waits.
+        [[nodiscard]]
+        std::string
+        format_count( std::uint64_t    count,
+                      std::string_view singular,
+                      std::string_view plural )
+        {
+            std::string text = std::to_string( count );
+            text.push_back( ' ' );
+            text.append( count == oneCall ? singular : plural );
+            return text;
+        }
+
+        [[nodiscard]]
+        std::vector<grab::diag::Tally>
+        by_total_descending( const grab::diag::Instrument& instrument )
+        {
+            std::vector<grab::diag::Tally> sorted{
+                instrument.tallies().begin(),
+                instrument.tallies().end()
+            };
+            std::ranges::sort( sorted,
+                               []( const grab::diag::Tally& left,
+                                   const grab::diag::Tally& right )
+                               {
+                                   return left.total > right.total;
+                               } );
+            return sorted;
+        }
+
+        void
+        append_tally( std::string&             text,
+                      const grab::diag::Tally& tally,
+                      std::string_view         singular,
+                      std::string_view         plural )
+        {
+            text.append( nameColumn, ' ' );
+            text.append( tally.name );
+            pad_to( text, countColumn );
+            text.append( format_count( tally.calls, singular, plural ) );
+            pad_to( text, totalColumn );
+            text.append( format_duration( tally.total ) );
+            if( tally.calls > oneCall )
+            {
+                pad_to( text, meanColumn );
+                text.append( "mean " );
+                text.append( format_duration( tally.mean() ) );
+                pad_to( text, maxColumn );
+                text.append( "max " );
+                text.append( format_duration( tally.longest ) );
+            }
+            text.push_back( '\n' );
+        }
+
+        [[nodiscard]]
+        const grab::diag::Tally*
+        find_tally( const grab::diag::Instrument& instrument,
+                    std::string_view              name )
+        {
+            for( const auto& tally : instrument.tallies() )
+            {
+                if( tally.name == name )
+                {
+                    return &tally;
+                }
+            }
+            return nullptr;
+        }
+
         // A day. The bound exists so that grace * depth cannot overflow the
         // nanosecond duration the plan is accumulated in.
-        constexpr std::uint64_t    maximumGraceMs = 86'400'000U;
+        constexpr std::uint64_t maximumGraceMs = 86'400'000U;
 
         // The loop wakes on the timer's eventfd; this bounds how long it can
         // block if that wake is ever lost, so a stuck run is a slow run rather
         // than a hung process.
-        constexpr int              maximumWaitMs = 250;
-        constexpr int              minimumWaitMs = 1;
+        constexpr int           maximumWaitMs = 250;
+        constexpr int           minimumWaitMs = 1;
 
         // What to arm when the player wants a tick but states no deadline --
         // an Opaque body, which finishes when it finishes. Polling it at this
         // cadence is what keeps the loop off a spin.
-        constexpr auto             opaquePollPeriod = std::chrono::milliseconds{ 1 };
+        constexpr auto          opaquePollPeriod = std::chrono::milliseconds{ 1 };
 
         void
         print_play_usage()
         {
             ( void )std::fputs( "usage: grab play SEQUENCE.json "
                                 "[--pacing strict|grace|precise] [--grace-ms N] "
-                                "[--dry-run] [--report PATH.jsonl]\n",
+                                "[--dry-run] [--report PATH.jsonl] [--trace]\n",
                                 stderr );
         }
 
@@ -952,6 +1104,77 @@ namespace grab::cli
             }
         }
 
+        // ── The machine-readable half ─────────────────────
+        //
+        // Everything --trace prints, as one JSONL object. The pretty report is
+        // for a human deciding what to optimise; this is for whatever answers
+        // "did that change help" over a hundred runs. Both are built from the
+        // same tallies, so they cannot drift apart.
+        [[nodiscard]]
+        OrderedJson
+        tallies_json( const grab::diag::Instrument& instrument )
+        {
+            OrderedJson array = OrderedJson::array();
+            for( const auto& tally : instrument.tallies() )
+            {
+                array.push_back( OrderedJson{
+                    {    "name", std::string{ tally.name }},
+                    {   "calls",               tally.calls},
+                    {"total_ns",       tally.total.count()},
+                    {  "min_ns",    tally.shortest.count()},
+                    {  "max_ns",     tally.longest.count()},
+                    { "mean_ns",      tally.mean().count()},
+                } );
+            }
+            return array;
+        }
+
+        [[nodiscard]]
+        std::string
+        trace_record( const std::string& run,
+                      const RunTrace&    trace )
+        {
+            const OrderedJson scheduling{
+                {             "arms",              trace.schedule.arms},
+                {          "cancels",           trace.schedule.cancels},
+                {            "fires",             trace.schedule.fires},
+                {           "drains",            trace.schedule.drains},
+                {  "spurious_drains",    trace.schedule.spuriousDrains},
+                {    "nearer_rearms",      trace.schedule.nearerRearms},
+                {    "deepest_armed",      trace.schedule.deepestArmed},
+                {      "deepest_due",        trace.schedule.deepestDue},
+                {"armed_depth_total",   trace.schedule.armedDepthTotal},
+                {  "due_depth_total",     trace.schedule.dueDepthTotal},
+                {          "tallies", tallies_json( trace.scheduling )},
+            };
+
+            const OrderedJson record{
+                {         "run",run                                },
+                {    "sequence",                    trace.sequence},
+                // The discriminator. A consumer that wants only step records
+                // filters on this rather than on the absence of a key.
+                {        "kind",                           "trace"},
+                {       "steps",                       trace.steps},
+                {  "elapsed_ns",             trace.elapsed.count()},
+                {  "planned_ns",             trace.planned.count()},
+                { "unestimated",                 trace.unestimated},
+                {     "load_ns",                trace.load.count()},
+                {"load_tallies", tallies_json( trace.load_phases )},
+                { "run_tallies",         tallies_json( trace.run )},
+                {"pump_tallies",        tallies_json( trace.pump )},
+                {  "scheduling",                        scheduling},
+                {         "ran",                         trace.ran},
+                // True when an instrument ran out of slots. A consumer that
+                // ignores this is averaging over an incomplete accounting.
+                {  "overflowed",
+                 trace.load_phases.overflowed() ||
+                 trace.run.overflowed() ||
+                 trace.pump.overflowed() ||
+                 trace.scheduling.overflowed()                    },
+            };
+            return record.dump();
+        }
+
     }    // namespace
 
     grab::Result<PlayOptions>
@@ -968,6 +1191,11 @@ namespace grab::cli
             if( argument == dryRunFlag )
             {
                 options.dry_run = true;
+                continue;
+            }
+            if( argument == traceFlag )
+            {
+                options.trace = true;
                 continue;
             }
             if( argument == pacingFlag )
@@ -1151,12 +1379,212 @@ namespace grab::cli
         return text;
     }
 
+    void
+    collect_run_tallies( const Sequence&                       program,
+                         const grab::kernel::sequence::Player& player,
+                         RunTrace&                             into )
+    {
+        for( const auto id : program.order() )
+        {
+            const auto* const step = program.find( id );
+            if( step == nullptr || !player.entered_at( id ).has_value() )
+            {
+                // A step that was never entered has no wall time to attribute.
+                // Recording a zero for it would move the mean of its command
+                // kind towards a number nothing measured.
+                continue;
+            }
+            into.run.record(
+                grab::command_name( grab::sequence::kind_of( step->command ) ),
+                player.timing_of( id ).call_duration
+            );
+        }
+    }
+
+    std::string
+    trace_report( const RunTrace& trace )
+    {
+        std::string text;
+
+        // ── Headline ──────────────────────────────────────
+        text.append( trace.sequence.empty() ? "sequence" : trace.sequence );
+        text.append( ": " );
+        text.append( std::to_string( trace.steps ) );
+        text.append( trace.steps == 1U ? " step" : " steps" );
+        if( trace.ran )
+        {
+            text.append( " in " );
+            text.append( format_duration( trace.elapsed ) );
+        }
+        else
+        {
+            text.append( ", not run" );
+        }
+        text.append( "  (planned >= " );
+        text.append( format_duration( trace.planned ) );
+        text.append( ", " );
+        text.append( std::to_string( trace.unestimated ) );
+        text.append( " unestimated)\n" );
+
+        // ── load ──────────────────────────────────────────
+        text.append( "\n  load" );
+        pad_to( text, countColumn );
+        text.append( format_count( oneCall, "call", "calls" ) );
+        pad_to( text, totalColumn );
+        text.append( format_duration( trace.load ) );
+        text.push_back( '\n' );
+        for( const auto& tally : by_total_descending( trace.load_phases ) )
+        {
+            append_tally( text, tally, "call", "calls" );
+        }
+
+        // ── run ───────────────────────────────────────────
+        //
+        // Skipped entirely on a --dry-run: nothing was played, so a section of
+        // zeroes would be a table of measurements nobody made.
+        if( trace.ran )
+        {
+            std::uint64_t played = noCalls;
+            for( const auto& tally : trace.run.tallies() )
+            {
+                played += tally.calls;
+            }
+
+            // "wall span" is not decoration. A step that is entered and
+            // completes inside ONE pump has entered_at == finished_at and
+            // reads 0 here, which is correct and would otherwise look like a
+            // broken instrument. Its real cost is a call cost and lives in the
+            // pump section.
+            text.append( "\n  run (wall span)" );
+            pad_to( text, countColumn );
+            text.append( format_count( played, "step", "steps" ) );
+            pad_to( text, totalColumn );
+            text.append( format_duration( trace.run.total() ) );
+            text.push_back( '\n' );
+            for( const auto& tally : by_total_descending( trace.run ) )
+            {
+                append_tally( text, tally, "call", "calls" );
+            }
+
+            // The Player's own phases, when it exposes them. Kept as its own
+            // section rather than merged into `run`: a pump phase and a
+            // command are not the same kind of thing, and summing them would
+            // double-count the time a command spent inside a pump.
+            if( trace.pump.tallies().begin() != trace.pump.tallies().end() )
+            {
+                // DELIBERATELY NO TOTAL. These phases nest -- play.pump
+                // contains play.enter contains the command's own tally -- so
+                // their sum is not a duration of anything, and printing it
+                // beside the run's wall time would invite exactly the
+                // subtraction that means nothing.
+                text.append( "\n  pump (call cost, phases nest)\n" );
+                for( const auto& tally : by_total_descending( trace.pump ) )
+                {
+                    append_tally( text, tally, "call", "calls" );
+                }
+            }
+        }
+
+        // ── scheduling ────────────────────────────────────
+        //
+        // The one section that is not purely durations, because the questions
+        // it answers are not: "how many wakes delivered nothing" is a count,
+        // and rendering it through a duration formatter would print a spurious
+        // wake count of 3 as "3 ns".
+        text.append( "\n  scheduling\n" );
+        const auto* const wake =
+            find_tally( trace.scheduling,
+                        grab::kernel::scheduling::timer_tally::wakeLatency );
+        if( wake == nullptr )
+        {
+            text.append( nameColumn, ' ' );
+            text.append( "no deadline was ever waited on\n" );
+        }
+        else
+        {
+            text.append( nameColumn, ' ' );
+            text.append( "wake latency" );
+            pad_to( text, countColumn );
+            text.append( format_count( wake->calls, "wait", "waits" ) );
+            pad_to( text, totalColumn );
+            text.append( "worst " );
+            text.append( format_duration( wake->longest ) );
+            pad_to( text, meanColumn );
+            text.append( "mean " );
+            text.append( format_duration( wake->mean() ) );
+            text.push_back( '\n' );
+        }
+
+        text.append( nameColumn, ' ' );
+        text.append( "spurious wakes" );
+        pad_to( text, countColumn );
+        text.append( std::to_string( trace.schedule.spuriousDrains ) );
+        text.append( " of " );
+        text.append( std::to_string( trace.schedule.drains ) );
+        text.append( " drains\n" );
+
+        text.append( nameColumn, ' ' );
+        text.append( "nearer rearms" );
+        pad_to( text, countColumn );
+        text.append( std::to_string( trace.schedule.nearerRearms ) );
+        text.append( " of " );
+        text.append( std::to_string( trace.schedule.arms ) );
+        text.append( " arms\n" );
+
+        text.append( nameColumn, ' ' );
+        text.append( "deepest queue" );
+        pad_to( text, countColumn );
+        text.append( std::to_string( trace.schedule.deepestArmed ) );
+        text.append( " armed, " );
+        text.append( std::to_string( trace.schedule.deepestDue ) );
+        text.append( " due\n" );
+
+        for( const auto& tally : by_total_descending( trace.scheduling ) )
+        {
+            if( tally.name == grab::kernel::scheduling::timer_tally::wakeLatency )
+            {
+                continue;
+            }
+            append_tally( text, tally, "call", "calls" );
+        }
+
+        // ── Overflow ──────────────────────────────────────
+        //
+        // An instrument that ran out of slots stopped recording names it had
+        // not seen before. Saying so is not optional: a report that silently
+        // omits the expensive thing is worse than no report.
+        if( trace.load_phases.overflowed() ||
+            trace.run.overflowed() ||
+            trace.pump.overflowed() ||
+            trace.scheduling.overflowed() )
+        {
+            text.append( "\n  ! this report is INCOMPLETE: an instrument ran out of "
+                         "slots and dropped names it had not seen before\n" );
+        }
+        return text;
+    }
+
     std::vector<std::string>
     report_records( const Sequence&                       program,
-                    const grab::kernel::sequence::Player& player )
+                    const grab::kernel::sequence::Player& player,
+                    const RunTrace*                       trace )
     {
         std::vector<std::string> records;
         records.reserve( program.steps().size() );
+
+        // Timeline origin: the first entry of the run. Emitting raw
+        // steady_clock counts instead would be a number nothing outside this
+        // process can interpret -- steady_clock's epoch is unspecified and
+        // differs between boots.
+        std::optional<Clock::time_point> origin;
+        for( const auto id : program.order() )
+        {
+            const auto entered = player.entered_at( id );
+            if( entered.has_value() && ( !origin.has_value() || *entered < *origin ) )
+            {
+                origin = *entered;
+            }
+        }
 
         const std::string run = player.run_id().to_string();
         for( const auto id : program.order() )
@@ -1208,7 +1636,47 @@ namespace grab::cli
             {
                 record["declared_ns"] = nullptr;
             }
+
+            // Added, never substituted. `wait_ns` is the span the step sat
+            // Ready before it was entered -- the pacing and scheduling cost
+            // attributable to this step, which `call_ns` deliberately excludes
+            // because it measures the body.
+            const auto entered  = player.entered_at( id );
+            const auto ready    = player.ready_at( id );
+            const auto finished = player.finished_at( id );
+
+            record["start_ns"]  = nullptr;
+            record["wait_ns"]   = nullptr;
+            record["end_ns"]    = nullptr;
+            if( entered.has_value() && origin.has_value() )
+            {
+                record["start_ns"] = ( *entered - *origin ).count();
+            }
+            // A ROOT HAS NO READY INSTANT. play() admits the roots without a
+            // clock -- it takes none -- so their ready_at is a
+            // default-constructed time_point, and subtracting it yields the
+            // entry's distance from the steady clock's epoch: days, reported
+            // as a wait. Null is the honest answer, and is why the guard is
+            // against the unset value rather than merely against ordering.
+            constexpr Clock::time_point neverReady{};
+            if( entered.has_value() &&
+                ready.has_value() &&
+                *ready !=
+                neverReady &&
+                *entered >= *ready )
+            {
+                record["wait_ns"] = ( *entered - *ready ).count();
+            }
+            if( finished.has_value() && origin.has_value() && *finished >= *origin )
+            {
+                record["end_ns"] = ( *finished - *origin ).count();
+            }
             records.push_back( record.dump() );
+        }
+
+        if( trace != nullptr )
+        {
+            records.push_back( trace_record( run, *trace ) );
         }
         return records;
     }
@@ -1236,7 +1704,8 @@ namespace grab::cli
     }
 
     grab::Result<void>
-    drive( grab::kernel::sequence::Player& player )
+    drive( grab::kernel::sequence::Player& player,
+           RunTrace*                       trace )
     {
         std::optional<grab::kernel::scheduling::TimerThread> timers;
 
@@ -1302,12 +1771,36 @@ namespace grab::cli
                 break;
             }
             const auto token = timers->arm( wake );
-            wait_readable( descriptor,
-                           std::chrono::duration_cast<std::chrono::milliseconds>(
-                               wake - Clock::now()
-                           ) );
-            timers->cancel( token );
+
+            // ceil, NOT duration_cast. poll() takes whole milliseconds, and
+            // truncating means a 1.9 ms remainder becomes a 1 ms budget that
+            // times out 0.9 ms EARLY -- the loop then cancels, re-arms and
+            // waits again for the same deadline. With waypoint dwells of 4-6 ms
+            // that misfired on roughly every other waypoint: the instrument
+            // measured 1386 spurious wakes of 2767 drains, half of every wait
+            // ending early, and 8301 syscall round trips to accomplish 2767
+            // waits. Rounding up can only overshoot by under a millisecond, and
+            // the deadline is absolute on the timer thread anyway, so the wake
+            // is still governed by the timerfd rather than by this budget.
+            wait_readable(
+                descriptor,
+                std::chrono::ceil<std::chrono::milliseconds>( wake - Clock::now() )
+            );
+
+            // DRAIN BEFORE CANCEL, and the order is load-bearing for the
+            // measurement rather than for the run. cancel() drops the token
+            // from `due_` as well as from the armed set -- that is its
+            // contract -- so cancelling first destroyed every delivery before
+            // it could be collected, and the timer thread's own spurious-wake
+            // counter read 2403 of 2403 on a 199-step run: an artefact of this
+            // loop, not a fact about the scheduler. Draining first collects
+            // the token when the deadline really fired, leaving cancel to do
+            // what it is here for -- retiring a wait that ended early.
+            //
+            // The token is discarded either way, so the run behaves
+            // identically. What changes is that "spurious wake" now means one.
             ( void )timers->drain();
+            timers->cancel( token );
         }
 
         // Whatever ended the loop, nothing may stay entered: an entered step
@@ -1318,22 +1811,44 @@ namespace grab::cli
         {
             ( void )player.interrupt();
         }
+
+        // Harvested before `timers` leaves scope, which is the only moment it
+        // can be: the TimerThread is a local of this function and no caller
+        // ever holds one. stop() first, so the worker is joined and the
+        // snapshot is final rather than a race with a last expiry -- and so
+        // the nominal one-line summary lands here rather than during
+        // destruction on some later line.
+        if( trace != nullptr && timers.has_value() )
+        {
+            timers->stop();
+            trace->scheduling = timers->instrument();
+            trace->schedule   = timers->counters();
+        }
         return outcome;
     }
 
     int
     play_program( const Sequence&                        program,
                   grab::kernel::sequence::CommandRunner& runner,
-                  const PlayOptions&                     options )
+                  const PlayOptions&                     options,
+                  RunTrace*                              trace )
     {
         grab::kernel::sequence::Player player{ program, runner };
-        auto                           outcome  = drive( player );
+        auto                           outcome = drive( player, trace );
 
-        bool                           reported = true;
+        if( trace != nullptr )
+        {
+            trace->ran     = true;
+            trace->elapsed = player.elapsed();
+            collect_run_tallies( program, player, *trace );
+            collect_pump_tallies( player, *trace );
+        }
+
+        bool reported = true;
         if( !options.report.empty() )
         {
             auto written =
-                write_report( options.report, report_records( program, player ) );
+                write_report( options.report, report_records( program, player, trace ) );
             if( !written.has_value() )
             {
                 print_error( written.error().message );
@@ -1400,7 +1915,18 @@ namespace grab::cli
             return usageExitCode;
         }
 
-        auto program =
+        // Timed unconditionally, with two clock reads. `load` happens once per
+        // process, and gating a number a human explicitly asked for behind a
+        // compile level would make --trace a facility you have to rebuild for.
+        //
+        // The loader's own instrument is thread-local and accumulates across
+        // calls by design, so the window has to be opened explicitly. Without
+        // the reset a second `grab play` in one process would report the first
+        // one's parse alongside its own.
+        grab::kernel::sequence::reset_load_instrument();
+        const auto started_loading = Clock::now();
+
+        auto       program =
             grab::kernel::sequence::load( std::filesystem::path{ options->document } );
         if( !program.has_value() )
         {
@@ -1422,10 +1948,37 @@ namespace grab::cli
             return runtimeExitCode;
         }
 
+        // The whole load: read, parse, validate, and rebuild under the
+        // effective pacing. Measured as one span because that is what a caller
+        // waits for; the phases inside it belong to the loader and arrive
+        // through load_phases when it exposes them.
+        RunTrace trace;
+        trace.load = Clock::now() - started_loading;
+
+        // Captured HERE, before planned() and unestimated_steps() run: those
+        // record `ops.*` into the same thread-local instrument, and a phase
+        // breakdown of the load that includes the cost of describing the load
+        // is a breakdown of the wrong thing.
+        trace.load_phases = grab::kernel::sequence::load_instrument();
+
+        trace.sequence    = paced->name();
+        trace.steps       = paced->steps().size();
+        trace.planned     = grab::kernel::sequence::planned( *paced, pacing );
+        trace.unestimated = grab::kernel::sequence::unestimated_steps( *paced );
+
         if( options->dry_run )
         {
             const auto text = dry_run_report( *paced, pacing );
             ( void )std::fwrite( text.data(), sizeof( char ), text.size(), stdout );
+            if( options->trace )
+            {
+                // ran stays false, so the report prints the load timing and
+                // omits the run section entirely rather than filling it with
+                // zeroes from a run that never happened.
+                const auto report = trace_report( trace );
+                ( void )
+                    std::fwrite( report.data(), sizeof( char ), report.size(), stdout );
+            }
             return successExitCode;
         }
 
@@ -1442,8 +1995,18 @@ namespace grab::cli
         const InterruptTrap         trap;
         SeatRunner<InputSeat>       runner{ *seat };
         OutstandingHolds<InputSeat> holds{ runner };
-        const int                   code     = play_program( *paced, runner, *options );
-        const auto                  released = holds.release();
+        const int                   code =
+            play_program( *paced, runner, *options, options->trace ? &trace : nullptr );
+        const auto released = holds.release();
+
+        // Printed on every exit path a run can reach, including a failed one:
+        // a run that aborted at step 140 is exactly when a human wants to know
+        // where the first 139 went.
+        if( options->trace )
+        {
+            const auto report = trace_report( trace );
+            ( void )std::fwrite( report.data(), sizeof( char ), report.size(), stdout );
+        }
 
         log::nominal(
             [&paced, released]( auto& event )

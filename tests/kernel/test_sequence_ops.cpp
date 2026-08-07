@@ -12,16 +12,23 @@
 // forbids.
 
 #include "grab/command.hpp"
+#include "grab/drag.hpp"
+#include "grab/geometry/point.hpp"
+#include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
 #include "kernel/sequence/sequence.hpp"
 #include "kernel/sequence/sequence_ops.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/step_diag.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 // clang-format on
@@ -505,6 +512,273 @@ namespace
         auto interleaved = build_strict( std::move( contended ), hostName );
         ASSERT_TRUE( interleaved.has_value() ) << interleaved.error().message;
         EXPECT_TRUE( validate( *interleaved ).has_value() );
+    }
+
+    // ── statistics() ──────────────────────────────────────
+    //
+    // What the document IS, in numbers. Every assertion here is a structured
+    // value, never log prose: the log record is built from the same struct,
+    // so testing the struct tests both.
+
+    constexpr bool opsTimingCompiledIn =
+        grab::diag::Measure<grab::log::Level::Nominal>::enabled;
+
+    constexpr std::uint64_t             oneCall       = 1U;
+    constexpr std::uint64_t             twoCalls      = 2U;
+    constexpr std::size_t               noneCounted   = 0U;
+    constexpr std::size_t               oneCounted    = 1U;
+    constexpr std::size_t               twoCounted    = 2U;
+    constexpr std::size_t               threeCounted  = 3U;
+    constexpr std::size_t               fourCounted   = 4U;
+    constexpr std::size_t               diamondDepth  = 3U;
+    constexpr std::size_t               diamondFanOut = 2U;
+    constexpr std::size_t               diamondFanIn  = 2U;
+
+    // A paced move whose duration its OWN options already fix: 8 dwells of
+    // 5 ms each is 40 ms per step, knowable before the run and yet counted as
+    // unestimated by planned().
+    constexpr std::int32_t              pacedSteps = 8;
+    constexpr std::chrono::milliseconds pacedDwell{ 5 };
+    constexpr std::chrono::milliseconds perPacedMove{ 40 };
+    constexpr std::chrono::milliseconds threePacedMoves{ 120 };
+
+    constexpr grab::geometry::Point     moveTarget{ .x = 40, .y = 60 };
+
+    const std::string                   firstHandle  = "circle-a";
+    const std::string                   secondHandle = "circle-b";
+    constexpr std::string_view          unusedPhase  = "ops.never-recorded";
+
+    [[nodiscard]]
+    grab::sequence::Step
+    move_step( std::string                         label,
+               std::vector<grab::sequence::StepId> after )
+    {
+        return grab::sequence::Step{
+            .label = std::move( label ),
+            .command =
+                grab::sequence::MoveCommand{
+                                            .to = moveTarget,
+                                            .options =
+                        grab::input::DragOptions{
+                            .interpolation_steps = pacedSteps,
+                            .step_dwell          = pacedDwell
+                        }, },
+            .after = std::move( after ),
+        };
+    }
+
+    [[nodiscard]]
+    grab::sequence::Step
+    overlay_add_step( std::string                         label,
+                      std::string                         handle,
+                      std::vector<grab::sequence::StepId> after )
+    {
+        return grab::sequence::Step{
+            .label = std::move( label ),
+            .command =
+                grab::sequence::OverlayAddCommand{ .handle = std::move( handle ) },
+            .after = std::move( after ),
+        };
+    }
+
+    [[nodiscard]]
+    const grab::diag::Tally*
+    tally_for( const grab::diag::Instrument& instrument,
+               std::string_view              name )
+    {
+        for( const auto& tally : instrument.tallies() )
+        {
+            if( tally.name == name )
+            {
+                return &tally;
+            }
+        }
+        return nullptr;
+    }
+
+    // The diamond is the shape that separates depth from step count and
+    // fan-out from edge count: four steps, four edges, but a critical path of
+    // three and a widest branch of two. A document that reports depth == steps
+    // has no parallelism to exploit, and that is exactly the thing nobody
+    // could see before.
+    TEST( SequenceOps,
+          StatisticsDescribeADiamondsShape )
+    {
+        auto built = build_strict(
+            { click_step( firstLabel, {} ),
+              click_step( secondLabel, { step_id( firstIndex ) } ),
+              click_step( thirdLabel, { step_id( firstIndex ) } ),
+              click_step( fourthLabel,
+                          { step_id( secondIndex ), step_id( thirdIndex ) } ) },
+            hostName
+        );
+        ASSERT_TRUE( built.has_value() ) << built.error().message;
+
+        const auto stats = grab::kernel::sequence::statistics( *built );
+        EXPECT_EQ( stats.steps, fourSteps );
+        EXPECT_EQ( stats.edges, fourEdges );
+        EXPECT_EQ( stats.labels, fourCounted );
+        EXPECT_EQ( stats.handles, noneCounted );
+        EXPECT_EQ( stats.depth, diamondDepth );
+        EXPECT_EQ( stats.max_fan_out, diamondFanOut );
+        EXPECT_EQ( stats.max_fan_in, diamondFanIn );
+
+        // Clicks declare nothing and derive nothing.
+        EXPECT_EQ( stats.declared_durations, noneCounted );
+        EXPECT_EQ( stats.undeclared_durations, fourCounted );
+        EXPECT_EQ( stats.derivable_durations, noneCounted );
+    }
+
+    // A chain has depth equal to its step count and no branching at all; an
+    // empty document has depth zero rather than one.
+    TEST( SequenceOps,
+          StatisticsOfAChainAndOfNothing )
+    {
+        auto chain =
+            build_strict( { click_step( firstLabel, {} ),
+                            click_step( secondLabel, { step_id( firstIndex ) } ),
+                            click_step( thirdLabel, { step_id( secondIndex ) } ) },
+                          hostName );
+        ASSERT_TRUE( chain.has_value() ) << chain.error().message;
+
+        const auto chained = grab::kernel::sequence::statistics( *chain );
+        EXPECT_EQ( chained.steps, threeSteps );
+        EXPECT_EQ( chained.depth, threeCounted );
+        EXPECT_EQ( chained.max_fan_out, oneCounted );
+        EXPECT_EQ( chained.max_fan_in, oneCounted );
+
+        auto empty = build_strict( {}, hostName );
+        ASSERT_TRUE( empty.has_value() ) << empty.error().message;
+
+        const auto nothing = grab::kernel::sequence::statistics( *empty );
+        EXPECT_EQ( nothing.steps, noSteps );
+        EXPECT_EQ( nothing.depth, noneCounted );
+        EXPECT_EQ( nothing.max_fan_out, noneCounted );
+        EXPECT_EQ( nothing.max_fan_in, noneCounted );
+    }
+
+    // THE finding this instrumentation exists to surface. A paced move's
+    // duration is interpolation_steps x step_dwell — fully knowable from its
+    // own options — yet planned() counts only time.wait, so all three moves
+    // below are reported as unestimated and contribute nothing to the plan.
+    // The gap is exactly derivable_total, and it is now a number rather than
+    // a suspicion.
+    TEST( SequenceOps,
+          StatisticsCountTheDurationsPlannedRefusesToDerive )
+    {
+        auto built = build_strict( { move_step( firstLabel, {} ),
+                                     move_step( secondLabel, { step_id( firstIndex ) } ),
+                                     move_step( thirdLabel, { step_id( secondIndex ) } ),
+                                     wait_step( fourthLabel,
+                                                stepWait,
+                                                { step_id( thirdIndex ) },
+                                                noExtraGrace ) },
+                                   hostName );
+        ASSERT_TRUE( built.has_value() ) << built.error().message;
+
+        const auto stats = grab::kernel::sequence::statistics( *built );
+        EXPECT_EQ( stats.declared_durations, oneCounted );
+        EXPECT_EQ( stats.undeclared_durations, threeCounted );
+        EXPECT_EQ( stats.derivable_durations, threeCounted );
+        EXPECT_EQ( stats.declared_total, std::chrono::nanoseconds{ stepWait } );
+        EXPECT_EQ( stats.derivable_total, std::chrono::nanoseconds{ threePacedMoves } );
+
+        // planned() is unchanged: the wait and nothing else. The three moves
+        // are the whole of the difference between the plan and the run.
+        EXPECT_EQ( planned( *built ), std::chrono::nanoseconds{ stepWait } );
+        EXPECT_EQ( unestimated_steps( *built ), threeSteps );
+        EXPECT_EQ( unestimated_steps( *built ), stats.undeclared_durations );
+
+        const auto single =
+            grab::kernel::sequence::derivable_duration( built->steps()[firstIndex] );
+        ASSERT_TRUE( single.has_value() );
+        EXPECT_EQ( *single, std::chrono::nanoseconds{ perPacedMove } );
+
+        // A wait DECLARES its duration; it does not derive one. Keeping the
+        // two apart is what stops the same 100 ms being counted twice.
+        EXPECT_FALSE(
+            grab::kernel::sequence::derivable_duration( built->steps()[fourthIndex] )
+                .has_value()
+        );
+    }
+
+    // Handles are counted by the step that CREATES one, and only once per
+    // distinct name: an overlay.add with an empty handle is fire-and-forget
+    // and names nothing at all.
+    TEST( SequenceOps,
+          StatisticsCountDistinctOverlayHandles )
+    {
+        auto built = build_strict(
+            { overlay_add_step( firstLabel, firstHandle, {} ),
+              overlay_add_step( secondLabel, secondHandle, { step_id( firstIndex ) } ),
+              overlay_add_step( thirdLabel, {}, { step_id( secondIndex ) } ) },
+            hostName
+        );
+        ASSERT_TRUE( built.has_value() ) << built.error().message;
+
+        const auto stats = grab::kernel::sequence::statistics( *built );
+        EXPECT_EQ( stats.steps, threeSteps );
+        EXPECT_EQ( stats.handles, twoCounted );
+        EXPECT_EQ( stats.labels, threeCounted );
+    }
+
+    // planned() and splice() are both O(V + E) and both reachable from the
+    // CLI, so both are tallied. splice() calls build(), which is why the
+    // instrument must NOT reset itself per operation.
+    TEST( SequenceOps,
+          PlannedAndSpliceAreTallied )
+    {
+        grab::kernel::sequence::reset_load_instrument();
+
+        auto host =
+            build_strict( { click_step( firstLabel, {} ),
+                            click_step( secondLabel, { step_id( firstIndex ) } ) },
+                          hostName );
+        ASSERT_TRUE( host.has_value() ) << host.error().message;
+        auto insert =
+            build_strict( { click_step( injectedFirstLabel, {} ) }, insertName );
+        ASSERT_TRUE( insert.has_value() ) << insert.error().message;
+
+        ( void )planned( *host );
+        ( void )planned( *host, grab::sequence::PacingOptions{} );
+        auto spliced = splice( *host, step_id( firstIndex ), *insert );
+        ASSERT_TRUE( spliced.has_value() ) << spliced.error().message;
+        const auto stats = grab::kernel::sequence::statistics( *spliced );
+        EXPECT_EQ( stats.steps, threeSteps );
+
+        const auto& instrument = grab::kernel::sequence::load_instrument();
+        EXPECT_FALSE( instrument.overflowed() );
+        EXPECT_EQ( tally_for( instrument, unusedPhase ), nullptr );
+
+        if constexpr( !opsTimingCompiledIn )
+        {
+            EXPECT_EQ( instrument.tallies().size(), noneCounted );
+            return;
+        }
+
+        // Two planned() calls, one tally: the single-argument overload
+        // delegates to the other and is deliberately not timed twice.
+        const auto* const plan =
+            tally_for( instrument, grab::kernel::sequence::phase::planned );
+        ASSERT_NE( plan, nullptr );
+        EXPECT_EQ( plan->calls, twoCalls );
+
+        const auto* const injected =
+            tally_for( instrument, grab::kernel::sequence::phase::splice );
+        ASSERT_NE( injected, nullptr );
+        EXPECT_EQ( injected->calls, oneCall );
+
+        const auto* const walked =
+            tally_for( instrument, grab::kernel::sequence::phase::statistics );
+        ASSERT_NE( walked, nullptr );
+        EXPECT_EQ( walked->calls, oneCall );
+
+        // splice() builds the merged document, so its own tally has to cover
+        // the build it performs.
+        const auto* const built =
+            tally_for( instrument, grab::kernel::sequence::phase::build );
+        ASSERT_NE( built, nullptr );
+        EXPECT_GE( injected->total, built->shortest );
     }
 
 }    // namespace

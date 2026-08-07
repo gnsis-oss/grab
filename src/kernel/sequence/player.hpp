@@ -26,6 +26,8 @@
 #include "grab/sequence_types.hpp"
 #include "grab/trace.hpp"
 #include "kernel/sequence/sequence.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/step_diag.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -185,6 +187,59 @@ namespace grab::kernel::sequence
     // applies. The count is the Player's business; the class is not.
     inline constexpr std::uint32_t maxRetriesPerStep = 1U;
 
+    // TIMING IS GATED AT NOMINAL, NOT VERBOSE, so the instrument is populated
+    // exactly when the run summary that reports it can be emitted — a summary
+    // printing zeros because the numbers needed a different ceiling is worse
+    // than no summary at all.
+    //
+    // It is a COMPILE gate only: `diag::Measure` reads no runtime level, so
+    // the clock reads happen whatever `--log-level` says. That is deliberate.
+    // `instrument()` is a QUERY, and a caller asking a finished run where its
+    // time went must not be told to run it again with logging on. Two
+    // steady_clock reads per dispatch, against a scheduler whose frontier is
+    // 2-10 wide, is not a cost the pump can feel; at
+    // `-DGRAB_LOG_LEVEL=off` both the timers and the summary disappear
+    // together.
+    inline constexpr log::Level    measureLevel = log::Level::Nominal;
+
+    // The PUMP's phases, verbatim as they appear in `Player::instrument()`.
+    // They re-open the `phase` namespace sequence.hpp opened for the LOAD
+    // path, for the reason stated there: an Instrument compares the data
+    // pointer before the content, so a name has to be one object rather than
+    // two equal spellings. The `play.` prefix keeps a run's tallies apart from
+    // `load.`/`ops.` in a report that shows both.
+    //
+    // THEY ARE PARTLY NESTED, and reading the report needs to know how:
+    //
+    //   play.pump        the whole pump() call, so it contains every term
+    //                    below.
+    //   play.ready_scan  the admission DECISION only — eligibility, the
+    //                    ready-at comparison, the find() and the entry
+    //                    bookkeeping. It stops before the enter() it leads to,
+    //                    so scheduling overhead is a term rather than a
+    //                    subtraction.
+    //   play.enter / play.tick / play.exit
+    //                    the three CommandRunner dispatches, nothing else.
+    //
+    // So `play.pump - (play.enter + play.tick + play.exit)` is what the
+    // scheduler spent on its own behalf.
+    //
+    // Every dispatch is ALSO tallied under `grab::command_name( kind )`, so
+    // one run answers both "which phase" and "which op dominates" without a
+    // second pass. Those two axes overlap by construction: summing every tally
+    // double-counts, which is why the summary reports them per name and never
+    // as a total.
+    namespace phase
+    {
+
+        inline constexpr std::string_view playPump      = "play.pump";
+        inline constexpr std::string_view playReadyScan = "play.ready_scan";
+        inline constexpr std::string_view playEnter     = "play.enter";
+        inline constexpr std::string_view playTick      = "play.tick";
+        inline constexpr std::string_view playExit      = "play.exit";
+
+    }    // namespace phase
+
     class Player final
     {
         public:
@@ -323,6 +378,24 @@ namespace grab::kernel::sequence
             const Sequence*
             program() const noexcept;
 
+            // WHERE THE RUN SPENT ITS TIME, by pump phase and by CommandKind
+            // (see `phase` above for how the two axes overlap). Accumulated by
+            // pump() itself, so it needs no profiler and no second run; empty
+            // when the build's log ceiling is `off`.
+            //
+            // Check `overflowed()` before presenting it as a full accounting:
+            // a full instrument drops new names rather than growing.
+            [[nodiscard]]
+            const diag::Instrument&
+            instrument() const noexcept;
+
+            // The widest the frontier ever got. THE RUN'S REALISED
+            // PARALLELISM: a diamond whose branches never overlapped and a
+            // chain look identical in every other number this class reports.
+            [[nodiscard]]
+            std::size_t
+            deepest_frontier() const noexcept;
+
         private:
 
             // Per-step run state, parallel to steps() and subscripted by
@@ -348,21 +421,49 @@ namespace grab::kernel::sequence
             bool
             is_terminal( grab::sequence::StepId id ) const;
 
+            // THE ONE PLACE A StepStatus CHANGES. Every transition is a state
+            // change someone debugging a stuck run needs to see, so the
+            // assignment and the log line are the same call — a second way to
+            // write status_ would be a transition nobody can observe.
+            void
+            set_status( grab::sequence::StepId                id,
+                        grab::sequence::StepStatus            next,
+                        std::chrono::steady_clock::time_point now );
+
+            // THE ONE PLACE PlayState CHANGES, for the same reason.
+            void
+            set_state( grab::sequence::PlayState next );
+
+            // Frontier admission: sets ready_at, pushes, and records the new
+            // depth. The counterpart of drop_from_frontier().
+            void
+            admit_to_frontier( grab::sequence::StepId                id,
+                               std::chrono::steady_clock::time_point ready_at );
+
             void
             drop_from_frontier( grab::sequence::StepId id );
 
             // exit() once, joining a blocking worker first. Folds the outcome
             // into neutralization_ only when the body had not completed, so a
-            // clean run still reports NotAttempted.
-            void
+            // clean run still reports NotAttempted. Answers what exit() said,
+            // so the unwind can log whether the step released anything without
+            // re-deriving it from the run's folded verdict.
+            grab::NeutralizationOutcome
             neutralize( grab::sequence::StepId                id,
                         std::chrono::steady_clock::time_point now );
 
             // The other half of neutralize(), for the steps neutralize() can
             // never reach: the ones that finished cleanly and were exited by
             // succeed(). See CommandRunner::release_holds.
-            void
+            grab::NeutralizationOutcome
             reap_holds( grab::sequence::StepId id );
+
+            // The run summary, at nominal, exactly once. Called from the tail
+            // of pump(), interrupt() and skip() rather than from set_state(),
+            // so the `pump` tally it prints already includes the pump that
+            // ended the run.
+            void
+            report_run();
 
             // One place that folds a released/failed/nothing-held report into
             // the run's verdict, so neutralize() and reap_holds() cannot drift
@@ -418,6 +519,11 @@ namespace grab::kernel::sequence
             std::chrono::steady_clock::time_point last_finish_{};
             bool                                  anything_entered_{ false };
             grab::Uuid                            run_id_{};
+            // Fixed slots, no allocation, and it outlives the run so the CLI
+            // can read it after the frontier has emptied.
+            diag::Instrument                      instrument_{};
+            std::size_t                           deepest_frontier_{ 0U };
+            bool                                  reported_{ false };
     };
 
 }    // namespace grab::kernel::sequence

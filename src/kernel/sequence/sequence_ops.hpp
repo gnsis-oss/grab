@@ -14,15 +14,77 @@
 // tooltips, :hover CSS — so an optimiser that runs by default silently breaks
 // the sequences it speeds up.
 
+#include "grab/command.hpp"
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
 #include "kernel/sequence/sequence.hpp"
 
 #include <chrono>
 #include <cstddef>
+#include <optional>
 
 namespace grab::kernel::sequence
 {
+
+    // What a loaded document actually IS, in numbers, so that "loading is
+    // slow" and "planning is useless" can be attributed to the document
+    // rather than guessed at.
+    //
+    // The three duration counts partition the steps: every step is declared,
+    // derivable or neither.
+    //
+    //   declared    time.wait, the only duration the GRAMMAR carries.
+    //   derivable   a paced input.move / input.follow / input.drag, whose
+    //               duration is interpolation_steps x step_dwell and is
+    //               therefore knowable from its own options — yet planned()
+    //               counts it as unestimated, because planned() reads
+    //               declared durations only.
+    //   neither     a click, a keystroke, a capture: unknown until measured.
+    //
+    // `derivable` is the one that makes the plan a lie by omission on a
+    // motion-heavy document, which is why it is counted here rather than left
+    // invisible.
+    struct DocumentStats
+    {
+            std::size_t              steps{};
+            std::size_t              edges{};
+            std::size_t              labels{};
+            std::size_t              handles{};
+
+            // Widest branch out of one step, widest join into one step.
+            std::size_t              max_fan_out{};
+            std::size_t              max_fan_in{};
+
+            // The critical path, counted in STEPS: a linear document of N
+            // steps has depth N, a diamond has depth 3, and an empty document
+            // has depth 0. Depth against step count is what says whether a
+            // document has any parallelism to exploit.
+            std::size_t              depth{};
+
+            std::size_t              declared_durations{};
+            std::size_t              undeclared_durations{};
+            std::size_t              derivable_durations{};
+
+            std::chrono::nanoseconds declared_total{};
+            std::chrono::nanoseconds derivable_total{};
+    };
+
+    // O(V + E), one pass. Not cached on the Sequence: a document is loaded
+    // once and this is asked for once, so caching would trade a permanent
+    // 100-odd bytes per Sequence for a walk nobody repeats.
+    [[nodiscard]]
+    DocumentStats
+    statistics( const Sequence& program );
+
+    // The duration a step's OWN options already determine, for the paced
+    // motion ops, and nullopt for everything else including time.wait — which
+    // DECLARES its duration rather than deriving it.
+    //
+    // It is a floor, not a promise: interpolation_steps x step_dwell counts
+    // the dwells and charges nothing for the XTest round trips between them.
+    [[nodiscard]]
+    std::optional<std::chrono::nanoseconds>
+    derivable_duration( const grab::sequence::Step& step ) noexcept;
 
     // Injected steps take fresh indices ABOVE the host's high-water mark
     // rather than being interleaved, so no live index is reused and every

@@ -28,6 +28,8 @@
 #include "grab/sequence_types.hpp"
 #include "grab/space.hpp"
 #include "kernel/sequence/execute.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/step_diag.hpp"
 #include "support/recording_seat.hpp"
 
 // clang-format off
@@ -1964,6 +1966,446 @@ namespace
                    Status::Failure );
         ASSERT_EQ( seat.attempts().size(), oneCall );
         EXPECT_EQ( seat.attempts().front(), OverlayEvent::Op::Add );
+    }
+
+    // ── Introspection ────────────────────────────────────────
+    //
+    // Everything below asserts STRUCTURED VALUES — tally names, tally counts,
+    // CommandState::worst_overshoot, the capability table — and never log
+    // prose. A log line is a diagnostic for a human; a test that pattern-matched
+    // one would make the wording the contract, which CLAUDE.md §5 forbids.
+    //
+    // Time is fabricated, as everywhere else in this file, so "the pacing error
+    // is exactly three milliseconds" is a statement about the executor's
+    // arithmetic rather than about the machine the suite happened to run on.
+
+    namespace exec_detail = grab::kernel::sequence::detail;
+
+    using Instrument      = grab::diag::Instrument;
+    using Phase           = exec_detail::Phase;
+
+    // The verbatim tally names. Pinned here because the CLI unit prints them
+    // and the Player unit tallies alongside them: a silent rename would leave
+    // two reports that no longer add up.
+    constexpr std::string_view enterMoveTally  = "enter:input.move";
+    constexpr std::string_view tickMoveTally   = "tick:input.move";
+    constexpr std::string_view exitMoveTally   = "exit:input.move";
+    constexpr std::string_view enterDragTally  = "enter:input.drag";
+    constexpr std::string_view tickDragTally   = "tick:input.drag";
+    constexpr std::string_view seatMoveTally   = "seat.move_pointer_absolute";
+    constexpr std::string_view seatFlushTally  = "seat.flush";
+    constexpr std::string_view seatButtonTally = "seat.button";
+
+    static_assert( exec_detail::tally_name( Phase::Enter,
+                                            grab::CommandKind::Move ) ==
+                   enterMoveTally );
+    static_assert( exec_detail::tally_name( Phase::Tick,
+                                            grab::CommandKind::Move ) == tickMoveTally );
+    static_assert( exec_detail::tally_name( Phase::Exit,
+                                            grab::CommandKind::Move ) == exitMoveTally );
+    static_assert( exec_detail::tally_name( Phase::Enter,
+                                            grab::CommandKind::Drag ) ==
+                   enterDragTally );
+    static_assert( exec_detail::tallies::seatMove == seatMoveTally );
+    static_assert( exec_detail::tallies::seatFlush == seatFlushTally );
+    static_assert( exec_detail::tallies::seatButton == seatButtonTally );
+
+    // Instrument compares the POINTER before the contents, so every call for a
+    // given phase and kind must hand it the same object. A table that returned
+    // a fresh view each time would still be correct and would silently cost a
+    // string compare on the hottest path in the executor.
+    static_assert( exec_detail::tally_name( Phase::Tick,
+                                            grab::CommandKind::Drag )
+                       .data() == exec_detail::tally_name( Phase::Tick,
+                                                           grab::CommandKind::Drag )
+                                      .data() );
+
+    // The compile gate is the one thing that makes "it compiles out" checkable
+    // rather than asserted, so it is asserted against log::enabled directly
+    // instead of being restated.
+    static_assert( grab::diag::Measure<exec_detail::measureLevel>::enabled ==
+                   grab::log::enabled( exec_detail::measureLevel ) );
+    static_assert( exec_detail::Sample<exec_detail::measureLevel>::enabled ==
+                   grab::diag::Measure<exec_detail::measureLevel>::enabled );
+
+    // Compiled out, a Measure keeps its instrument pointer and its name but not
+    // its clock reading — the time_point member vanishes under
+    // [[no_unique_address]] — and a Sample around one is empty outright. The
+    // `enabled ||` prefix is what lets this assertion hold at every ceiling:
+    // above the gate there is nothing to claim.
+    constexpr std::size_t measureFieldBytes =
+        sizeof( Instrument* ) + sizeof( std::string_view );
+    static_assert( grab::diag::Measure<exec_detail::measureLevel>::enabled ||
+                   sizeof( grab::diag::Measure<exec_detail::measureLevel> ) <=
+                   measureFieldBytes );
+    static_assert( exec_detail::Sample<exec_detail::measureLevel>::enabled ||
+                   sizeof( exec_detail::Sample<exec_detail::measureLevel> ) == 1U );
+
+    // A context that never names an instrument is the default, and the whole
+    // point of defaulting it is that every existing caller keeps compiling.
+    static_assert( ExecContext<SequenceSeat>{}.instrument == nullptr );
+
+    // The concept each command needs, asserted at compile time so a rejection
+    // that "names the missing concept" is a checkable claim rather than a
+    // sentence in a log.
+    static_assert( exec_detail::required_capability( grab::CommandKind::Move ) ==
+                   exec_detail::pointerSeatConcept );
+    static_assert( exec_detail::required_capability( grab::CommandKind::Drag ) ==
+                   exec_detail::pointerSeatConcept );
+    static_assert( exec_detail::required_capability( grab::CommandKind::KeyDown ) ==
+                   exec_detail::keyboardSeatConcept );
+    static_assert( exec_detail::required_capability( grab::CommandKind::Type ) ==
+                   exec_detail::textSeatConcept );
+    static_assert( exec_detail::required_capability( grab::CommandKind::Capture ) ==
+                   exec_detail::capturingSeatConcept );
+    static_assert( exec_detail::required_capability( grab::CommandKind::OverlayGrab ) ==
+                   exec_detail::overlaySeatConcept );
+    // time.wait touches no seat at all, so it can never be rejected for one.
+    static_assert( exec_detail::required_capability( grab::CommandKind::Wait ).empty() );
+
+    [[nodiscard]]
+    const grab::diag::Tally*
+    tally_for( const Instrument& instrument,
+               std::string_view  name )
+    {
+        for( const auto& tally : instrument.tallies() )
+        {
+            if( tally.name == name )
+            {
+                return &tally;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]]
+    std::uint64_t
+    calls_of( const Instrument& instrument,
+              std::string_view  name )
+    {
+        const auto* const tally = tally_for( instrument, name );
+        return tally == nullptr ? 0U : tally->calls;
+    }
+
+    // Below measureLevel there is no timer to construct and therefore nothing
+    // to tally. Asserting the counts unconditionally would turn "the
+    // instrumentation compiles out" — the exact property a GRAB_LOG_LEVEL=off
+    // build exists to prove — into a suite failure, so the expectation follows
+    // the gate instead of contradicting it.
+    constexpr bool timingCompiledIn =
+        exec_detail::Sample<exec_detail::measureLevel>::enabled;
+
+    [[nodiscard]]
+    std::uint64_t
+    expected_calls( std::uint64_t when_compiled_in ) noexcept
+    {
+        return timingCompiledIn ? when_compiled_in : 0U;
+    }
+
+    // One paced move, walked exactly on its deadlines. Shared by the tally test
+    // and the on-time half of the pacing test so neither can drift from the
+    // other's idea of what "on time" means.
+    void
+    walk_a_paced_move( SequenceSeat&              seat,
+                       ExecContext<SequenceSeat>& context,
+                       CommandState&              state,
+                       std::chrono::milliseconds  lateBy )
+    {
+        const grab::sequence::Command command{
+            grab::sequence::MoveCommand{
+                                        .from    = moveFrom,
+                                        .to      = moveTo,
+                                        .options = paced_options( moveSteps, moveDwell ),
+                                        }
+        };
+
+        set_clock( context, seat, fabricated_start() );
+        ASSERT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Running );
+
+        for( std::size_t index = 0U; index < expectedMoveX.size(); ++index )
+        {
+            const auto ordinal =
+                static_cast<std::chrono::milliseconds::rep>( index + 1U );
+            set_clock( context,
+                       seat,
+                       fabricated_start() + ( moveDwell * ordinal ) + lateBy );
+            ( void )grab::kernel::sequence::tick( command, state, context, context.now );
+        }
+
+        grab::kernel::sequence::exit( command, state, context );
+    }
+
+    constexpr auto          onTime     = std::chrono::milliseconds{ 0 };
+    constexpr auto          moveLateBy = std::chrono::milliseconds{ 3 };
+    constexpr std::uint64_t oneTally   = 1U;
+    // Four ticks, one per waypoint.
+    constexpr std::uint64_t moveTickCount = 4U;
+    // The origin warp plus one per waypoint, each of which is a move and a
+    // flush: the flush is not optional, or the waypoint sits in the output
+    // buffer and lands whenever it next drains.
+    constexpr std::uint64_t moveSeatCalls = 5U;
+
+    TEST( ExecuteInstrument,
+          APacedMoveTalliesEveryPhaseOnceAndEverySeatRoundTripItMade )
+    {
+        SequenceSeat              seat;
+        Instrument                instrument;
+        ExecContext<SequenceSeat> context{
+            .seat       = &seat,
+            .timers     = nullptr,
+            .now        = fabricated_start(),
+            .instrument = &instrument,
+        };
+        CommandState state;
+
+        walk_a_paced_move( seat, context, state, onTime );
+
+        // The walk itself: one waypoint per interpolation step, which is what
+        // every tally below is counted against.
+        EXPECT_EQ( state.emitted, static_cast<std::size_t>( moveSteps ) );
+        EXPECT_EQ( state.waypoints.size(), static_cast<std::size_t>( moveSteps ) );
+
+        // One tally per phase. enter() and exit() run once each; tick() ran
+        // once per waypoint.
+        EXPECT_EQ( calls_of( instrument, enterMoveTally ), expected_calls( oneTally ) );
+        EXPECT_EQ( calls_of( instrument, tickMoveTally ),
+                   expected_calls( moveTickCount ) );
+        EXPECT_EQ( calls_of( instrument, exitMoveTally ), expected_calls( oneTally ) );
+
+        // ...and the seat round trips underneath them, tallied apart. This is
+        // the split the exercise exists for: a slow move and a slow server are
+        // different bugs with the same symptom.
+        EXPECT_EQ( calls_of( instrument, seatMoveTally ),
+                   expected_calls( moveSeatCalls ) );
+        EXPECT_EQ( calls_of( instrument, seatFlushTally ),
+                   expected_calls( moveSeatCalls ) );
+
+        // A move presses nothing, so no button round trip was made and no slot
+        // was claimed for one.
+        EXPECT_EQ( tally_for( instrument, seatButtonTally ), nullptr );
+
+        // Every name this run produced fitted, so the report is a full
+        // accounting rather than a partial one.
+        EXPECT_FALSE( instrument.overflowed() );
+        if constexpr( timingCompiledIn )
+        {
+            EXPECT_GT( instrument.total(), std::chrono::nanoseconds::zero() );
+        }
+    }
+
+    TEST( ExecuteInstrument,
+          ThePacingErrorIsZeroOnTheDeadlineAndExactlyTheLatenessWhenTheTickIsLate )
+    {
+        {
+            SequenceSeat              seat;
+            ExecContext<SequenceSeat> context{
+                .seat       = &seat,
+                .timers     = nullptr,
+                .now        = fabricated_start(),
+                .instrument = nullptr,
+            };
+            CommandState state;
+            walk_a_paced_move( seat, context, state, onTime );
+
+            // Fabricated exactly on each deadline, so the executor owes zero.
+            // A number that could not be zero would not be measuring anything.
+            EXPECT_EQ( state.worst_overshoot, std::chrono::nanoseconds::zero() );
+        }
+        {
+            SequenceSeat              seat;
+            ExecContext<SequenceSeat> context{
+                .seat       = &seat,
+                .timers     = nullptr,
+                .now        = fabricated_start(),
+                .instrument = nullptr,
+            };
+            CommandState state;
+            walk_a_paced_move( seat, context, state, moveLateBy );
+
+            // Every tick was late by the same amount, so the worst single
+            // overshoot is exactly that — not a multiple of it. The walk never
+            // catches up by firing the remainder early, and it never
+            // accumulates the error either.
+            EXPECT_EQ( state.worst_overshoot, moveLateBy );
+            EXPECT_EQ( state.emitted, static_cast<std::size_t>( moveSteps ) );
+        }
+    }
+
+    TEST( ExecuteInstrument,
+          ANullInstrumentChangesNothingAboutWhatTheRunDoes )
+    {
+        SequenceSeat              measured_seat;
+        Instrument                instrument;
+        ExecContext<SequenceSeat> measured_context{
+            .seat       = &measured_seat,
+            .timers     = nullptr,
+            .now        = fabricated_start(),
+            .instrument = &instrument,
+        };
+        CommandState measured_state;
+        walk_a_paced_move( measured_seat, measured_context, measured_state, onTime );
+
+        // The same run with the field left off entirely — which is how every
+        // caller that predates the instrument spells it.
+        SequenceSeat              plain_seat;
+        ExecContext<SequenceSeat> plain_context{
+            .seat   = &plain_seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+        CommandState plain_state;
+        walk_a_paced_move( plain_seat, plain_context, plain_state, onTime );
+
+        ASSERT_EQ( plain_context.instrument, nullptr );
+        EXPECT_EQ( plain_state.emitted, measured_state.emitted );
+        EXPECT_EQ( plain_state.worst_overshoot, measured_state.worst_overshoot );
+        ASSERT_EQ( plain_seat.events().size(), measured_seat.events().size() );
+        for( std::size_t index = 0U; index < plain_seat.events().size(); ++index )
+        {
+            const auto& plain    = plain_seat.events().at( index );
+            const auto& measured = measured_seat.events().at( index );
+            EXPECT_EQ( plain.kind, measured.kind );
+            EXPECT_EQ( plain.x, measured.x );
+            EXPECT_EQ( plain.y, measured.y );
+            EXPECT_EQ( plain.at, measured.at );
+        }
+    }
+
+    constexpr std::uint64_t dragButtonCalls = 2U;
+
+    TEST( ExecuteInstrument,
+          ADragTalliesItsButtonRoundTripsApartFromItsWaypoints )
+    {
+        SequenceSeat              seat;
+        Instrument                instrument;
+        ExecContext<SequenceSeat> context{
+            .seat       = &seat,
+            .timers     = nullptr,
+            .now        = fabricated_start(),
+            .instrument = &instrument,
+        };
+        CommandState                  state;
+        const grab::sequence::Command command{
+            grab::sequence::DragCommand{
+                                        .from    = moveFrom,
+                                        .to      = moveTo,
+                                        .button  = grab::input::primaryButton,
+                                        .options = paced_options( moveSteps, moveDwell ),
+                                        }
+        };
+
+        set_clock( context, seat, fabricated_start() );
+        ASSERT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                   Status::Running );
+        for( std::size_t index = 0U; index < expectedMoveX.size(); ++index )
+        {
+            const auto ordinal =
+                static_cast<std::chrono::milliseconds::rep>( index + 1U );
+            set_clock( context, seat, fabricated_start() + ( moveDwell * ordinal ) );
+            ( void )grab::kernel::sequence::tick( command, state, context, context.now );
+        }
+        grab::kernel::sequence::exit( command, state, context );
+
+        EXPECT_EQ( calls_of( instrument, enterDragTally ), expected_calls( oneTally ) );
+        EXPECT_EQ( calls_of( instrument, tickDragTally ),
+                   expected_calls( moveTickCount ) );
+        // Press at enter(), release on the tick that finished the walk. Both go
+        // through the same seat verb and neither is charged to a waypoint.
+        EXPECT_EQ( calls_of( instrument, seatButtonTally ),
+                   expected_calls( dragButtonCalls ) );
+        EXPECT_EQ( calls_of( instrument, seatMoveTally ),
+                   expected_calls( moveSeatCalls ) );
+        EXPECT_FALSE( instrument.overflowed() );
+    }
+
+    // ── Capability rejections ────────────────────────────────
+
+    // Named payloads for the three commands a pointer-only seat must refuse.
+    // Their contents never reach anything — the point is that they do not.
+    const std::string rejectedKeyName     = "Control_L";
+    const std::string rejectedText        = "hi";
+    const std::string rejectedCaptureFile = "a.png";
+
+    TEST( ExecuteCapability,
+          EveryOverlayStepAgainstAPointerOnlySeatIsRejectedForOverlaySeat )
+    {
+        OverlaylessSeat              seat;
+        ExecContext<OverlaylessSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+
+        const auto commands = every_overlay_command();
+        ASSERT_EQ( commands.size(), overlayOpCount );
+
+        for( const auto& command : commands )
+        {
+            CommandState state;
+            EXPECT_EQ( grab::kernel::sequence::enter( command, state, context ),
+                       Status::Failure );
+            // The rejection is not merely "failed": the concept the seat did
+            // not satisfy is derivable from the command alone, which is what
+            // makes the logged record actionable and this assertion possible
+            // without reading it.
+            const auto missing =
+                exec_detail::required_capability( grab::sequence::kind_of( command ) );
+            EXPECT_EQ( missing, exec_detail::overlaySeatConcept );
+            EXPECT_FALSE( missing.empty() );
+        }
+
+        EXPECT_EQ( seat.calls(), noCalls );
+    }
+
+    TEST( ExecuteCapability,
+          TheKeyboardTextAndCaptureHalvesNameTheirOwnConceptsRatherThanOverlays )
+    {
+        OverlaylessSeat              seat;
+        ExecContext<OverlaylessSeat> context{
+            .seat   = &seat,
+            .timers = nullptr,
+            .now    = fabricated_start(),
+        };
+
+        struct Expectation
+        {
+                grab::sequence::Command command;
+                std::string_view        concept_name;
+        };
+
+        std::vector<Expectation> expectations;
+        expectations.push_back( Expectation{
+            .command      = grab::sequence::KeyDownCommand{ .key = rejectedKeyName },
+            .concept_name = exec_detail::keyboardSeatConcept,
+        } );
+        expectations.push_back( Expectation{
+            .command      = grab::sequence::TypeCommand{ .text = rejectedText },
+            .concept_name = exec_detail::textSeatConcept,
+        } );
+        expectations.push_back( Expectation{
+            .command =
+                grab::sequence::CaptureCommand{
+                                               .output  = rejectedCaptureFile,
+                                               .locator = {},
+                                               },
+            .concept_name = exec_detail::capturingSeatConcept,
+        } );
+
+        for( const auto& expected : expectations )
+        {
+            CommandState state;
+            EXPECT_EQ( grab::kernel::sequence::enter( expected.command, state, context ),
+                       Status::Failure );
+            EXPECT_EQ( exec_detail::required_capability(
+                           grab::sequence::kind_of( expected.command )
+                       ),
+                       expected.concept_name );
+        }
+
+        // A rejected step never reached the pointer half either: a command the
+        // seat cannot run does nothing at all rather than doing half of it.
+        EXPECT_EQ( seat.calls(), noCalls );
     }
 
 }    // namespace

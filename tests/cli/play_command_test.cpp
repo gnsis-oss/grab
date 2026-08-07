@@ -55,6 +55,7 @@ namespace
     constexpr std::string_view          graceFlag      = "--grace-ms";
     constexpr std::string_view          dryRunFlag     = "--dry-run";
     constexpr std::string_view          reportFlag     = "--report";
+    constexpr std::string_view          traceFlag      = "--trace";
     constexpr std::string_view          preciseMode    = "precise";
     constexpr std::string_view          strictMode     = "strict";
     constexpr std::string_view          unknownMode    = "sloppy";
@@ -106,9 +107,64 @@ namespace
     constexpr std::string_view captureOpFragment  = "screen.capture";
     constexpr std::string_view abortFragment      = "abort";
 
+    // ── --trace ───────────────────────────────────────────
+    //
+    // Section markers carry their leading newline and trailing space on
+    // purpose: "  run" without them also matches ", not run" in the headline,
+    // which would make the dry-run assertion pass for the wrong reason.
+    constexpr std::string_view loadSection           = "\n  load";
+    constexpr std::string_view runSection            = "\n  run ";
+    constexpr std::string_view schedulingSection     = "\n  scheduling\n";
+    constexpr std::string_view idleTimerLine         = "no deadline was ever waited on";
+    constexpr std::string_view wakeLatencyLine       = "wake latency";
+    constexpr std::string_view spuriousLine          = "spurious wakes";
+
+    constexpr std::string_view traceKindFragment     = R"("kind":"trace")";
+    constexpr std::string_view schedulingKeyFragment = R"("scheduling")";
+    constexpr std::string_view runTalliesKeyFragment = R"("run_tallies")";
+    constexpr std::string_view startKeyFragment      = R"("start_ns")";
+    constexpr std::string_view waitKeyFragment       = R"("wait_ns")";
+    constexpr std::string_view rootWaitFragment      = R"("wait_ns":null)";
+    constexpr std::string_view endKeyFragment        = R"("end_ns")";
+    constexpr std::string_view callKeyFragment       = R"("call_ns")";
+    constexpr std::string_view overrunKeyFragment    = R"("overrun_ns")";
+    constexpr std::string_view receiptKeyFragment    = R"("receipt")";
+
+    constexpr std::string_view moveTallyName         = "input.move";
+    constexpr std::string_view waitTallyName         = "time.wait";
+    constexpr std::string_view clickTallyName        = "input.click";
+
+    // Chosen so every rendered figure is exact and unambiguous. `waitTotalText`
+    // keeps its leading space because "50.00 ms" is a substring of the run
+    // total "250.00 ms" and would match it.
+    constexpr std::chrono::milliseconds traceMove{ 100 };
+    constexpr std::chrono::milliseconds traceWait{ 50 };
+    constexpr std::chrono::milliseconds traceLoad{ 4 };
+    constexpr std::chrono::milliseconds tracePlanned{ 7'010 };
+    constexpr std::chrono::milliseconds traceElapsed{ 8'420 };
+
+    constexpr std::string_view          headlineText       = "2 steps in 8.42 s";
+    constexpr std::string_view          plannedText        = "planned >= 7.01 s";
+    constexpr std::string_view          unestimatedText    = "1 unestimated";
+    constexpr std::string_view          loadTotalText      = "4.00 ms";
+    constexpr std::string_view          runCountText       = "3 steps";
+    constexpr std::string_view          runTotalText       = "250.00 ms";
+    constexpr std::string_view          moveTotalText      = "200.00 ms";
+    constexpr std::string_view          moveCountText      = "2 calls";
+    constexpr std::string_view          moveMeanText       = "mean 100.00 ms";
+    constexpr std::string_view          waitTotalText      = " 50.00 ms";
+    constexpr std::string_view          waitCountText      = "1 call";
+
+    constexpr std::uint64_t             noRecordedCalls    = 0U;
+    constexpr std::uint64_t             oneArm             = 1U;
+    constexpr std::size_t               threeLines         = 3U;
+    constexpr std::size_t               oneOverSlots       = 1U;
+    constexpr std::string_view          overflowNamePrefix = "phase-";
+    constexpr std::string_view          incompleteWarning  = "this report is INCOMPLETE";
+
     // Deliberately not a name any other test writes: the assertion is that
     // --dry-run leaves it absent, and a stale file would make that a lie.
-    constexpr std::string_view captureOutputName =
+    constexpr std::string_view          captureOutputName =
         "grab-play-dry-run-must-not-exist.png";
 
     // A document whose only step names an op that does not exist, so the
@@ -501,6 +557,25 @@ namespace
             .command     = grab::sequence::WaitCommand{ .duration = waitDuration },
             .after       = { step_id( firstStep ) },
             .extra_grace = extraGrace,
+        } );
+        return build_or_die( std::move( steps ), pacing );
+    }
+
+    // Two steps with a REAL ready gap between them, so drive() has something
+    // to arm a deadline for. A document whose steps are all immediately ready
+    // never creates a TimerThread at all, and would prove nothing about
+    // scheduling.
+    [[nodiscard]]
+    Sequence
+    click_then_click( PacingOptions pacing )
+    {
+        std::vector<Step> steps;
+        steps.push_back( Step{
+            .command = grab::sequence::ClickCommand{ .button = primaryButton },
+        } );
+        steps.push_back( Step{
+            .command = grab::sequence::ClickCommand{ .button = primaryButton },
+            .after   = { step_id( firstStep ) },
         } );
         return build_or_die( std::move( steps ), pacing );
     }
@@ -1246,4 +1321,239 @@ TEST( PlayCommand,
     EXPECT_TRUE( grab::sequence::is_sequence_command( grab::CommandKind::ClickAt ) );
     EXPECT_TRUE( grab::sequence::is_sequence_command( grab::CommandKind::Type ) );
     EXPECT_TRUE( grab::sequence::is_sequence_command( grab::CommandKind::Drag ) );
+}
+
+// ── --trace ────────────────────────────────────────────────
+
+TEST( PlayCommand,
+      TraceIsAFlagAndIsOffUnlessAskedFor )
+{
+    const std::array bare{ documentPath };
+    const auto       plain = grab::cli::parse_play_options( arguments( bare ) );
+    ASSERT_TRUE( plain.has_value() ) << plain.error().message;
+    EXPECT_FALSE( plain->trace );
+
+    const std::array asked{ documentPath, traceFlag };
+    const auto       traced = grab::cli::parse_play_options( arguments( asked ) );
+    ASSERT_TRUE( traced.has_value() ) << traced.error().message;
+    EXPECT_TRUE( traced->trace );
+}
+
+// The report is a projection of the tallies and must not be able to disagree
+// with them: the section total is the sum of its lines, the per-line mean is
+// the total over the calls, and the order is by total descending so the
+// expensive name is the first one read.
+TEST( PlayCommand,
+      TheTraceReportTotalsAgreeWithItsTallies )
+{
+    grab::cli::RunTrace trace;
+    trace.sequence    = std::string{ sequenceName };
+    trace.steps       = twoSteps;
+    trace.ran         = true;
+    trace.elapsed     = traceElapsed;
+    trace.planned     = tracePlanned;
+    trace.unestimated = oneStep;
+    trace.load        = traceLoad;
+    trace.run.record( moveTallyName, traceMove );
+    trace.run.record( moveTallyName, traceMove );
+    trace.run.record( waitTallyName, traceWait );
+
+    ASSERT_EQ( trace.run.total(), traceMove + traceMove + traceWait );
+
+    const auto text = grab::cli::trace_report( trace );
+
+    EXPECT_TRUE( contains( text, sequenceName ) ) << text;
+    EXPECT_TRUE( contains( text, headlineText ) ) << text;
+    EXPECT_TRUE( contains( text, plannedText ) ) << text;
+    EXPECT_TRUE( contains( text, unestimatedText ) ) << text;
+
+    EXPECT_TRUE( contains( text, loadSection ) ) << text;
+    EXPECT_TRUE( contains( text, loadTotalText ) ) << text;
+
+    EXPECT_TRUE( contains( text, runSection ) ) << text;
+    EXPECT_TRUE( contains( text, runCountText ) ) << text;
+    EXPECT_TRUE( contains( text, runTotalText ) ) << text;
+
+    EXPECT_TRUE( contains( text, moveCountText ) ) << text;
+    EXPECT_TRUE( contains( text, moveTotalText ) ) << text;
+    EXPECT_TRUE( contains( text, moveMeanText ) ) << text;
+    EXPECT_TRUE( contains( text, waitCountText ) ) << text;
+    EXPECT_TRUE( contains( text, waitTotalText ) ) << text;
+
+    // Sorted by total descending: 200 ms of moves outranks 50 ms of waiting.
+    EXPECT_LT( text.find( moveTallyName ), text.find( waitTallyName ) ) << text;
+
+    // No timer was ever armed here, and the section says so rather than
+    // printing zeroes that read like measurements.
+    EXPECT_TRUE( contains( text, schedulingSection ) ) << text;
+    EXPECT_TRUE( contains( text, idleTimerLine ) ) << text;
+}
+
+// An instrument that ran out of slots stopped recording. A report that omits
+// the expensive thing while looking complete is the one failure mode worse
+// than no report at all.
+TEST( PlayCommand,
+      AnOverflowedInstrumentIsDeclaredInTheReport )
+{
+    grab::cli::RunTrace trace;
+    trace.ran = true;
+
+    // One more distinct name than the instrument has slots. The storage has to
+    // be distinct per name and stable while it is recorded: the instrument
+    // compares by POINTER first, so reusing one buffer would fold every record
+    // into a single slot and never overflow at all. Reserved up front, then
+    // recorded in a second pass, because a vector reallocation would move the
+    // small-string buffers the views point at.
+    std::vector<std::string> names;
+    names.reserve( grab::diag::maxInstrumentSlots + oneOverSlots );
+    for( std::size_t slot = firstStep; slot <= grab::diag::maxInstrumentSlots; ++slot )
+    {
+        names.push_back( std::string{ overflowNamePrefix } + std::to_string( slot ) );
+    }
+    for( const auto& name : names )
+    {
+        trace.run.record( name, traceWait );
+    }
+    ASSERT_TRUE( trace.run.overflowed() );
+
+    EXPECT_TRUE( contains( grab::cli::trace_report( trace ), incompleteWarning ) );
+}
+
+// --dry-run played nothing, so a `run` section would be a table of zeroes
+// pretending to be measurements. The load DID happen and is reported.
+TEST( PlayCommand,
+      TraceOnADryRunReportsTheLoadAndNoRun )
+{
+    const TempDocument document{ captureDocument };
+    const std::string  path = document.path();
+    const std::array   values{ std::string_view{ path }, dryRunFlag, traceFlag };
+
+    testing::internal::CaptureStdout();
+    const int         code    = grab::cli::run_play_command( arguments( values ) );
+    const std::string printed = testing::internal::GetCapturedStdout();
+
+    EXPECT_EQ( code, successExit );
+    EXPECT_TRUE( contains( printed, loadSection ) ) << printed;
+    EXPECT_FALSE( contains( printed, runSection ) ) << printed;
+    EXPECT_TRUE( contains( printed, schedulingSection ) ) << printed;
+    EXPECT_TRUE( contains( printed, idleTimerLine ) ) << printed;
+}
+
+// Every tally comes from timing_of(), which is the same source the JSONL has
+// always used -- so the pretty report and the machine-readable one cannot
+// drift apart.
+TEST( PlayCommand,
+      ARunTraceCountsEveryStepItPlayedAndTheDeadlinesItWaitedOn )
+{
+    const auto program = click_then_click(
+        PacingOptions{ .mode = PacingMode::Grace, .grace = documentGrace }
+    );
+    ScriptedRunner         runner{ Status::Success };
+    grab::cli::PlayOptions options;
+    options.trace = true;
+
+    grab::cli::RunTrace trace;
+    const int code = grab::cli::play_program( program, runner, options, &trace );
+
+    EXPECT_EQ( code, successExit );
+    EXPECT_TRUE( trace.ran );
+
+    std::uint64_t calls = noRecordedCalls;
+    for( const auto& tally : trace.run.tallies() )
+    {
+        calls += tally.calls;
+    }
+    EXPECT_EQ( calls, twoSteps );
+    EXPECT_FALSE( trace.run.overflowed() );
+
+    // A 25 ms ready gap is a deadline, and a deadline is armed.
+    EXPECT_GE( trace.schedule.arms, oneArm );
+
+    const auto text = grab::cli::trace_report( trace );
+    EXPECT_TRUE( contains( text, clickTallyName ) ) << text;
+    EXPECT_TRUE( contains( text, spuriousLine ) ) << text;
+    EXPECT_TRUE( contains( text, wakeLatencyLine ) ) << text;
+}
+
+// The corpus harness is written against this record. Every key it had is
+// still there, in the same shape, and the new ones sit beside them.
+TEST( PlayCommand,
+      TheReportGainsPerStepTimingWithoutLosingAnyExistingField )
+{
+    const TempDocument document{ emptyDocument };
+    const auto         report  = document.sibling( reportPath );
+    const auto         program = wait_after_click(
+        PacingOptions{ .mode = PacingMode::Strict, .grace = documentGrace }
+    );
+    ScriptedRunner         runner{ Status::Success };
+    grab::cli::PlayOptions options;
+    options.report = report.string();
+
+    EXPECT_EQ( grab::cli::play_program( program, runner, options ), successExit );
+
+    std::ifstream stream{ report };
+    ASSERT_TRUE( stream.good() );
+    std::vector<std::string> lines;
+    std::string              line;
+    while( std::getline( stream, line ) )
+    {
+        lines.push_back( line );
+    }
+
+    // Still one line per step: a consumer counting them keeps counting them.
+    ASSERT_EQ( lines.size(), twoSteps );
+    EXPECT_TRUE( contains( lines[firstStep], opFragment ) ) << lines[firstStep];
+    EXPECT_TRUE( contains( lines[firstStep], succeededFragment ) ) << lines[firstStep];
+    EXPECT_TRUE( contains( lines[firstStep], callKeyFragment ) ) << lines[firstStep];
+    EXPECT_TRUE( contains( lines[firstStep], overrunKeyFragment ) ) << lines[firstStep];
+    EXPECT_TRUE( contains( lines[firstStep], receiptKeyFragment ) ) << lines[firstStep];
+    EXPECT_TRUE( contains( lines[secondStep], declaredFragment ) ) << lines[secondStep];
+
+    EXPECT_TRUE( contains( lines[firstStep], startKeyFragment ) ) << lines[firstStep];
+    EXPECT_TRUE( contains( lines[firstStep], waitKeyFragment ) ) << lines[firstStep];
+    EXPECT_TRUE( contains( lines[firstStep], endKeyFragment ) ) << lines[firstStep];
+
+    // A root is admitted by play(), which reads no clock, so it has no ready
+    // instant to have waited from. Reporting one would be a span measured from
+    // the steady clock's epoch -- days, dressed as a scheduling cost.
+    EXPECT_TRUE( contains( lines[firstStep], rootWaitFragment ) ) << lines[firstStep];
+
+    // Without --trace there is no summary line, so the one-line-per-step
+    // invariant is unconditional for anything written before this change.
+    EXPECT_FALSE( contains( lines[firstStep], traceKindFragment ) ) << lines[firstStep];
+    EXPECT_FALSE( contains( lines[secondStep], traceKindFragment ) )
+        << lines[secondStep];
+}
+
+TEST( PlayCommand,
+      TraceAddsExactlyOneSummaryLineToTheReport )
+{
+    const TempDocument document{ emptyDocument };
+    const auto         report  = document.sibling( reportPath );
+    const auto         program = wait_after_click(
+        PacingOptions{ .mode = PacingMode::Strict, .grace = documentGrace }
+    );
+    ScriptedRunner         runner{ Status::Success };
+    grab::cli::PlayOptions options;
+    options.report = report.string();
+    options.trace  = true;
+
+    grab::cli::RunTrace trace;
+    EXPECT_EQ( grab::cli::play_program( program, runner, options, &trace ),
+               successExit );
+
+    std::ifstream stream{ report };
+    ASSERT_TRUE( stream.good() );
+    std::vector<std::string> lines;
+    std::string              line;
+    while( std::getline( stream, line ) )
+    {
+        lines.push_back( line );
+    }
+
+    ASSERT_EQ( lines.size(), threeLines );
+    EXPECT_FALSE( contains( lines[firstStep], traceKindFragment ) ) << lines[firstStep];
+    EXPECT_TRUE( contains( lines.back(), traceKindFragment ) ) << lines.back();
+    EXPECT_TRUE( contains( lines.back(), schedulingKeyFragment ) ) << lines.back();
+    EXPECT_TRUE( contains( lines.back(), runTalliesKeyFragment ) ) << lines.back();
 }

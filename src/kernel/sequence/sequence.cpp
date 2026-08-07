@@ -5,6 +5,7 @@
 #include "kernel/sequence/sequence.hpp"
 #include "kernel/support/log.hpp"
 #include "kernel/support/log_tags.hpp"
+#include "kernel/support/step_diag.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -63,6 +64,33 @@ namespace grab::kernel::sequence
 
     }    // namespace
 
+    namespace detail
+    {
+
+        diag::Instrument&
+        load_instrument_storage() noexcept
+        {
+            // One per thread, function-local so nothing depends on static
+            // initialisation order. A shared instrument would need a lock on
+            // the recording path, and loading is not a shared activity.
+            static thread_local diag::Instrument instrument;
+            return instrument;
+        }
+
+    }    // namespace detail
+
+    const diag::Instrument&
+    load_instrument() noexcept
+    {
+        return detail::load_instrument_storage();
+    }
+
+    void
+    reset_load_instrument() noexcept
+    {
+        detail::load_instrument_storage().reset();
+    }
+
     Sequence::Sequence( const Sequence& other ) :
         steps_( other.steps_ ),
         order_( other.order_ ),
@@ -105,6 +133,12 @@ namespace grab::kernel::sequence
                      grab::sequence::PacingOptions     pacing,
                      std::string                       name )
     {
+        diag::Instrument& instrument = detail::load_instrument_storage();
+        // Covers the rejecting paths too: a document that fails to build still
+        // spent the time, and hiding that would make a slow rejection
+        // invisible.
+        const diag::Measure<log::Level::Nominal> buildTiming{ instrument, phase::build };
+
         if( steps.size() > grab::sequence::maxSteps )
         {
             std::string message{ "sequence has " };
@@ -130,71 +164,102 @@ namespace grab::kernel::sequence
         built.pacing_ = pacing;
         built.name_   = std::move( name );
 
-        for( const auto& step : built.steps_ )
         {
-            if( step.label.empty() )
+            // Tallied under the same name as the loader's label pre-pass, so
+            // `load.labels` prices label indexing wherever it happens; a load
+            // through parse() therefore shows two calls, not one.
+            const diag::Measure<log::Level::Nominal> labelTiming{
+                instrument,
+                phase::labels
+            };
+            for( const auto& step : built.steps_ )
             {
-                continue;
-            }
-            if( built.labels_.contains( step.label ) )
-            {
-                std::string message{ "duplicate step label '" };
-                message.append( step.label );
-                message.append( "'" );
-                return grab::fail( grab::ErrorCode::InvalidArgument, message );
-            }
-            built.labels_.emplace( step.label, step.id );
-        }
-
-        for( const auto& step : built.steps_ )
-        {
-            ( void )built.graph_.add_node( step.id );
-        }
-
-        for( const auto& step : built.steps_ )
-        {
-            for( const auto predecessor : step.after )
-            {
-                if( !built.graph_.contains_node( predecessor ) )
+                if( step.label.empty() )
                 {
-                    std::string message{ "step " };
-                    message.append( step_name( step ) );
-                    message.append( " depends on step index " );
-                    message.append( std::to_string( predecessor.index() ) );
-                    message.append( ", which does not exist" );
+                    continue;
+                }
+                if( built.labels_.contains( step.label ) )
+                {
+                    std::string message{ "duplicate step label '" };
+                    message.append( step.label );
+                    message.append( "'" );
                     return grab::fail( grab::ErrorCode::InvalidArgument, message );
                 }
-                if( predecessor == step.id )
-                {
-                    std::string message{ "step " };
-                    message.append( step_name( step ) );
-                    message.append( " depends on itself" );
-                    return grab::fail( grab::ErrorCode::InvalidArgument, message );
-                }
-                // add_edge also returns false for a duplicate edge, and the
-                // edge simply never enters the graph, so the topological sort
-                // could never see it. Treat every false as a rejection.
-                if( !built.graph_.add_edge( predecessor,
-                                            step.id,
-                                            grab::sequence::DependencyEdge{} ) )
-                {
-                    std::string message{ "step " };
-                    message.append( step_name( step ) );
-                    message.append( " lists step index " );
-                    message.append( std::to_string( predecessor.index() ) );
-                    message.append( " as a dependency twice" );
-                    return grab::fail( grab::ErrorCode::InvalidArgument, message );
-                }
+                built.labels_.emplace( step.label, step.id );
             }
         }
 
-        auto order = grab::kernel::topological_order( built.graph_ );
-        if( !order.has_value() )
         {
-            return grab::fail( grab::ErrorCode::InvalidArgument,
-                               "sequence has a dependency cycle" );
+            // Node insertion plus one add_edge per declared dependency: the
+            // O(V + E) half of a build, and the half that grows with how
+            // BRANCHED a document is rather than with how long it is.
+            const diag::Measure<log::Level::Nominal> graphTiming{
+                instrument,
+                phase::graph
+            };
+
+            for( const auto& step : built.steps_ )
+            {
+                ( void )built.graph_.add_node( step.id );
+            }
+
+            for( const auto& step : built.steps_ )
+            {
+                for( const auto predecessor : step.after )
+                {
+                    if( !built.graph_.contains_node( predecessor ) )
+                    {
+                        std::string message{ "step " };
+                        message.append( step_name( step ) );
+                        message.append( " depends on step index " );
+                        message.append( std::to_string( predecessor.index() ) );
+                        message.append( ", which does not exist" );
+                        return grab::fail( grab::ErrorCode::InvalidArgument, message );
+                    }
+                    if( predecessor == step.id )
+                    {
+                        std::string message{ "step " };
+                        message.append( step_name( step ) );
+                        message.append( " depends on itself" );
+                        return grab::fail( grab::ErrorCode::InvalidArgument, message );
+                    }
+                    // add_edge also returns false for a duplicate edge, and
+                    // the edge simply never enters the graph, so the
+                    // topological sort could never see it. Treat every false
+                    // as a rejection.
+                    if( !built.graph_.add_edge( predecessor,
+                                                step.id,
+                                                grab::sequence::DependencyEdge{} ) )
+                    {
+                        std::string message{ "step " };
+                        message.append( step_name( step ) );
+                        message.append( " lists step index " );
+                        message.append( std::to_string( predecessor.index() ) );
+                        message.append( " as a dependency twice" );
+                        return grab::fail( grab::ErrorCode::InvalidArgument, message );
+                    }
+                }
+            }
         }
-        built.order_ = std::move( *order );
+
+        {
+            // Kahn over the whole graph. Timed apart from construction
+            // because "the topological sort is most of a load" and "building
+            // the adjacency lists is" are different findings with different
+            // fixes.
+            const diag::Measure<log::Level::Nominal> orderTiming{
+                instrument,
+                phase::topology
+            };
+
+            auto order = grab::kernel::topological_order( built.graph_ );
+            if( !order.has_value() )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   "sequence has a dependency cycle" );
+            }
+            built.order_ = std::move( *order );
+        }
 
         log::nominal(
             [&built]( auto& event )

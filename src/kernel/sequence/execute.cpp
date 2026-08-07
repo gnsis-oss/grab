@@ -14,6 +14,7 @@
 #include "kernel/support/log_tags.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -66,19 +67,71 @@ namespace grab::kernel::sequence
         }
 
         grab::sequence::Status
-        note_unavailable( grab::CommandKind kind,
-                          std::string_view  capability )
+        note_unavailable( grab::CommandKind kind )
         {
             log::nominal(
-                [kind, capability]( auto& event )
+                [kind]( auto& event )
                 {
                     event.tag( log::tags::sequence )
                         .value( "command", grab::command_name( kind ) )
-                        .value( "missing_capability", capability )
-                        .value( "error", "seat cannot run this command" );
+                        // The CONCEPT, not a category: whoever has to fix the
+                        // seat needs a name they can grep for in execute.hpp,
+                        // and "overlay" is not one.
+                        .value( "missing_concept", required_capability( kind ) )
+                        .value( "error",
+                                "seat does not satisfy the concept this "
+                                "command needs" );
                 }
             );
             return grab::sequence::Status::Failure;
+        }
+
+        void
+        note_hold_taken( grab::CommandKind kind,
+                         std::string_view  hold )
+        {
+            log::verbose(
+                [kind, hold]( auto& event )
+                {
+                    event.tag( log::tags::sequence )
+                        .value( "command", grab::command_name( kind ) )
+                        .value( "hold", hold )
+                        .value( "taken", true );
+                }
+            );
+        }
+
+        void
+        note_deadline( grab::CommandKind         kind,
+                       std::size_t               waypoints,
+                       std::chrono::milliseconds dwell,
+                       std::chrono::nanoseconds  span )
+        {
+            log::verbose(
+                [kind, waypoints, dwell, span]( auto& event )
+                {
+                    event.tag( log::tags::sequence )
+                        .value( "command", grab::command_name( kind ) )
+                        .value( "deadline_in_us", as_micros( span ) )
+                        .value( "waypoints", waypoints )
+                        .value( "step_dwell_us", as_micros( dwell ) );
+                }
+            );
+        }
+
+        void
+        note_deadline_met( grab::CommandKind        kind,
+                           std::chrono::nanoseconds overshoot )
+        {
+            log::verbose(
+                [kind, overshoot]( auto& event )
+                {
+                    event.tag( log::tags::sequence )
+                        .value( "command", grab::command_name( kind ) )
+                        .value( "deadline", "met" )
+                        .value( "late_us", as_micros( overshoot ) );
+                }
+            );
         }
 
         // Built through fail() rather than by aggregate initialization:
@@ -100,17 +153,28 @@ namespace grab::kernel::sequence
         // is the record that answers "did the interrupt strand anything", and
         // that question is asked exactly when logging is turned on after the
         // fact.
+        //
+        // `hold` and `reason` are the two halves of §6.1's distinction. An
+        // implicit hold is released because the command that took it finished
+        // with it; a document hold is released ONLY because the unwind proved
+        // the step that was supposed to lift it will never run. Without both,
+        // a chord that completed and a chord that was cut short produce the
+        // same line — and that ambiguity has already hidden one real bug.
         void
         note_release( grab::CommandKind kind,
                       std::string_view  what,
+                      std::string_view  hold,
+                      std::string_view  reason,
                       bool              succeeded )
         {
             log::nominal(
-                [kind, what, succeeded]( auto& event )
+                [kind, what, hold, reason, succeeded]( auto& event )
                 {
                     event.tag( log::tags::sequence )
                         .value( "command", grab::command_name( kind ) )
                         .value( "released", what )
+                        .value( "hold", hold )
+                        .value( "reason", reason )
                         .value( "ok", succeeded );
                 }
             );

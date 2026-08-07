@@ -11,6 +11,7 @@
 // layer existing at all.
 
 #include "grab/command.hpp"
+#include "grab/command_descriptor.hpp"
 #include "grab/drag.hpp"
 #include "grab/geometry/point.hpp"
 #include "grab/result.hpp"
@@ -18,6 +19,8 @@
 #include "grab/trace.hpp"
 #include "kernel/sequence/player.hpp"
 #include "kernel/sequence/sequence.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/step_diag.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
@@ -25,7 +28,10 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1615,6 +1621,559 @@ namespace
         );
         EXPECT_EQ( strict.steps().size(), grace.steps().size() );
         EXPECT_EQ( strict.order().size(), grace.order().size() );
+    }
+
+    // ---- introspection ------------------------------------------------------
+    //
+    // The subsystem's diagnosability is itself a contract: a DAG scheduler
+    // whose frontier stalls is undebuggable without a record of the
+    // transitions, and "where did the run spend its time" must be answerable
+    // from a log rather than from a profiler.
+    //
+    // These assert on STRUCTURED VALUES -- an instrument tally, a timing_of(),
+    // a `key=value` field -- and never on the prose around them (CLAUDE.md
+    // §5). They also have to hold in a build whose log ceiling is `off`, where
+    // the timers and the summary are both gone, so every one of them says what
+    // it expects in each case rather than being compiled away.
+
+    namespace phase = grab::kernel::sequence::phase;
+
+    using Timer     = grab::diag::Measure<grab::log::Level::Debug>;
+    using RunTimer  = grab::diag::Measure<grab::kernel::sequence::measureLevel>;
+
+    constexpr std::string_view quickLabel    = "quick";
+    constexpr std::string_view dominantLabel = "dominant";
+    constexpr std::string_view trailingLabel = "trailing";
+    constexpr std::string_view blockerLabel  = "blocker";
+    constexpr std::string_view blockedLabel  = "blocked";
+    constexpr std::string_view otherLabel    = "other";
+    constexpr std::string_view gracedLabel   = "graced";
+    constexpr std::string_view measuredName  = "test.measured";
+    constexpr std::string_view runningText   = "running";
+    constexpr std::string_view readyText     = "ready";
+    constexpr std::string_view doneText      = "done";
+    constexpr std::string_view preciseText   = "precise";
+    constexpr std::string_view completeText  = "complete";
+
+    constexpr Millis           dominantSpan{ 900 };
+    constexpr Millis           tinySpan{ 1 };
+
+    constexpr std::uint64_t    noCalls        = 0U;
+    constexpr std::uint64_t    oneCall        = 1U;
+    constexpr std::size_t      noTallies      = 0U;
+    constexpr std::size_t      oneTally       = 1U;
+    constexpr std::size_t      oneOccurrence  = 1U;
+    constexpr std::size_t      soloFrontier   = 1U;
+    constexpr std::size_t      pairedFrontier = 2U;
+    constexpr std::int64_t     microsPerMilli = 1'000;
+
+    // Routes the log to a temporary file for the duration of `body`, the way
+    // tests/core/test_log.cpp does. The runtime level and the sink are
+    // process-global, so both are restored.
+    template<typename Body>
+    [[nodiscard]]
+    std::string
+    captured_log( grab::log::Level level,
+                  Body             body )
+    {
+        const std::string path =
+            std::string{ std::tmpnam( nullptr ) } + ".grab-player-log";
+
+        const auto previous = grab::log::runtime_level();
+        EXPECT_TRUE( grab::log::sink_to_file( path ) );
+        grab::log::set_runtime_level( level );
+
+        body();
+
+        grab::log::set_runtime_level( previous );
+        grab::log::sink_off();
+
+        std::ifstream     stream{ path };
+        std::stringstream buffer;
+        buffer << stream.rdbuf();
+        stream.close();
+        ( void )std::remove( path.c_str() );
+        return buffer.str();
+    }
+
+    // A record is a sequence of ` key=value` fields. Matching the WHOLE field
+    // is what keeps these assertions off the prose and stops a match landing
+    // inside some other key's value.
+    [[nodiscard]]
+    std::string
+    field( std::string_view key,
+           std::string_view value )
+    {
+        std::string text{ " " };
+        text.append( key );
+        text.append( "=" );
+        text.append( value );
+        return text;
+    }
+
+    [[nodiscard]]
+    std::string
+    numeric_field( std::string_view key,
+                   std::size_t      value )
+    {
+        const std::string text = std::to_string( value );
+        return field( key, text );
+    }
+
+    [[nodiscard]]
+    bool
+    has_field( std::string_view text,
+               std::string_view key,
+               std::string_view value )
+    {
+        return text.find( field( key, value ) ) != std::string_view::npos;
+    }
+
+    [[nodiscard]]
+    std::size_t
+    occurrences( std::string_view text,
+                 std::string_view needle )
+    {
+        std::size_t found = 0U;
+        std::size_t at    = text.find( needle );
+        while( at != std::string_view::npos )
+        {
+            ++found;
+            at = text.find( needle, at + needle.size() );
+        }
+        return found;
+    }
+
+    [[nodiscard]]
+    const grab::diag::Tally*
+    tally_for( const grab::diag::Instrument& instrument,
+               std::string_view              name )
+    {
+        for( const auto& entry : instrument.tallies() )
+        {
+            if( entry.name == name )
+            {
+                return &entry;
+            }
+        }
+        return nullptr;
+    }
+
+    // sizeof is the only way to prove a member is ABSENT rather than merely
+    // unread: a compiled-out timer that still carried a time_point would still
+    // be reading the clock to fill it.
+    TEST( Player,
+          MeasureIsAnEmptyTimerWhenItsLevelIsCompiledOut )
+    {
+        // Where to record and under what name is unconditional -- that is the
+        // handle. The CLOCK is what disappears.
+        constexpr std::size_t handleSize =
+            sizeof( grab::diag::Instrument* ) + sizeof( std::string_view );
+        constexpr std::size_t liveSize = handleSize + sizeof( TimePoint );
+
+        static_assert( Timer::enabled == grab::log::enabled( grab::log::Level::Debug ) );
+        static_assert( sizeof( Timer ) == ( Timer::enabled ? liveSize : handleSize ) );
+        static_assert( sizeof( grab::diag::Measure<grab::log::Level::Off> ) == liveSize,
+                       "Off is always at or below the ceiling, so it is never "
+                       "the compiled-out case" );
+
+        grab::diag::Instrument instrument;
+        {
+            const Timer timer{ instrument, measuredName };
+        }
+
+        if constexpr( Timer::enabled )
+        {
+            ASSERT_EQ( instrument.tallies().size(), oneTally );
+            EXPECT_EQ( instrument.tallies().front().name, measuredName );
+            EXPECT_EQ( instrument.tallies().front().calls, oneCall );
+        }
+        else
+        {
+            // Untouched: no slot, no name, no clock read.
+            EXPECT_EQ( instrument.tallies().size(), noTallies );
+            EXPECT_EQ( instrument.total(), Nanos::zero() );
+        }
+        EXPECT_FALSE( instrument.overflowed() );
+    }
+
+    TEST( Player,
+          InstrumentTalliesEveryCommandKindTheRunExecuted )
+    {
+        const auto click    = positional_id( 0U );
+        const auto wait     = positional_id( 1U );
+        const auto capture  = positional_id( 2U );
+        auto       document = build_or_die( {
+            make_step( a_click(), {} ),
+            make_step( a_wait( Nanos{ shortSpan } ), { click } ),
+            make_step( a_capture(), { wait } ),
+        } );
+        FakeRunner runner{ document };
+        runner.script( capture ).pace = captureSpan;
+
+        Player player{ document, runner };
+        ASSERT_TRUE( player.play().has_value() );
+        ( void )run_to_completion( player, origin );
+        ASSERT_EQ( player.state(), PlayState::Done );
+
+        const auto& instrument = player.instrument();
+        // A dropped name would make every number below a partial accounting.
+        EXPECT_FALSE( instrument.overflowed() );
+
+        if constexpr( !RunTimer::enabled )
+        {
+            // The whole point of the compile gate: at ceiling `off` there is
+            // no instrument to read, and the CLI has to say so rather than
+            // print zeros.
+            EXPECT_EQ( instrument.tallies().size(), noTallies );
+            return;
+        }
+
+        for( const auto& step : document.steps() )
+        {
+            const auto name =
+                grab::command_name( grab::sequence::kind_of( step.command ) );
+            const auto* const entry = tally_for( instrument, name );
+            ASSERT_NE( entry, nullptr ) << name;
+            EXPECT_GT( entry->calls, noCalls ) << name;
+            EXPECT_GE( entry->longest, entry->shortest ) << name;
+        }
+
+        // Every phase name the CLI prints, and every one of them reached.
+        for( const auto name :
+             { phase::playPump,
+               phase::playReadyScan,
+               phase::playEnter,
+               phase::playTick,
+               phase::playExit } )
+        {
+            const auto* const entry = tally_for( instrument, name );
+            ASSERT_NE( entry, nullptr ) << name;
+            EXPECT_GT( entry->calls, noCalls ) << name;
+        }
+
+        // pump CONTAINS the dispatches, so it can never be the smaller number.
+        const auto* const pumped  = tally_for( instrument, phase::playPump );
+        const auto* const entered = tally_for( instrument, phase::playEnter );
+        ASSERT_NE( pumped, nullptr );
+        ASSERT_NE( entered, nullptr );
+        EXPECT_GE( pumped->total, entered->total );
+    }
+
+    TEST( Player,
+          SummaryNamesTheLongestStepAndIsEmittedExactlyOnce )
+    {
+        const auto quick    = positional_id( 0U );
+        const auto dominant = positional_id( 1U );
+        const auto trailing = positional_id( 2U );
+        auto       document = build_or_die( {
+            make_step( a_click(), {}, std::string{ quickLabel } ),
+            make_step( a_capture(), { quick }, std::string{ dominantLabel } ),
+            make_step( a_click(), { dominant }, std::string{ trailingLabel } ),
+        } );
+        FakeRunner runner{ document };
+        runner.script( quick ).pace    = tinySpan;
+        runner.script( dominant ).pace = dominantSpan;
+        runner.script( trailing ).pace = tinySpan;
+
+        Player     player{ document, runner };
+        const auto text = captured_log( grab::log::Level::Nominal,
+                                        [&player]()
+                                        {
+                                            ASSERT_TRUE( player.play().has_value() );
+                                            ( void )run_to_completion( player, origin );
+                                        } );
+
+        ASSERT_EQ( player.state(), PlayState::Done );
+
+        // The structural truth first. The summary is only ever allowed to
+        // REPORT what the run's own accessors already say, so that is what
+        // pins the behaviour; the log line is checked against it.
+        EXPECT_EQ( player.timing_of( dominant ).call_duration, Nanos{ dominantSpan } );
+        EXPECT_GT( player.timing_of( dominant ).call_duration,
+                   player.timing_of( quick ).call_duration );
+        EXPECT_GT( player.timing_of( dominant ).call_duration,
+                   player.timing_of( trailing ).call_duration );
+        EXPECT_EQ( player.deepest_frontier(), soloFrontier );
+
+        if constexpr( !grab::log::enabled( grab::log::Level::Nominal ) )
+        {
+            EXPECT_TRUE( text.empty() );
+            return;
+        }
+
+        EXPECT_EQ( occurrences( text, field( "summary", sequenceName ) ), oneOccurrence )
+            << text;
+        EXPECT_TRUE( has_field( text, "state", doneText ) ) << text;
+        EXPECT_TRUE( has_field( text, "longest_label", dominantLabel ) ) << text;
+        EXPECT_NE(
+            text.find( numeric_field( "longest_step",
+                                      static_cast<std::size_t>( dominant.index() ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_NE(
+            text.find( numeric_field( "longest_us",
+                                      static_cast<std::size_t>( dominantSpan.count() *
+                                                                microsPerMilli ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_NE(
+            text.find( numeric_field( "deepest_frontier", soloFrontier ) ),
+            std::string::npos
+        ) << text;
+        // An overflowed instrument must never read as a full accounting; this
+        // run did not overflow, so it must say the other thing.
+        EXPECT_TRUE( has_field( text, "instrument", completeText ) ) << text;
+    }
+
+    TEST( Player,
+          ABlockedStepLogsWhichPredecessorItIsWaitingOn )
+    {
+        const auto slow     = positional_id( 0U );
+        const auto other    = positional_id( 1U );
+        const auto blocked  = positional_id( 2U );
+        auto       document = build_or_die( {
+            make_step( a_wait( longWait ), {}, std::string{ blockerLabel } ),
+            make_step( a_click(), {}, std::string{ otherLabel } ),
+            make_step( a_click(), { slow, other }, std::string{ blockedLabel } ),
+        } );
+        FakeRunner runner{ document };
+
+        Player     player{ document, runner };
+        const auto text =
+            captured_log( grab::log::Level::Verbose,
+                          [&player]()
+                          {
+                              ASSERT_TRUE( player.play().has_value() );
+                              ASSERT_TRUE( player.pump( origin ).has_value() );
+                          } );
+
+        // Structural: the run really is stalled, and on that predecessor.
+        EXPECT_EQ( player.status_of( other ), StepStatus::Succeeded );
+        EXPECT_EQ( player.status_of( slow ), StepStatus::Running );
+        EXPECT_EQ( player.status_of( blocked ), StepStatus::Pending );
+        EXPECT_EQ( player.deepest_frontier(), pairedFrontier );
+
+        if constexpr( !grab::log::enabled( grab::log::Level::Verbose ) )
+        {
+            EXPECT_TRUE( text.empty() );
+            return;
+        }
+
+        // "Blocked" with no reason is the log line people curse at, so the
+        // record has to NAME the predecessor and say what it is doing.
+        EXPECT_NE(
+            text.find( numeric_field( "blocked",
+                                      static_cast<std::size_t>( blocked.index() ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_NE(
+            text.find( numeric_field( "waiting_on",
+                                      static_cast<std::size_t>( slow.index() ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_TRUE( has_field( text, "waiting_on_label", blockerLabel ) ) << text;
+        EXPECT_TRUE( has_field( text, "waiting_on_status", runningText ) ) << text;
+    }
+
+    TEST( Player,
+          EveryStepAndPlayStateTransitionIsLogged )
+    {
+        const auto first    = positional_id( 0U );
+        auto       document = build_or_die( {
+            make_step( a_click(), {}, std::string{ quickLabel } ),
+            make_step( a_click(), { first }, std::string{ trailingLabel } ),
+        } );
+        FakeRunner runner{ document };
+
+        Player     player{ document, runner };
+        const auto text =
+            captured_log( grab::log::Level::Verbose,
+                          [&player]()
+                          {
+                              ASSERT_TRUE( player.play().has_value() );
+                              ASSERT_TRUE( player.pump( origin ).has_value() );
+                          } );
+
+        ASSERT_EQ( player.state(), PlayState::Done );
+
+        if constexpr( !grab::log::enabled( grab::log::Level::Verbose ) )
+        {
+            EXPECT_TRUE( text.empty() );
+            return;
+        }
+
+        // The three transitions a step makes on the happy path, and the two
+        // the run makes.
+        EXPECT_TRUE( has_field( text, "to", readyText ) ) << text;
+        EXPECT_TRUE( has_field( text, "from", readyText ) ) << text;
+        EXPECT_TRUE( has_field( text, "to", runningText ) ) << text;
+        EXPECT_TRUE( has_field( text, "from", runningText ) ) << text;
+        EXPECT_TRUE( has_field( text, "to", "succeeded" ) ) << text;
+        EXPECT_TRUE( has_field( text, "state_to", "playing" ) ) << text;
+        EXPECT_TRUE( has_field( text, "state_to", doneText ) ) << text;
+        // Admission and retirement, both named, both with the depth after.
+        EXPECT_NE(
+            text.find( numeric_field( "admitted",
+                                      static_cast<std::size_t>( first.index() ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_NE(
+            text.find( numeric_field( "retired",
+                                      static_cast<std::size_t>( first.index() ) ) ),
+            std::string::npos
+        ) << text;
+    }
+
+    TEST( Player,
+          GraceActuallyAppliedIsLoggedWithTheModeThatAuthorisedIt )
+    {
+        const auto first = positional_id( 0U );
+        auto       steps = std::vector<Step>{
+            make_step( a_click(), {}, std::string{ quickLabel } ),
+            make_step( a_click(), { first }, std::string{ gracedLabel } ),
+        };
+        steps[1].extra_grace = extraGraceSpan;
+        auto document        = build_or_die(
+            std::move( steps ),
+            PacingOptions{ .mode = PacingMode::Precise, .grace = graceSpan }
+        );
+        FakeRunner runner{ document };
+
+        const auto second = positional_id( 1U );
+        Player     player{ document, runner };
+        const auto text =
+            captured_log( grab::log::Level::Verbose,
+                          [&player]()
+                          {
+                              ASSERT_TRUE( player.play().has_value() );
+                              ASSERT_TRUE( player.pump( origin ).has_value() );
+                          } );
+
+        // Structural: the delay the log claims is the delay the run took.
+        ASSERT_TRUE( player.ready_at( second ).has_value() );
+        EXPECT_EQ( *player.ready_at( second ) - origin,
+                   Nanos{ graceSpan } + Nanos{ extraGraceSpan } );
+
+        if constexpr( !grab::log::enabled( grab::log::Level::Verbose ) )
+        {
+            EXPECT_TRUE( text.empty() );
+            return;
+        }
+
+        EXPECT_NE(
+            text.find( numeric_field( "graced",
+                                      static_cast<std::size_t>( second.index() ) ) ),
+            std::string::npos
+        ) << text;
+        // The mode is the SOLE authority on extra_grace, so it is logged
+        // alongside the number it authorised.
+        EXPECT_TRUE( has_field( text, "mode", preciseText ) ) << text;
+        EXPECT_NE(
+            text.find( numeric_field( "base_grace_us",
+                                      static_cast<std::size_t>( graceSpan.count() *
+                                                                microsPerMilli ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_NE(
+            text.find( numeric_field( "extra_grace_us",
+                                      static_cast<std::size_t>( extraGraceSpan.count() *
+                                                                microsPerMilli ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_NE(
+            text.find(
+                numeric_field( "total_grace_us",
+                               static_cast<std::size_t>( ( graceSpan.count() +
+                                                           extraGraceSpan.count() ) *
+                                                         microsPerMilli ) )
+            ),
+            std::string::npos
+        ) << text;
+    }
+
+    TEST( Player,
+          DeepestFrontierReportsRealisedParallelismRatherThanStepCount )
+    {
+        auto       chain = build_or_die( three_step_chain() );
+        FakeRunner chainRunner{ chain };
+        Player     chainPlayer{ chain, chainRunner };
+        ASSERT_TRUE( chainPlayer.play().has_value() );
+        ( void )run_to_completion( chainPlayer, origin );
+
+        auto       forked = build_or_die( {
+            make_step( a_drag(), {} ),
+            make_step( a_capture(), {} ),
+        } );
+        FakeRunner forkedRunner{ forked };
+        forkedRunner.script( positional_id( 0U ) ).pace = dragSpan;
+        forkedRunner.script( positional_id( 1U ) ).pace = captureSpan;
+        Player forkedPlayer{ forked, forkedRunner };
+        ASSERT_TRUE( forkedPlayer.play().has_value() );
+        ( void )run_to_completion( forkedPlayer, origin );
+
+        ASSERT_EQ( chainPlayer.state(), PlayState::Done );
+        ASSERT_EQ( forkedPlayer.state(), PlayState::Done );
+
+        // Same number of steps in flight over time; different parallelism.
+        // Every other number the Player reports is blind to the difference.
+        EXPECT_EQ( chainPlayer.deepest_frontier(), soloFrontier );
+        EXPECT_EQ( forkedPlayer.deepest_frontier(), pairedFrontier );
+    }
+
+    TEST( Player,
+          UnwindLogsEachStepItReapedInOrder )
+    {
+        const auto held     = positional_id( 0U );
+        const auto running  = positional_id( 1U );
+        auto       document = build_or_die( {
+            make_step( a_click(), {}, std::string{ quickLabel } ),
+            make_step( a_wait( longWait ), { held }, std::string{ trailingLabel } ),
+        } );
+        FakeRunner runner{ document };
+        runner.script( held ).document_hold = true;
+
+        Player     player{ document, runner };
+        const auto text =
+            captured_log( grab::log::Level::Verbose,
+                          [&player]()
+                          {
+                              ASSERT_TRUE( player.play().has_value() );
+                              ASSERT_TRUE( player.pump( origin ).has_value() );
+                              ASSERT_TRUE( player.interrupt().has_value() );
+                          } );
+
+        // Structural: the explicit hold really did come back up.
+        EXPECT_EQ( player.neutralization(), grab::NeutralizationOutcome::Released );
+        EXPECT_EQ( player.status_of( running ), StepStatus::Skipped );
+
+        if constexpr( !grab::log::enabled( grab::log::Level::Verbose ) )
+        {
+            EXPECT_TRUE( text.empty() );
+            return;
+        }
+
+        // Reverse entry order, so the later step is reaped first. Both are
+        // named, and each says whether it released anything.
+        EXPECT_NE(
+            text.find( numeric_field( "unwound",
+                                      static_cast<std::size_t>( running.index() ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_NE(
+            text.find( numeric_field( "unwound",
+                                      static_cast<std::size_t>( held.index() ) ) ),
+            std::string::npos
+        ) << text;
+        EXPECT_TRUE( has_field( text, "path", "release_holds" ) ) << text;
+        EXPECT_TRUE( has_field( text, "released", "true" ) ) << text;
+        EXPECT_TRUE( has_field( text, "released", "false" ) ) << text;
+        EXPECT_TRUE( has_field( text, "outcome", "released" ) ) << text;
+        // The summary is emitted for an interrupted run too, not only a Done
+        // one -- a run that aborted is exactly when someone reads it.
+        EXPECT_EQ( occurrences( text, field( "summary", sequenceName ) ), oneOccurrence )
+            << text;
+        EXPECT_TRUE( has_field( text, "state", "interrupted" ) ) << text;
     }
 
 }    // namespace

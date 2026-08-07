@@ -11,15 +11,18 @@
 // wake_fd() readability observed from a thread that is deliberately busy.
 
 #include "kernel/scheduling/timer_thread.hpp"
+#include "kernel/support/step_diag.hpp"
 
 // clang-format off
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <poll.h>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -103,6 +106,52 @@ namespace
         descriptor.fd     = fd;
         descriptor.events = static_cast<short>( POLLIN );
         return readable( descriptor, static_cast<int>( budget.count() ) );
+    }
+
+    // ── Introspection ─────────────────────────────────────
+
+    constexpr auto          zeroNanoseconds = std::chrono::nanoseconds::zero();
+
+    // A sanity ceiling, not an accuracy assertion: the machine is shared, so
+    // the point is that the recorded latency is a plausible measurement rather
+    // than an uninitialised or wrapped value.
+    constexpr auto          latencyCeiling = std::chrono::seconds{ 5 };
+
+    // Long enough for the timer thread to have come out of poll(), programmed
+    // the timerfd for the deadline just armed, and gone back in. Only the
+    // "nearer deadline" question needs it, because that is the only counter
+    // whose answer depends on what the OTHER thread has already done.
+    constexpr auto          settleSpan  = std::chrono::milliseconds{ 50 };
+
+    constexpr std::uint64_t noFires     = 0U;
+    constexpr std::uint64_t oneFire     = 1U;
+    constexpr std::uint64_t noDrains    = 0U;
+    constexpr std::uint64_t twoDrains   = 2U;
+    constexpr std::uint64_t threeDrains = 3U;
+    constexpr std::uint64_t noRearms    = 0U;
+    constexpr std::uint64_t oneRearm    = 1U;
+    constexpr std::uint64_t threeArms   = 3U;
+
+    // 1 + 2 + 3: the depth is read after each push, so three arms against an
+    // empty set sum to six.
+    constexpr std::uint64_t depthTotal   = 6U;
+    constexpr std::size_t   deepestThree = 3U;
+    constexpr std::size_t   deepestOne   = 1U;
+    constexpr std::size_t   armCount     = 3U;
+
+    [[nodiscard]]
+    const grab::diag::Tally*
+    tally_named( const grab::diag::Instrument& instrument,
+                 std::string_view              name )
+    {
+        for( const auto& tally : instrument.tallies() )
+        {
+            if( tally.name == name )
+            {
+                return &tally;
+            }
+        }
+        return nullptr;
     }
 
     // Descriptors are the resource this class is most likely to leak: it owns
@@ -302,4 +351,135 @@ TEST( TimerThreadTiming,
         static_cast<void>( timers.arm( Clock::now() + wakeDeadline ) );
     }
     EXPECT_EQ( open_descriptor_count(), before );
+}
+
+// ── Scheduling introspection ───────────────────────────────
+//
+// WAKE LATENCY IS THE NUMBER THIS CLASS EXISTS TO BE JUDGED BY. Everything
+// above proves the wake happens; this proves the class knows how late it was,
+// which is the only thing that turns "the run felt slow" into a decision.
+//
+// It is measured from values run() already had -- the `now` it reads once per
+// loop iteration and the deadline the entry was armed with -- so nothing here
+// costs the hot path a clock read, which is why it is unconditional rather
+// than gated behind a compile level.
+
+TEST( TimerThreadTiming,
+      WakeLatencyIsRecordedForAFiredTokenAndIsNeverNegative )
+{
+    TimerThread timers;
+    EXPECT_EQ( timers.worst_wake_latency(), zeroNanoseconds );
+
+    const auto deadline = Clock::now() + wakeDeadline;
+    const auto token    = timers.arm( deadline );
+    ASSERT_TRUE( wait_readable( timers.wake_fd(), wakeBudget ) );
+
+    const auto due = timers.drain();
+    ASSERT_EQ( due.size(), oneToken );
+    EXPECT_EQ( due.front(), token );
+
+    const auto&       instrument = timers.instrument();
+    const auto* const wake =
+        tally_named( instrument, grab::kernel::scheduling::timer_tally::wakeLatency );
+    ASSERT_NE( wake, nullptr );
+    EXPECT_EQ( wake->calls, oneFire );
+
+    // Non-negative by construction: a token is collected only once its
+    // deadline is at or before the instant that collected it. A negative here
+    // would mean the two clocks disagree, which is the bug diag::ServerClock
+    // exists to prevent elsewhere.
+    EXPECT_GE( wake->shortest, zeroNanoseconds );
+    EXPECT_GE( wake->longest, zeroNanoseconds );
+    EXPECT_GE( wake->total, zeroNanoseconds );
+    EXPECT_LT( wake->longest, latencyCeiling );
+
+    EXPECT_EQ( timers.worst_wake_latency(), wake->longest );
+    EXPECT_EQ( timers.counters().fires, oneFire );
+    EXPECT_FALSE( instrument.overflowed() );
+}
+
+// A wake that delivered nothing cost a syscall, a lock and a round trip. It is
+// pure overhead, so it is counted separately rather than folded into the drain
+// count -- "3 of 260" and "3 of 4" are different diagnoses.
+TEST( TimerThreadTiming,
+      ADrainWithNothingDueIsCountedAsSpurious )
+{
+    TimerThread timers;
+    EXPECT_EQ( timers.counters().drains, noDrains );
+
+    EXPECT_TRUE( timers.drain().empty() );
+    EXPECT_TRUE( timers.drain().empty() );
+
+    const auto idle = timers.counters();
+    EXPECT_EQ( idle.drains, twoDrains );
+    EXPECT_EQ( idle.spuriousDrains, twoDrains );
+    EXPECT_EQ( idle.fires, noFires );
+    EXPECT_EQ( idle.deepestDue, firstIndex );
+
+    // The control: a drain that DOES deliver must not be counted as spurious,
+    // or the number means nothing.
+    static_cast<void>( timers.arm( Clock::now() + wakeDeadline ) );
+    ASSERT_TRUE( wait_readable( timers.wake_fd(), wakeBudget ) );
+    EXPECT_EQ( timers.drain().size(), oneToken );
+
+    const auto delivered = timers.counters();
+    EXPECT_EQ( delivered.drains, threeDrains );
+    EXPECT_EQ( delivered.spuriousDrains, twoDrains );
+    EXPECT_EQ( delivered.fires, oneFire );
+    EXPECT_EQ( delivered.deepestDue, deepestOne );
+}
+
+// Depth is read under the same lock as the push, so it describes the queue the
+// arm actually joined. Far deadlines never expire, which is what makes the sum
+// deterministic rather than a race with the timer thread.
+TEST( TimerThreadTiming,
+      QueueDepthIsRecordedAtEveryArm )
+{
+    TimerThread timers;
+    for( std::size_t index = firstIndex; index < armCount; ++index )
+    {
+        static_cast<void>( timers.arm( Clock::now() + farDeadline ) );
+    }
+
+    const auto counters = timers.counters();
+    EXPECT_EQ( counters.arms, threeArms );
+    EXPECT_EQ( counters.deepestArmed, deepestThree );
+    EXPECT_EQ( counters.armedDepthTotal, depthTotal );
+    EXPECT_EQ( counters.fires, noFires );
+}
+
+// A rearm is not free: the wait already in flight is torn down and the timerfd
+// reprogrammed. Counting it is what distinguishes "the caller arms in deadline
+// order" from "the caller arms backwards and pays for it every time".
+TEST( TimerThreadTiming,
+      OnlyANearerDeadlineThanTheOneArmedCountsAsARearm )
+{
+    TimerThread timers;
+    static_cast<void>( timers.arm( Clock::now() + farDeadline ) );
+
+    // The one place this suite must wait for the OTHER thread: until run() has
+    // programmed the timerfd there is no armed deadline for a later arm to be
+    // nearer than.
+    std::this_thread::sleep_for( settleSpan );
+
+    static_cast<void>( timers.arm( Clock::now() + farDeadline + farDeadline ) );
+    EXPECT_EQ( timers.counters().nearerRearms, noRearms );
+
+    static_cast<void>( timers.arm( Clock::now() + shortDeadline ) );
+    EXPECT_EQ( timers.counters().nearerRearms, oneRearm );
+}
+
+// Nothing armed after stop() can ever become a deadline, so counting it would
+// inflate the denominator of every ratio in the report.
+TEST( TimerThreadTiming,
+      ArmingAfterStopIsNotCountedAsAnArm )
+{
+    TimerThread timers;
+    static_cast<void>( timers.arm( Clock::now() + farDeadline ) );
+    timers.stop();
+    static_cast<void>( timers.arm( Clock::now() + farDeadline ) );
+
+    const auto counters = timers.counters();
+    EXPECT_EQ( counters.arms, oneFire );
+    EXPECT_EQ( counters.deepestArmed, deepestOne );
 }

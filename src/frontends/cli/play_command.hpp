@@ -4,7 +4,7 @@
 // the Player over a seat adapted from grab::Input.
 //
 //   grab play <sequence.json> [--pacing strict|grace|precise] [--grace-ms N]
-//                             [--dry-run] [--report <path.jsonl>]
+//                             [--dry-run] [--report <path.jsonl>] [--trace]
 //
 // CLI FLAGS OVERRIDE THE DOCUMENT. `pacing` is a document block and also a
 // pair of flags, and when they disagree the flags win -- that is what lets one
@@ -39,12 +39,15 @@
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
 #include "grab/trace.hpp"
+#include "kernel/scheduling/timer_thread.hpp"
 #include "kernel/sequence/execute.hpp"
 #include "kernel/sequence/player.hpp"
 #include "kernel/sequence/sequence.hpp"
+#include "kernel/support/step_diag.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -69,7 +72,107 @@ namespace grab::cli
             std::optional<grab::sequence::PacingMode> pacing{};
             std::optional<std::chrono::milliseconds>  grace{};
             bool                                      dry_run{ false };
+
+            // --trace: print the END-OF-RUN timing summary. Deliberately not
+            // a log level. `--log-level verbose --log-tags timer` is the
+            // running commentary -- one record per arm, per fire, per cancel,
+            // interleaved with the run and costing a write(2) each. This is
+            // the accounting afterwards, built from tallies that were
+            // accumulating anyway. They compose: asking for both gives the
+            // commentary and then the summary, and neither is derived from
+            // the other.
+            bool                                      trace{ false };
     };
+
+    // ── What --trace reports ──────────────────────────────
+    //
+    // Four instruments, kept apart because they answer four different
+    // questions and merging them would lose which is which:
+    //
+    //   load       parsing and building the document, once, before any clock
+    //              that matters starts
+    //   run        per-command wall time, which is where a sequence actually
+    //              spends itself
+    //   pump       the Player's own phases, when it exposes them
+    //   scheduling the timer thread's accuracy -- the number that says whether
+    //              the run was slow because the work was slow or because the
+    //              spine was
+    //
+    // Every one of them is a diag::Instrument, so the same formatter prints
+    // all four and a new phase anywhere shows up without touching this file.
+    struct RunTrace
+    {
+            std::string                                sequence{};
+            std::size_t                                steps{};
+
+            // Measured span of the run, from the Player's own clock.
+            std::chrono::nanoseconds                   elapsed{};
+
+            // What the document said it would take, recomputed under the
+            // EFFECTIVE pacing, and how many steps declared nothing. A plan of
+            // 7 s over 199 steps with 187 unestimated is a lower bound and
+            // must read as one.
+            std::chrono::nanoseconds                   planned{};
+            std::size_t                                unestimated{};
+
+            // Whole-document load: read, parse, validate and rebuild under the
+            // effective pacing. Timed unconditionally -- it happens once, and
+            // two clock reads for a number a human asked for is not a hot
+            // path.
+            std::chrono::nanoseconds                   load{};
+
+            grab::diag::Instrument                     load_phases{};
+            grab::diag::Instrument                     run{};
+            grab::diag::Instrument                     pump{};
+            grab::diag::Instrument                     scheduling{};
+            grab::kernel::scheduling::ScheduleCounters schedule{};
+
+            // False for --dry-run: nothing was played, so a run section would
+            // be a table of zeroes pretending to be measurements.
+            bool                                       ran{ false };
+    };
+
+    // The report, as text rather than to a stream, so its shape is assertable
+    // without capturing stdout. Ends in a newline. Sections are sorted by
+    // total time descending, so the expensive thing is the first line a human
+    // reads.
+    [[nodiscard]]
+    std::string
+    trace_report( const RunTrace& trace );
+
+    // Per-command tallies, derived from the Player's public timing. This is
+    // deliberately NOT dependent on the Player exposing an instrument: every
+    // number here comes from timing_of(), which is the same source the JSONL
+    // has always used, so the pretty report and the machine-readable one
+    // cannot disagree.
+    void
+    collect_run_tallies( const grab::kernel::sequence::Sequence& program,
+                         const grab::kernel::sequence::Player&   player,
+                         RunTrace&                               into );
+
+    // The Player's own pump-phase instrument, when it has one. A template so
+    // the absent case is a discarded branch rather than a compile error --
+    // the accessor is landing in a unit written beside this one, and a report
+    // that cannot be built until that lands is a report nobody gets today.
+    template<typename PlayerT>
+    void
+    collect_pump_tallies( const PlayerT& player,
+                          RunTrace&      into )
+    {
+        if constexpr( requires {
+                          {
+                              player.instrument()
+                          } -> std::convertible_to<const grab::diag::Instrument&>;
+                      } )
+        {
+            into.pump = player.instrument();
+        }
+        else
+        {
+            static_cast<void>( player );
+            static_cast<void>( into );
+        }
+    }
 
     [[nodiscard]]
     grab::Result<PlayOptions>
@@ -121,10 +224,24 @@ namespace grab::cli
     // One JSON object per step, in topological order, carrying what the run
     // recorded for it. Separate from writing so a test can assert the records
     // without touching the filesystem.
+    //
+    // THE PER-STEP RECORD SHAPE IS ADDITIVE AND STAYS THAT WAY: the corpus
+    // harness is written against it, so `start_ns`, `wait_ns` and `end_ns`
+    // joined the existing keys rather than replacing any. `wait_ns` is the
+    // span a step sat Ready before it was entered, which is the pacing and
+    // scheduling cost attributable to that step; `start_ns` and `end_ns` are
+    // relative to the first entry of the run, so a consumer can lay the run
+    // out on a timeline without knowing this process's steady-clock origin.
+    //
+    // `trace` adds ONE extra line at the end, tagged `"kind":"trace"`, holding
+    // the run-level accounting. It is written only when --trace was asked for,
+    // so a consumer counting one line per step keeps counting one line per
+    // step unless it opted in.
     [[nodiscard]]
     std::vector<std::string>
     report_records( const grab::kernel::sequence::Sequence& program,
-                    const grab::kernel::sequence::Player&   player );
+                    const grab::kernel::sequence::Player&   player,
+                    const RunTrace*                         trace = nullptr );
 
     [[nodiscard]]
     grab::Result<void>
@@ -140,9 +257,15 @@ namespace grab::cli
     // Fails only when a step failed under ErrorPolicy::Abort. The run is
     // always left in a terminal state: a loop that ends any other way
     // interrupts the player first, so nothing stays entered.
+    //
+    // `trace`, when given, receives the timer thread's accuracy. It is
+    // harvested HERE and nowhere else because the TimerThread is a local of
+    // this function: it is created on the first wait and destroyed on return,
+    // so a caller has no other moment at which to ask it anything.
     [[nodiscard]]
     grab::Result<void>
-    drive( grab::kernel::sequence::Player& player );
+    drive( grab::kernel::sequence::Player& player,
+           RunTrace*                       trace = nullptr );
 
     // Build the player, drive it, write the report, and answer the process
     // exit code. Takes the runner rather than making one so the
@@ -151,7 +274,8 @@ namespace grab::cli
     int
     play_program( const grab::kernel::sequence::Sequence& program,
                   grab::kernel::sequence::CommandRunner&  runner,
-                  const PlayOptions&                      options );
+                  const PlayOptions&                      options,
+                  RunTrace*                               trace = nullptr );
 
     [[nodiscard]]
     int
