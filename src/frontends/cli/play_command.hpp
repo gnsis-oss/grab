@@ -5,6 +5,14 @@
 //
 //   grab play <sequence.json> [--pacing strict|grace|precise] [--grace-ms N]
 //                             [--dry-run] [--report <path.jsonl>] [--trace]
+//                             [--trail] [--feedback] + their style flags
+//
+// VISUAL FEEDBACK IS TWO FLAGS, NOT THREE PROCESSES. Watching a playback used
+// to mean `grab trail &`, `grab feedback &`, then `grab play` -- three
+// processes started in the right order, each opening its own Session against
+// the same display, and each needing to be killed afterwards. `--trail` and
+// `--feedback` do it from the one command, over the one session the overlay
+// steps already use.
 //
 // CLI FLAGS OVERRIDE THE DOCUMENT. `pacing` is a document block and also a
 // pair of flags, and when they disagree the flags win -- that is what lets one
@@ -34,11 +42,15 @@
 // any seat satisfying the concepts in execute.hpp, which includes
 // grab::testing::RecordingSeat.
 
+#include "frontends/cli/overlay_command.hpp"
 #include "grab/command.hpp"
 #include "grab/command_descriptor.hpp"
+#include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
+#include "grab/session.hpp"
 #include "grab/trace.hpp"
+#include "kernel/presentation/trail_animator.hpp"
 #include "kernel/scheduling/timer_thread.hpp"
 #include "kernel/sequence/execute.hpp"
 #include "kernel/sequence/player.hpp"
@@ -50,6 +62,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -82,6 +95,46 @@ namespace grab::cli
             // commentary and then the summary, and neither is derived from
             // the other.
             bool                                      trace{ false };
+
+            // ── Visual feedback, opt-in ───────────────────────
+            //
+            // Two booleans, so ONE command plays a document AND shows what it
+            // is doing. Both are off by default: a headless corpus run must not
+            // start paying for an overlay it will never look at.
+            //
+            // The style fields below are meaningful only alongside their
+            // feature. A style flag without its feature is a COMMAND-LINE ERROR
+            // naming the flag that is missing, never a silent no-op -- the
+            // failure mode being avoided is `--fade-ms 400` on its own, which
+            // would otherwise parse, run, and draw nothing.
+            bool                                      trail{ false };
+            bool                                      feedback{ false };
+
+            // Spelled out rather than defaulted, because
+            // `OverlayTrailOptions{}` is NOT the trail's defaults: its `fade`
+            // and `width_px` default to zero, and the standalone verb fills
+            // them in at parse time. A zero-width trail draws nothing.
+            //
+            // BOTH COLOURS DEFAULT TO THE SAME AMBER, which is what makes
+            // `grab play --trail` visible out of the box: under playback every
+            // sample is XTest-injected, so the trail is drawn ENTIRELY in
+            // `injected_color` and a dim or distinct default there would look
+            // like a broken feature rather than a deliberate one.
+            OverlayTrailOptions                       trail_style{
+                .physical_color = grab::overlay::defaultOverlayColor,
+                .injected_color = grab::overlay::defaultOverlayColor,
+                .fade           = grab::kernel::presentation::defaultTrailFade,
+                .width_px       = grab::kernel::presentation::defaultTrailWidthPx,
+            };
+
+            // Click ripple and hold bar both on, matching `grab feedback`.
+            // `CursorFeedbackConfig{}` would leave both nullopt, which is the
+            // configuration that presents nothing.
+            CursorFeedbackConfig feedback_style{
+                .click      = grab::RippleStyle{},
+                .hold       = grab::ProgressStyle{},
+                .thresholds = grab::GestureThresholds{},
+            };
     };
 
     // ── What --trace reports ──────────────────────────────
@@ -262,10 +315,19 @@ namespace grab::cli
     // harvested HERE and nowhere else because the TimerThread is a local of
     // this function: it is created on the first wait and destroyed on return,
     // so a caller has no other moment at which to ask it anything.
+    //
+    // `on_pump` runs once per pump, on this loop's own thread. `--trail` uses
+    // it to turn the observation queue into trail segments WHILE the run
+    // proceeds: this loop is the only thread awake for the whole run, and a
+    // trail assembled afterwards is a trail nobody saw. It is called on the
+    // last iteration too, so the tail of a run is not dropped.
+    using PumpHook = std::function<void()>;
+
     [[nodiscard]]
     grab::Result<void>
     drive( grab::kernel::sequence::Player& player,
-           RunTrace*                       trace = nullptr );
+           RunTrace*                       trace   = nullptr,
+           const PumpHook&                 on_pump = PumpHook{} );
 
     // Build the player, drive it, write the report, and answer the process
     // exit code. Takes the runner rather than making one so the
@@ -275,7 +337,8 @@ namespace grab::cli
     play_program( const grab::kernel::sequence::Sequence& program,
                   grab::kernel::sequence::CommandRunner&  runner,
                   const PlayOptions&                      options,
-                  RunTrace*                               trace = nullptr );
+                  RunTrace*                               trace   = nullptr,
+                  const PumpHook&                         on_pump = PumpHook{} );
 
     [[nodiscard]]
     int

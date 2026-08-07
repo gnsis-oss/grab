@@ -1,8 +1,10 @@
 #include "codec/png.hpp"
 #include "frontends/cli/common.hpp"
+#include "frontends/cli/overlay_command.hpp"
 #include "frontends/cli/play_command.hpp"
 #include "grab/command.hpp"
 #include "grab/command_descriptor.hpp"
+#include "grab/event.hpp"
 #include "grab/geometry/point.hpp"
 #include "grab/image.hpp"
 #include "grab/input.hpp"
@@ -13,6 +15,9 @@
 #include "grab/session.hpp"
 #include "grab/space.hpp"
 #include "grab/trace.hpp"
+#include "grab/watch.hpp"
+#include "kernel/presentation/overlay_scene.hpp"
+#include "kernel/presentation/trail_animator.hpp"
 #include "kernel/scheduling/timer_thread.hpp"
 #include "kernel/sequence/interpreter.hpp"
 #include "kernel/sequence/player.hpp"
@@ -25,6 +30,7 @@
 #include <cerrno>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -65,28 +71,63 @@ namespace grab::cli
         constexpr std::string_view flagPrefix     = "-";
         constexpr std::string_view singleStepName = "cli";
 
+        // ── The visual-feedback flags ─────────────────────────
+        //
+        // Names and defaults are the standalone verbs', so the two surfaces
+        // cannot disagree about what `--fade-ms 400` means. The two renames are
+        // forced by the merge and nothing else: `grab trail --color` becomes
+        // `--trail-color` and `--width` becomes `--trail-width`, because on a
+        // command that also carries `grab feedback`'s options a bare `--color`
+        // or `--width` names neither feature.
+        constexpr std::string_view trailFlag         = "--trail";
+        constexpr std::string_view feedbackFlag      = "--feedback";
+        constexpr std::string_view trailColorFlag    = "--trail-color";
+        constexpr std::string_view injectedColorFlag = "--injected-color";
+        constexpr std::string_view fadeMsFlag        = "--fade-ms";
+        constexpr std::string_view trailWidthFlag    = "--trail-width";
+        constexpr std::string_view noClickFlag       = "--no-click";
+        constexpr std::string_view noHoldFlag        = "--no-hold";
+        constexpr std::string_view holdMsFlag        = "--hold-ms";
+        constexpr std::string_view rippleRadiusFlag  = "--ripple-radius";
+
+        constexpr std::size_t      colorTextLength   = 6U;
+        constexpr std::size_t      hexDigitsPerByte  = 2U;
+        constexpr std::size_t      redTextOffset     = 0U;
+        constexpr std::size_t      greenTextOffset   = 2U;
+        constexpr std::size_t      blueTextOffset    = 4U;
+        constexpr std::uint8_t     hexadecimalBase   = 16U;
+        constexpr std::uint8_t     decimalDigitBase  = 10U;
+        constexpr std::uint8_t     alphaHexOffset    = 10U;
+        constexpr char             lowerHexA         = 'a';
+        constexpr char             lowerHexF         = 'f';
+        constexpr char             upperHexA         = 'A';
+        constexpr char             upperHexF         = 'F';
+        constexpr char             asciiZero         = '0';
+        constexpr char             asciiNine         = '9';
+        constexpr std::uint8_t  opaqueChannel = std::numeric_limits<std::uint8_t>::max();
+
         // ── Report formatting ─────────────────────────────────
         //
         // Two decimals and a unit chosen by magnitude, computed in integers.
         // std::to_chars over a double would need a precision and a rounding
         // mode argued about; the report is read by a human deciding what to
         // optimise, and 8.42 s tells them what 8.4213977 s does not.
-        constexpr std::int64_t     nanosecondsPerMicrosecond = 1'000;
-        constexpr std::int64_t     nanosecondsPerMillisecond = 1'000'000;
-        constexpr std::int64_t     nanosecondsPerSecond      = 1'000'000'000;
-        constexpr std::int64_t     hundredths                = 100;
-        constexpr std::int64_t     tenths                    = 10;
+        constexpr std::int64_t  nanosecondsPerMicrosecond = 1'000;
+        constexpr std::int64_t  nanosecondsPerMillisecond = 1'000'000;
+        constexpr std::int64_t  nanosecondsPerSecond      = 1'000'000'000;
+        constexpr std::int64_t  hundredths                = 100;
+        constexpr std::int64_t  tenths                    = 10;
 
         // Column stops. Left-aligned, because the names are the thing being
         // scanned and a right-aligned name column reads as ragged.
-        constexpr std::size_t      nameColumn  = 4U;
-        constexpr std::size_t      countColumn = 28U;
-        constexpr std::size_t      totalColumn = 42U;
-        constexpr std::size_t      meanColumn  = 56U;
-        constexpr std::size_t      maxColumn   = 74U;
+        constexpr std::size_t   nameColumn  = 4U;
+        constexpr std::size_t   countColumn = 28U;
+        constexpr std::size_t   totalColumn = 42U;
+        constexpr std::size_t   meanColumn  = 56U;
+        constexpr std::size_t   maxColumn   = 74U;
 
-        constexpr std::uint64_t    noCalls     = 0U;
-        constexpr std::uint64_t    oneCall     = 1U;
+        constexpr std::uint64_t noCalls     = 0U;
+        constexpr std::uint64_t oneCall     = 1U;
 
         [[nodiscard]]
         std::string
@@ -234,10 +275,17 @@ namespace grab::cli
         void
         print_play_usage()
         {
-            ( void )std::fputs( "usage: grab play SEQUENCE.json "
-                                "[--pacing strict|grace|precise] [--grace-ms N] "
-                                "[--dry-run] [--report PATH.jsonl] [--trace]\n",
-                                stderr );
+            ( void )std::fputs(
+                "usage: grab play SEQUENCE.json "
+                "[--pacing strict|grace|precise] [--grace-ms N]\n"
+                "                 [--dry-run] [--report PATH.jsonl] [--trace]\n"
+                "                 [--trail] [--trail-color RRGGBB] "
+                "[--injected-color RRGGBB]\n"
+                "                 [--fade-ms N] [--trail-width F]\n"
+                "                 [--feedback] [--no-click] [--no-hold] "
+                "[--hold-ms N] [--ripple-radius PX]\n",
+                stderr
+            );
         }
 
         [[nodiscard]]
@@ -770,6 +818,45 @@ namespace grab::cli
                     return {};
                 }
 
+                // ── Eager open, for --trail / --feedback ─────────
+                //
+                // Lazy is right for a document: one that draws nothing must not
+                // pay for a session, and `grab click` must keep working on a
+                // display with no compositing manager. It is WRONG for the
+                // visual flags. A trail that starts when the document first
+                // draws something has already missed every move before that, so
+                // the first waypoints of a run would silently produce no
+                // segments -- indistinguishable from `--trail` not working.
+                //
+                // The same session and the same overlay the overlay.* steps use:
+                // opening a second pair would put the trail on one surface and
+                // the document's shapes on another.
+                [[nodiscard]]
+                grab::Result<void>
+                open_session()
+                {
+                    auto surface = ensure_overlay();
+                    if( !surface.has_value() )
+                    {
+                        return std::unexpected( std::move( surface.error() ) );
+                    }
+                    return {};
+                }
+
+                [[nodiscard]]
+                grab::Session*
+                session() noexcept
+                {
+                    return session_.get();
+                }
+
+                [[nodiscard]]
+                grab::Overlay*
+                surface() noexcept
+                {
+                    return overlay_;
+                }
+
             private:
 
                 // One placed shape: the name the document spells, the id the
@@ -961,6 +1048,159 @@ namespace grab::cli
             return value;
         }
 
+        // ── Style-flag values ─────────────────────────────────
+        //
+        // Same grammar and the same rejections as the standalone verbs: RRGGBB
+        // hex, a positive millisecond count for a fade, a positive finite width
+        // and a nonnegative one for the gesture thresholds and the ripple.
+
+        [[nodiscard]]
+        std::optional<std::uint8_t>
+        hex_digit( char value ) noexcept
+        {
+            if( value >= asciiZero && value <= asciiNine )
+            {
+                return static_cast<std::uint8_t>( value - asciiZero );
+            }
+            if( value >= lowerHexA && value <= lowerHexF )
+            {
+                return static_cast<std::uint8_t>( value - lowerHexA + alphaHexOffset );
+            }
+            if( value >= upperHexA && value <= upperHexF )
+            {
+                return static_cast<std::uint8_t>( value - upperHexA + alphaHexOffset );
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]]
+        grab::Result<grab::overlay::Color>
+        parse_color( std::string_view text,
+                     std::string_view flag )
+        {
+            if( text.size() != colorTextLength )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   std::string{ flag } + " must match RRGGBB" );
+            }
+            const auto channel = [text]( std::size_t offset )
+            {
+                const auto pair = text.substr( offset, hexDigitsPerByte );
+                const auto high = hex_digit( pair.front() );
+                const auto low  = hex_digit( pair.back() );
+                return high.has_value() && low.has_value()
+                         ? std::optional<std::uint8_t>{ static_cast<std::uint8_t>(
+                               ( *high * hexadecimalBase ) + *low
+                           ) }
+                         : std::nullopt;
+            };
+            const auto red   = channel( redTextOffset );
+            const auto green = channel( greenTextOffset );
+            const auto blue  = channel( blueTextOffset );
+            if( !red.has_value() || !green.has_value() || !blue.has_value() )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   std::string{ flag } + " must match RRGGBB" );
+            }
+            return grab::overlay::Color{
+                .r = *red,
+                .g = *green,
+                .b = *blue,
+                .a = opaqueChannel,
+            };
+        }
+
+        [[nodiscard]]
+        grab::Result<std::chrono::milliseconds>
+        parse_positive_duration( std::string_view text,
+                                 std::string_view flag )
+        {
+            std::chrono::milliseconds::rep value{};
+            const auto* const              begin = text.begin();
+            const auto* const              end   = text.end();
+            const auto parsed = std::from_chars( begin, end, value, decimalDigitBase );
+            if( text.empty() ||
+                parsed.ec !=
+                std::errc{} ||
+                parsed.ptr !=
+                end ||
+                value <= 0 )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   std::string{ flag } +
+                                       " must be a positive millisecond count" );
+            }
+            return std::chrono::milliseconds{ value };
+        }
+
+        [[nodiscard]]
+        grab::Result<std::chrono::milliseconds>
+        parse_nonnegative_duration( std::string_view text,
+                                    std::string_view flag )
+        {
+            std::chrono::milliseconds::rep value{};
+            const auto* const              begin = text.begin();
+            const auto* const              end   = text.end();
+            const auto parsed = std::from_chars( begin, end, value, decimalDigitBase );
+            if( text.empty() ||
+                parsed.ec !=
+                std::errc{} ||
+                parsed.ptr !=
+                end ||
+                value < 0 )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   std::string{ flag } +
+                                       " must be a nonnegative millisecond count" );
+            }
+            return std::chrono::milliseconds{ value };
+        }
+
+        [[nodiscard]]
+        grab::Result<double>
+        parse_nonnegative_number( std::string_view text,
+                                  std::string_view flag )
+        {
+            double            value{};
+            const auto* const begin  = text.begin();
+            const auto* const end    = text.end();
+            const auto        parsed = std::from_chars( begin, end, value );
+            if( text.empty() ||
+                parsed.ec !=
+                std::errc{} ||
+                parsed.ptr !=
+                end ||
+                !std::isfinite( value ) ||
+                value < 0.0 )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   std::string{ flag } +
+                                       " must be a finite nonnegative number" );
+            }
+            return value;
+        }
+
+        [[nodiscard]]
+        grab::Result<float>
+        parse_trail_width( std::string_view text,
+                           std::string_view flag )
+        {
+            auto value = parse_nonnegative_number( text, flag );
+            if( !value.has_value() )
+            {
+                return std::unexpected( std::move( value.error() ) );
+            }
+            if( *value <=
+                0.0 ||
+                *value > static_cast<double>( std::numeric_limits<float>::max() ) )
+            {
+                return grab::fail( grab::ErrorCode::InvalidArgument,
+                                   std::string{ flag } +
+                                       " must be a positive finite number" );
+            }
+            return static_cast<float>( *value );
+        }
+
         // ── The interrupt path ────────────────────────────────
         //
         // SIGINT and SIGTERM during a run, turned into an ordinary unwind
@@ -1079,6 +1319,273 @@ namespace grab::cli
                 bool released_{ false };
         };
 
+        // ── --trail and --feedback ────────────────────────────
+        //
+        // The two visual surfaces a playback can raise, as ONE owner with ONE
+        // teardown. Both are assembled out of what already exists:
+        //
+        //   feedback  Session::cursor_feedback(), a first-class session API
+        //             returning a move-only RAII handle. Nothing here does more
+        //             than hold it for the run and read its status at the end.
+        //   trail     the assembly `grab trail` uses -- watch({MouseMove})
+        //             feeding kernel::presentation::TrailAnimator through an
+        //             OverlayScene whose Upsert deltas become add_many calls.
+        //
+        // WHERE THE TRAIL IS DRAINED IS THE ONE REAL CHOICE HERE. `grab trail`
+        // has nothing else to do, so it drains on the session's reactor thread
+        // from the subscription's notify callback. `grab play` does have
+        // something else to do: its drive loop owns that same overlay for every
+        // overlay.* step. Draining from the loop instead keeps every mutation
+        // of the surface on ONE thread and needs no notify callback that could
+        // fire into a half-torn-down animator. The cadence comes free -- the
+        // loop wakes once per waypoint, which is the 4-6 ms a document paces
+        // its motion at, and never blocks longer than maximumWaitMs.
+        //
+        // BOTH HANDLES ARE RELEASED ON EVERY EXIT PATH, for the same reason
+        // release_outstanding() exists: stop() is called explicitly on the
+        // normal, failed and signalled paths, and the destructor is the
+        // backstop for a throw between them. A feedback presenter that outlives
+        // its session is a leak; a subscription left installed holds an
+        // observation reference the session cannot retire.
+        class VisualFeedback final
+        {
+            public:
+
+                VisualFeedback() = default;
+
+                ~VisualFeedback()
+                {
+                    stop();
+                }
+
+                VisualFeedback( const VisualFeedback& ) = delete;
+                VisualFeedback&
+                operator=( const VisualFeedback& ) = delete;
+                VisualFeedback( VisualFeedback&& ) = delete;
+                VisualFeedback&
+                operator=( VisualFeedback&& ) = delete;
+
+                // All-or-nothing: a partial start is torn down before the error
+                // is returned, so a failed --feedback cannot leave a live trail
+                // subscription behind it.
+                [[nodiscard]]
+                grab::Result<void>
+                start( grab::Session&     session,
+                       grab::Overlay&     overlay,
+                       const PlayOptions& options )
+                {
+                    session_    = &session;
+                    overlay_    = &overlay;
+
+                    auto opened = open( options );
+                    if( !opened.has_value() )
+                    {
+                        stop();
+                        return opened;
+                    }
+                    return {};
+                }
+
+                // One drain of the observation queue into the animator, then
+                // one add_many for everything it produced. Cheap when idle: an
+                // empty queue is one mutex acquisition and an empty vector.
+                void
+                pump()
+                {
+                    if( !animator_.has_value() )
+                    {
+                        return;
+                    }
+                    while( auto item = subscription_.try_pop_item() )
+                    {
+                        animator_->consume( *item );
+                    }
+                    flush_pending();
+                }
+
+                void
+                stop() noexcept
+                {
+                    if( stopped_ )
+                    {
+                        return;
+                    }
+                    stopped_ = true;
+                    try
+                    {
+                        // The tail of the run, drawn rather than dropped: the
+                        // last waypoints of the last motion command are still
+                        // in the queue when the loop ends.
+                        pump();
+                        if( feedback_.has_value() )
+                        {
+                            auto status = feedback_->status();
+                            if( !status.has_value() )
+                            {
+                                remember( std::move( status.error() ) );
+                            }
+                            feedback_.reset();
+                        }
+                        if( scene_.has_value() )
+                        {
+                            scene_->set_delta_sink( {} );
+                        }
+                        animator_.reset();
+                        scene_.reset();
+                        subscription_ = grab::Subscription{};
+                        if( observing_ && session_ != nullptr )
+                        {
+                            session_->stop_observation();
+                            observing_ = false;
+                        }
+                    }
+                    catch( ... )    // NOLINT(bugprone-empty-catch)
+                    {
+                        // Teardown is the last thing that runs; there is nobody
+                        // left to report to, and throwing out of a noexcept
+                        // teardown would abort the process instead.
+                    }
+                }
+
+                // The first thing that went wrong while drawing, if anything
+                // did. A requested feature that silently drew nothing is the
+                // failure this exists to make visible.
+                [[nodiscard]]
+                const std::optional<grab::Error>&
+                error() const noexcept
+                {
+                    return error_;
+                }
+
+            private:
+
+                [[nodiscard]]
+                grab::Result<void>
+                open( const PlayOptions& options )
+                {
+                    if( options.trail )
+                    {
+                        auto started = start_trail( options.trail_style );
+                        if( !started.has_value() )
+                        {
+                            return started;
+                        }
+                    }
+                    if( options.feedback )
+                    {
+                        auto handle =
+                            session_->cursor_feedback( options.feedback_style );
+                        if( !handle.has_value() )
+                        {
+                            return std::unexpected( std::move( handle.error() ) );
+                        }
+                        feedback_.emplace( std::move( *handle ) );
+                    }
+                    return {};
+                }
+
+                [[nodiscard]]
+                grab::Result<void>
+                start_trail( const OverlayTrailOptions& style )
+                {
+                    scene_.emplace(
+                        []
+                        {
+                            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                                Clock::now().time_since_epoch()
+                            );
+                        }
+                    );
+                    scene_->set_delta_sink(
+                        [this]( const grab::overlay::SceneDelta& delta )
+                        {
+                            forward( delta );
+                        }
+                    );
+                    animator_.emplace( *scene_,
+                                       grab::kernel::presentation::TrailStyle{
+                                           .physical = style.physical_color,
+                                           .injected = style.injected_color,
+                                           .fade     = style.fade,
+                                           .width_px = style.width_px,
+                                       } );
+
+                    grab::SubscriptionScope scope;
+                    scope.kinds  = { grab::EventKind::MouseMove };
+                    auto watched = session_->watch( std::move( scope ) );
+                    if( !watched.has_value() )
+                    {
+                        return std::unexpected( std::move( watched.error() ) );
+                    }
+                    subscription_ = std::move( *watched );
+
+                    // Nothing arrives without this. cursor_feedback() acquires
+                    // its own observation reference; a raw watch() does not, so
+                    // --trail alone would subscribe to a stream nobody started.
+                    auto observed = session_->start_observation();
+                    if( !observed.has_value() )
+                    {
+                        return std::unexpected( std::move( observed.error() ) );
+                    }
+                    observing_ = true;
+                    return {};
+                }
+
+                // Batched, not one add per segment: every mutating Overlay call
+                // is a round trip to the reactor thread priced per CALL, so a
+                // producer adding one shape at a time stalls itself. A
+                // non-Upsert delta (an expiry, a clear) is the scene saying the
+                // batch it was accumulating is complete.
+                void
+                forward( const grab::overlay::SceneDelta& delta )
+                {
+                    const auto* const upsert =
+                        std::get_if<grab::overlay::Upsert>( &delta.change );
+                    if( upsert != nullptr )
+                    {
+                        pending_.push_back( upsert->record.shape );
+                        return;
+                    }
+                    flush_pending();
+                }
+
+                void
+                flush_pending()
+                {
+                    if( pending_.empty() || overlay_ == nullptr )
+                    {
+                        pending_.clear();
+                        return;
+                    }
+                    auto added = overlay_->add_many( pending_ );
+                    pending_.clear();
+                    if( !added.has_value() )
+                    {
+                        remember( std::move( added.error() ) );
+                    }
+                }
+
+                void
+                remember( grab::Error error )
+                {
+                    if( !error_.has_value() )
+                    {
+                        error_ = std::move( error );
+                    }
+                }
+
+                grab::Session* session_{ nullptr };
+                grab::Overlay* overlay_{ nullptr };
+                std::optional<grab::kernel::presentation::OverlayScene>  scene_{};
+                std::optional<grab::kernel::presentation::TrailAnimator> animator_{};
+                grab::Subscription                                       subscription_{};
+                std::optional<grab::CursorFeedback>                      feedback_{};
+                std::vector<grab::overlay::Shape>                        pending_{};
+                std::optional<grab::Error>                               error_{};
+                bool observing_{ false };
+                bool stopped_{ false };
+        };
+
         // poll() rather than a sleep: the wait is owned by the timer thread's
         // eventfd, and the timeout is only a bound on how long a lost wake can
         // cost.
@@ -1180,9 +1687,20 @@ namespace grab::cli
     grab::Result<PlayOptions>
     parse_play_options( std::span<const std::string_view> args )
     {
-        PlayOptions options;
-        bool        has_document = false;
-        auto        current      = args.begin();
+        PlayOptions                     options;
+        bool                            has_document = false;
+
+        // Which STYLE flags were seen, so a style without its feature can be
+        // rejected by name after the whole line has been read. Deciding at the
+        // point of the flag would make `--fade-ms 400 --trail` an error and
+        // `--trail --fade-ms 400` a success, which is an ordering rule nobody
+        // can guess.
+        std::optional<std::string_view> trail_style_flag;
+        std::optional<std::string_view> feedback_style_flag;
+        bool                            click_enabled = true;
+        bool                            hold_enabled  = true;
+
+        auto                            current       = args.begin();
         while( current != args.end() )
         {
             const std::string_view argument = *current;
@@ -1196,6 +1714,123 @@ namespace grab::cli
             if( argument == traceFlag )
             {
                 options.trace = true;
+                continue;
+            }
+            if( argument == trailFlag )
+            {
+                options.trail = true;
+                continue;
+            }
+            if( argument == feedbackFlag )
+            {
+                options.feedback = true;
+                continue;
+            }
+            if( argument == noClickFlag )
+            {
+                click_enabled       = false;
+                feedback_style_flag = noClickFlag;
+                continue;
+            }
+            if( argument == noHoldFlag )
+            {
+                hold_enabled        = false;
+                feedback_style_flag = noHoldFlag;
+                continue;
+            }
+            if( argument == trailColorFlag || argument == injectedColorFlag )
+            {
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       std::string{ argument } + " requires a value" );
+                }
+                auto color = parse_color( *current, argument );
+                if( !color.has_value() )
+                {
+                    return std::unexpected( std::move( color.error() ) );
+                }
+                if( argument == trailColorFlag )
+                {
+                    options.trail_style.physical_color = *color;
+                }
+                else
+                {
+                    options.trail_style.injected_color = *color;
+                }
+                trail_style_flag = argument;
+                ++current;
+                continue;
+            }
+            if( argument == fadeMsFlag )
+            {
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--fade-ms requires a value" );
+                }
+                auto fade = parse_positive_duration( *current, fadeMsFlag );
+                if( !fade.has_value() )
+                {
+                    return std::unexpected( std::move( fade.error() ) );
+                }
+                options.trail_style.fade = *fade;
+                trail_style_flag         = fadeMsFlag;
+                ++current;
+                continue;
+            }
+            if( argument == trailWidthFlag )
+            {
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--trail-width requires a value" );
+                }
+                auto width = parse_trail_width( *current, trailWidthFlag );
+                if( !width.has_value() )
+                {
+                    return std::unexpected( std::move( width.error() ) );
+                }
+                options.trail_style.width_px = *width;
+                trail_style_flag             = trailWidthFlag;
+                ++current;
+                continue;
+            }
+            if( argument == holdMsFlag )
+            {
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--hold-ms requires a value" );
+                }
+                auto hold = parse_nonnegative_duration( *current, holdMsFlag );
+                if( !hold.has_value() )
+                {
+                    return std::unexpected( std::move( hold.error() ) );
+                }
+                options.feedback_style.thresholds.hold = *hold;
+                feedback_style_flag                    = holdMsFlag;
+                ++current;
+                continue;
+            }
+            if( argument == rippleRadiusFlag )
+            {
+                if( current == args.end() )
+                {
+                    return grab::fail( grab::ErrorCode::InvalidArgument,
+                                       "--ripple-radius requires a value" );
+                }
+                auto radius = parse_nonnegative_number( *current, rippleRadiusFlag );
+                if( !radius.has_value() )
+                {
+                    return std::unexpected( std::move( radius.error() ) );
+                }
+                if( options.feedback_style.click.has_value() )
+                {
+                    options.feedback_style.click->radius_px = *radius;
+                }
+                feedback_style_flag = rippleRadiusFlag;
+                ++current;
                 continue;
             }
             if( argument == pacingFlag )
@@ -1263,6 +1898,35 @@ namespace grab::cli
         {
             return grab::fail( grab::ErrorCode::InvalidArgument,
                                "play requires a sequence document" );
+        }
+
+        // A style flag without its feature is an ERROR naming the flag that is
+        // missing, not a silent no-op. `--fade-ms 400` on its own would
+        // otherwise parse, run, and draw nothing, and the only evidence would
+        // be an absent trail.
+        if( !options.trail && trail_style_flag.has_value() )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               std::string{ *trail_style_flag } +
+                                   " styles the mouse trail and needs --trail" );
+        }
+        if( !options.feedback && feedback_style_flag.has_value() )
+        {
+            return grab::fail( grab::ErrorCode::InvalidArgument,
+                               std::string{ *feedback_style_flag } +
+                                   " styles the cursor feedback and needs "
+                                   "--feedback" );
+        }
+
+        // Applied last, so --no-click still suppresses the ripple when
+        // --ripple-radius set a radius for it earlier on the same line.
+        if( !click_enabled )
+        {
+            options.feedback_style.click.reset();
+        }
+        if( !hold_enabled )
+        {
+            options.feedback_style.hold.reset();
         }
         return options;
     }
@@ -1705,7 +2369,8 @@ namespace grab::cli
 
     grab::Result<void>
     drive( grab::kernel::sequence::Player& player,
-           RunTrace*                       trace )
+           RunTrace*                       trace,
+           const PumpHook&                 on_pump )
     {
         std::optional<grab::kernel::scheduling::TimerThread> timers;
 
@@ -1719,6 +2384,13 @@ namespace grab::cli
         while( true )
         {
             auto pumped = player.pump( Clock::now() );
+            // Run BEFORE the break checks, so the samples the last pump
+            // produced are drawn on the way out rather than left in the queue
+            // for a teardown that may not look at it.
+            if( on_pump )
+            {
+                on_pump();
+            }
             if( !pumped.has_value() )
             {
                 outcome = pumped;
@@ -1831,10 +2503,11 @@ namespace grab::cli
     play_program( const Sequence&                        program,
                   grab::kernel::sequence::CommandRunner& runner,
                   const PlayOptions&                     options,
-                  RunTrace*                              trace )
+                  RunTrace*                              trace,
+                  const PumpHook&                        on_pump )
     {
         grab::kernel::sequence::Player player{ program, runner };
-        auto                           outcome = drive( player, trace );
+        auto                           outcome = drive( player, trace, on_pump );
 
         if( trace != nullptr )
         {
@@ -1989,15 +2662,50 @@ namespace grab::cli
             return runtimeExitCode;
         }
 
+        // Declared after the seat so it is DESTROYED FIRST: it borrows the
+        // session and overlay the seat owns, and a presenter torn down after
+        // its session is a use-after-free rather than a leak.
+        VisualFeedback visuals;
+        if( options->trail || options->feedback )
+        {
+            // Eagerly, before the first step runs. Opened lazily on the first
+            // overlay step instead, the first moves of the run would produce no
+            // trail at all -- and a document that draws nothing would produce
+            // none ever.
+            auto opened = seat->open_session();
+            if( !opened.has_value() )
+            {
+                print_error( opened.error().message );
+                return runtimeExitCode;
+            }
+            auto started = visuals.start( *seat->session(), *seat->surface(), *options );
+            if( !started.has_value() )
+            {
+                print_error( started.error().message );
+                return runtimeExitCode;
+            }
+        }
+
         // The trap is armed before the runner and disarmed after the holds are
         // lifted, so there is no window in which a signal can reach a run that
         // has already stopped tracking what it is holding.
         const InterruptTrap         trap;
         SeatRunner<InputSeat>       runner{ *seat };
         OutstandingHolds<InputSeat> holds{ runner };
-        const int                   code =
-            play_program( *paced, runner, *options, options->trace ? &trace : nullptr );
+        const int  code     = play_program( *paced,
+                                            runner,
+                                            *options,
+                                            options->trace ? &trace : nullptr,
+                                            [&visuals]
+                                            {
+                                           visuals.pump();
+                                            } );
         const auto released = holds.release();
+
+        // Explicit on the normal, failed AND signalled paths -- drive() turns a
+        // signal into an ordinary unwind, so control reaches here for all
+        // three. The destructor covers only the fourth, a throw.
+        visuals.stop();
 
         // Printed on every exit path a run can reach, including a failed one:
         // a run that aborted at step 140 is exactly when a human wants to know
@@ -2009,11 +2717,13 @@ namespace grab::cli
         }
 
         log::nominal(
-            [&paced, released]( auto& event )
+            [&paced, released, &options]( auto& event )
             {
                 event.tag( log::tags::player )
                     .value( "played", paced->name() )
-                    .value( "outstanding", neutralization_name( released ) );
+                    .value( "outstanding", neutralization_name( released ) )
+                    .value( "trail", options->trail )
+                    .value( "feedback", options->feedback );
             }
         );
 
@@ -2022,6 +2732,14 @@ namespace grab::cli
             print_error( "the document left a button, key or pointer capture down "
                          "and it could not be released" );
             return runtimeExitCode;
+        }
+        // A requested overlay that failed to draw is a failure, exactly as it is
+        // for `grab trail` and `grab feedback` -- reported after the run's own
+        // verdict, which is the more important one when both went wrong.
+        if( visuals.error().has_value() )
+        {
+            print_error( visuals.error()->message );
+            return code == successExitCode ? runtimeExitCode : code;
         }
         return code;
     }

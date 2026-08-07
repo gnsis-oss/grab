@@ -111,8 +111,81 @@ Useful flags:
 --pacing strict       ignore the document's grace and run back to back
 --grace-ms N          change the gap without changing which mode reads it
 --report run.jsonl    one JSON record per step: status, call_ns, overrun_ns
+--trace               end-of-run timing summary: load, per-command, scheduling
 --log-level verbose --log-tags player,frame,raster
 ```
+
+## Watching it: `--trail` and `--feedback`
+
+A playback is a pointer moving on its own. Two opt-in flags draw what it is
+doing, on the same session and the same overlay surface the `overlay.*` steps
+already use:
+
+```bash
+DISPLAY=:137 grab play examples/sequences/osu_stress.json --trail --feedback
+```
+
+| flag | what it draws |
+|---|---|
+| `--trail` | a fading line following the pointer, one segment per motion sample |
+| `--feedback` | a ripple at every click and a progress bar while a button is held |
+
+**This used to be three processes** — `grab trail &`, `grab feedback &`, then
+`grab play` — started in that order, each opening its own `Session` against the
+same display, and each needing to be killed afterwards. It worked; it was not
+something anyone wanted to type.
+
+Both are **off by default**: a corpus run that nobody watches must not pay for
+an overlay, and the trail needs a compositing manager the input half does not.
+
+### Styling them
+
+```
+--trail-color RRGGBB     colour for PHYSICAL input       (default edce59, amber)
+--injected-color RRGGBB  colour for INJECTED input       (default edce59, amber)
+--fade-ms N              how long a trail segment lives  (default 1200)
+--trail-width F          stroke width in pixels          (default 3)
+
+--no-click               suppress the click ripple
+--no-hold                suppress the hold progress bar
+--hold-ms N              how long a press must last to count as a hold (default 500)
+--ripple-radius PX       ripple radius                                 (default 48)
+```
+
+Names and defaults are the standalone `grab trail` / `grab feedback` verbs', so
+the two surfaces cannot disagree about what a flag means. The two renames are
+forced by the merge: on a command that carries both verbs' options, a bare
+`--color` or `--width` names neither feature, so they are `--trail-color` and
+`--trail-width` here.
+
+**Under `grab play` every sample is injected**, because injecting them is the
+whole point — so the trail is drawn entirely in `--injected-color`, and
+`--trail-color` only matters if you move the real mouse during a run. Both
+default to the same amber, which is what makes a bare `--trail` visible rather
+than looking like a flag that does nothing.
+
+A style flag without its feature is a **command-line error naming the missing
+flag**, not a silent no-op:
+
+```
+$ grab play doc.json --fade-ms 400
+grab: error: --fade-ms styles the mouse trail and needs --trail
+```
+
+### What they cost, and what they need
+
+- **A compositing manager**, like every other overlay: ARGB32, XFixes and an
+  owned `_NET_WM_CM_Sn`. Without one the session opens and the flags fail with
+  the same error `overlay.add` gives.
+- **The session opens before the first step**, not lazily on the first overlay
+  step. A trail that started when the document first drew something would have
+  missed every move before it.
+- The trail is assembled **from the drive loop**, so it advances at the
+  document's own waypoint cadence and every mutation of the overlay surface —
+  the document's shapes and the trail's segments — stays on one thread.
+- Both handles are released on **every** exit path, including Ctrl-C: the
+  interrupt runs the same unwind an abort does, lifts any held button, and then
+  tears the trail and the feedback presenter down before the process exits.
 
 ## Interrupting it
 

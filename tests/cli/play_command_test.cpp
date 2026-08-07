@@ -13,7 +13,9 @@
 #include "grab/overlay.hpp"
 #include "grab/result.hpp"
 #include "grab/sequence_types.hpp"
+#include "grab/session.hpp"
 #include "grab/trace.hpp"
+#include "kernel/presentation/trail_animator.hpp"
 #include "kernel/sequence/player.hpp"
 #include "kernel/sequence/sequence.hpp"
 #include "support/recording_seat.hpp"
@@ -143,28 +145,78 @@ namespace
     constexpr std::chrono::milliseconds tracePlanned{ 7'010 };
     constexpr std::chrono::milliseconds traceElapsed{ 8'420 };
 
-    constexpr std::string_view          headlineText       = "2 steps in 8.42 s";
-    constexpr std::string_view          plannedText        = "planned >= 7.01 s";
-    constexpr std::string_view          unestimatedText    = "1 unestimated";
-    constexpr std::string_view          loadTotalText      = "4.00 ms";
-    constexpr std::string_view          runCountText       = "3 steps";
-    constexpr std::string_view          runTotalText       = "250.00 ms";
-    constexpr std::string_view          moveTotalText      = "200.00 ms";
-    constexpr std::string_view          moveCountText      = "2 calls";
-    constexpr std::string_view          moveMeanText       = "mean 100.00 ms";
-    constexpr std::string_view          waitTotalText      = " 50.00 ms";
-    constexpr std::string_view          waitCountText      = "1 call";
+    constexpr std::string_view          headlineText    = "2 steps in 8.42 s";
+    constexpr std::string_view          plannedText     = "planned >= 7.01 s";
+    constexpr std::string_view          unestimatedText = "1 unestimated";
+    constexpr std::string_view          loadTotalText   = "4.00 ms";
+    constexpr std::string_view          runCountText    = "3 steps";
+    constexpr std::string_view          runTotalText    = "250.00 ms";
+    constexpr std::string_view          moveTotalText   = "200.00 ms";
+    constexpr std::string_view          moveCountText   = "2 calls";
+    constexpr std::string_view          moveMeanText    = "mean 100.00 ms";
+    constexpr std::string_view          waitTotalText   = " 50.00 ms";
+    constexpr std::string_view          waitCountText   = "1 call";
 
-    constexpr std::uint64_t             noRecordedCalls    = 0U;
-    constexpr std::uint64_t             oneArm             = 1U;
-    constexpr std::size_t               threeLines         = 3U;
-    constexpr std::size_t               oneOverSlots       = 1U;
-    constexpr std::string_view          overflowNamePrefix = "phase-";
-    constexpr std::string_view          incompleteWarning  = "this report is INCOMPLETE";
+    // ── --trail / --feedback ──────────────────────────────
+    //
+    // Spelled here rather than reached for through the parser, so a rename in
+    // play_command.cpp that quietly drops a flag fails a test instead of
+    // passing one.
+    constexpr std::string_view          trailFlag          = "--trail";
+    constexpr std::string_view          feedbackFlag       = "--feedback";
+    constexpr std::string_view          trailColorFlag     = "--trail-color";
+    constexpr std::string_view          injectedColorFlag  = "--injected-color";
+    constexpr std::string_view          fadeMsFlag         = "--fade-ms";
+    constexpr std::string_view          trailWidthFlag     = "--trail-width";
+    constexpr std::string_view          noClickFlag        = "--no-click";
+    constexpr std::string_view          noHoldFlag         = "--no-hold";
+    constexpr std::string_view          holdMsFlag         = "--hold-ms";
+    constexpr std::string_view          rippleRadiusFlag   = "--ripple-radius";
+
+    constexpr std::string_view          trailColorValue    = "00ff00";
+    constexpr std::string_view          injectedColorValue = "ff0055";
+    constexpr std::string_view          malformedColor     = "ZZTOP0";
+    constexpr std::string_view          fadeValue          = "400";
+    constexpr std::string_view          widthValue         = "5";
+    constexpr std::string_view          holdValue          = "250";
+    constexpr std::string_view          rippleRadiusValue  = "12";
+
+    constexpr std::uint8_t              noChannel          = 0X00U;
+    constexpr std::uint8_t              fullChannel        = 0XFFU;
+    constexpr std::uint8_t              redOfInjected      = 0XFFU;
+    constexpr std::uint8_t              greenOfInjected    = 0X00U;
+    constexpr std::uint8_t              blueOfInjected     = 0X55U;
+    constexpr std::chrono::milliseconds trailFade{ 400 };
+    constexpr std::chrono::milliseconds holdThreshold{ 250 };
+    constexpr float                     trailWidth   = 5.0F;
+    constexpr double                    rippleRadius = 12.0;
+
+    constexpr std::size_t               onePump      = 1U;
+
+    [[nodiscard]]
+    bool
+    same_color( grab::overlay::Color left,
+                grab::overlay::Color right ) noexcept
+    {
+        return left.r ==
+               right.r &&
+               left.g ==
+               right.g &&
+               left.b ==
+               right.b &&
+               left.a == right.a;
+    }
+
+    constexpr std::uint64_t    noRecordedCalls    = 0U;
+    constexpr std::uint64_t    oneArm             = 1U;
+    constexpr std::size_t      threeLines         = 3U;
+    constexpr std::size_t      oneOverSlots       = 1U;
+    constexpr std::string_view overflowNamePrefix = "phase-";
+    constexpr std::string_view incompleteWarning  = "this report is INCOMPLETE";
 
     // Deliberately not a name any other test writes: the assertion is that
     // --dry-run leaves it absent, and a stale file would make that a lie.
-    constexpr std::string_view          captureOutputName =
+    constexpr std::string_view captureOutputName =
         "grab-play-dry-run-must-not-exist.png";
 
     // A document whose only step names an op that does not exist, so the
@@ -1556,4 +1608,266 @@ TEST( PlayCommand,
     EXPECT_TRUE( contains( lines.back(), traceKindFragment ) ) << lines.back();
     EXPECT_TRUE( contains( lines.back(), schedulingKeyFragment ) ) << lines.back();
     EXPECT_TRUE( contains( lines.back(), runTalliesKeyFragment ) ) << lines.back();
+}
+
+// ── --trail and --feedback ────────────────────────────────
+//
+// The user need these exist for: "I am playing back a json script and I want to
+// enable feedback overlays + trail of the mouse." That took three processes --
+// `grab trail &`, `grab feedback &`, then `grab play` -- each opening its own
+// Session against the same display, started in order and killed afterwards.
+
+TEST( PlayCommand,
+      TheVisualFlagsAreOffByDefault )
+{
+    const std::array values{ documentPath };
+    const auto       options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_TRUE( options.has_value() ) << options.error().message;
+    EXPECT_FALSE( options->trail );
+    EXPECT_FALSE( options->feedback );
+}
+
+// THE DEFAULT THAT DECIDES WHETHER THE FEATURE LOOKS BROKEN. `grab trail`
+// distinguishes physical input from XTest-injected input, and under `grab play`
+// EVERY sample is injected -- so the trail is drawn entirely in
+// `injected_color`. Both colours default to the same amber, which is what makes
+// a bare `--trail` visible; a dim or distinct injected default would render a
+// working feature indistinguishable from a broken one.
+TEST( PlayCommand,
+      TheTrailDefaultsMatchTheStandaloneVerbAndAreVisibleWhenInjected )
+{
+    const std::array values{ documentPath, trailFlag };
+    const auto       options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_TRUE( options.has_value() ) << options.error().message;
+    EXPECT_TRUE( options->trail );
+    EXPECT_TRUE( same_color( options->trail_style.physical_color,
+                             grab::overlay::defaultOverlayColor ) );
+    EXPECT_TRUE( same_color( options->trail_style.injected_color,
+                             grab::overlay::defaultOverlayColor ) );
+    EXPECT_TRUE( same_color( options->trail_style.injected_color,
+                             options->trail_style.physical_color ) );
+
+    // Not zero, which is what `OverlayTrailOptions{}` alone would leave behind:
+    // a zero-width, zero-fade trail draws nothing at all.
+    EXPECT_EQ( options->trail_style.fade, grab::kernel::presentation::defaultTrailFade );
+    EXPECT_EQ( options->trail_style.width_px,
+               grab::kernel::presentation::defaultTrailWidthPx );
+}
+
+TEST( PlayCommand,
+      TheFeedbackDefaultsMatchTheStandaloneVerb )
+{
+    const std::array values{ documentPath, feedbackFlag };
+    const auto       options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_TRUE( options.has_value() ) << options.error().message;
+    EXPECT_TRUE( options->feedback );
+
+    // Both presenters on. `CursorFeedbackConfig{}` leaves both nullopt, which
+    // is the configuration that draws nothing.
+    ASSERT_TRUE( options->feedback_style.click.has_value() );
+    ASSERT_TRUE( options->feedback_style.hold.has_value() );
+    EXPECT_EQ( options->feedback_style.click->radius_px, grab::RippleStyle{}.radius_px );
+    EXPECT_EQ( options->feedback_style.hold->width_px, grab::ProgressStyle{}.width_px );
+    EXPECT_EQ( options->feedback_style.thresholds.hold, grab::GestureThresholds{}.hold );
+}
+
+TEST( PlayCommand,
+      ParsesEveryTrailStyleFlag )
+{
+    const std::array values{
+        documentPath,
+        trailFlag,
+        trailColorFlag,
+        trailColorValue,
+        injectedColorFlag,
+        injectedColorValue,
+        fadeMsFlag,
+        fadeValue,
+        trailWidthFlag,
+        widthValue
+    };
+    const auto options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_TRUE( options.has_value() ) << options.error().message;
+    EXPECT_TRUE( options->trail );
+    EXPECT_TRUE( same_color( options->trail_style.physical_color,
+                             grab::overlay::Color{
+                                 .r = noChannel,
+                                 .g = fullChannel,
+                                 .b = noChannel,
+                                 .a = fullChannel,
+                             } ) );
+    EXPECT_TRUE( same_color( options->trail_style.injected_color,
+                             grab::overlay::Color{
+                                 .r = redOfInjected,
+                                 .g = greenOfInjected,
+                                 .b = blueOfInjected,
+                                 .a = fullChannel,
+                             } ) );
+    EXPECT_EQ( options->trail_style.fade, trailFade );
+    EXPECT_EQ( options->trail_style.width_px, trailWidth );
+}
+
+TEST( PlayCommand,
+      ParsesEveryFeedbackStyleFlag )
+{
+    const std::array values{
+        documentPath,
+        feedbackFlag,
+        holdMsFlag,
+        holdValue,
+        rippleRadiusFlag,
+        rippleRadiusValue
+    };
+    const auto options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_TRUE( options.has_value() ) << options.error().message;
+    EXPECT_TRUE( options->feedback );
+    EXPECT_EQ( options->feedback_style.thresholds.hold, holdThreshold );
+    ASSERT_TRUE( options->feedback_style.click.has_value() );
+    EXPECT_EQ( options->feedback_style.click->radius_px, rippleRadius );
+}
+
+TEST( PlayCommand,
+      NoClickAndNoHoldSuppressTheirPresenters )
+{
+    const std::array values{ documentPath, feedbackFlag, noClickFlag, noHoldFlag };
+    const auto       options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_TRUE( options.has_value() ) << options.error().message;
+    EXPECT_FALSE( options->feedback_style.click.has_value() );
+    EXPECT_FALSE( options->feedback_style.hold.has_value() );
+}
+
+// --no-click wins wherever it appears on the line, so the ripple radius set
+// before it does not resurrect a presenter the caller turned off.
+TEST( PlayCommand,
+      NoClickWinsOverARadiusSetEarlierOnTheLine )
+{
+    const std::array values{
+        documentPath,
+        feedbackFlag,
+        rippleRadiusFlag,
+        rippleRadiusValue,
+        noClickFlag
+    };
+    const auto options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_TRUE( options.has_value() ) << options.error().message;
+    EXPECT_FALSE( options->feedback_style.click.has_value() );
+}
+
+// A style flag without its feature is an ERROR naming the missing flag. The
+// failure being prevented is `--fade-ms 400` on its own: it would otherwise
+// parse, run, draw nothing, and leave no evidence but an absent trail.
+TEST( PlayCommand,
+      RejectsATrailStyleWithoutTheTrailFlag )
+{
+    const std::array values{ documentPath, fadeMsFlag, fadeValue };
+    const auto       options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_FALSE( options.has_value() );
+    EXPECT_TRUE( contains( options.error().message, fadeMsFlag ) )
+        << options.error().message;
+    EXPECT_TRUE( contains( options.error().message, trailFlag ) )
+        << options.error().message;
+}
+
+TEST( PlayCommand,
+      RejectsAFeedbackStyleWithoutTheFeedbackFlag )
+{
+    const std::array values{ documentPath, rippleRadiusFlag, rippleRadiusValue };
+    const auto       options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_FALSE( options.has_value() );
+    EXPECT_TRUE( contains( options.error().message, rippleRadiusFlag ) )
+        << options.error().message;
+    EXPECT_TRUE( contains( options.error().message, feedbackFlag ) )
+        << options.error().message;
+}
+
+TEST( PlayCommand,
+      RejectsABooleanFeedbackStyleWithoutTheFeedbackFlag )
+{
+    const std::array values{ documentPath, noHoldFlag };
+
+    EXPECT_FALSE( grab::cli::parse_play_options( arguments( values ) ).has_value() );
+}
+
+// The check is made after the whole line is read, so the two orders agree.
+// Deciding at the point of the flag would make one an error and the other a
+// success, which is a rule nobody can guess.
+TEST( PlayCommand,
+      AStyleFlagMayPrecedeItsFeatureFlag )
+{
+    const std::array values{ documentPath, fadeMsFlag, fadeValue, trailFlag };
+    const auto       options = grab::cli::parse_play_options( arguments( values ) );
+
+    ASSERT_TRUE( options.has_value() ) << options.error().message;
+    EXPECT_EQ( options->trail_style.fade, trailFade );
+}
+
+TEST( PlayCommand,
+      RejectsAMalformedTrailColor )
+{
+    const std::array values{ documentPath, trailFlag, trailColorFlag, malformedColor };
+
+    EXPECT_FALSE( grab::cli::parse_play_options( arguments( values ) ).has_value() );
+}
+
+TEST( PlayCommand,
+      RejectsAStyleFlagWithNoValue )
+{
+    const std::array values{ documentPath, trailFlag, fadeMsFlag };
+
+    EXPECT_FALSE( grab::cli::parse_play_options( arguments( values ) ).has_value() );
+}
+
+TEST( PlayCommand,
+      RejectsANonNumericTrailWidth )
+{
+    const std::array values{ documentPath, trailFlag, trailWidthFlag, notANumber };
+
+    EXPECT_FALSE( grab::cli::parse_play_options( arguments( values ) ).has_value() );
+}
+
+// The trail is assembled from the drive loop, not from a second thread: the
+// hook is what carries the observation queue into the animator while the run
+// proceeds. A run that never calls it draws nothing however well the rest is
+// wired, so the wiring is asserted display-free here.
+TEST( PlayCommand,
+      TheDriveLoopRunsThePumpHook )
+{
+    const auto program = wait_after_click(
+        PacingOptions{ .mode = PacingMode::Strict, .grace = documentGrace }
+    );
+    ScriptedRunner               runner{ Status::Success };
+    const grab::cli::PlayOptions options;
+
+    std::size_t                  pumps = 0U;
+    EXPECT_EQ( grab::cli::play_program( program,
+                                        runner,
+                                        options,
+                                        nullptr,
+                                        [&pumps]
+                                        {
+                                            ++pumps;
+                                        } ),
+               successExit );
+    EXPECT_GE( pumps, onePump );
+}
+
+TEST( PlayCommand,
+      TheDriveLoopRunsWithoutAPumpHook )
+{
+    const auto program = wait_after_click(
+        PacingOptions{ .mode = PacingMode::Strict, .grace = documentGrace }
+    );
+    ScriptedRunner               runner{ Status::Success };
+    const grab::cli::PlayOptions options;
+
+    EXPECT_EQ( grab::cli::play_program( program, runner, options ), successExit );
 }

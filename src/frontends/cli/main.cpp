@@ -282,7 +282,13 @@ namespace
         // they are document ops, not CLI verbs.
         ( void )std::fputs( "       grab play SEQUENCE.json "
                             "[--pacing strict|grace|precise] [--grace-ms N] "
-                            "[--dry-run] [--report PATH.jsonl] [--trace]\n",
+                            "[--dry-run] [--report PATH.jsonl] [--trace]\n"
+                            "                              [--trail] "
+                            "[--trail-color RRGGBB] [--injected-color RRGGBB] "
+                            "[--fade-ms N] [--trail-width F]\n"
+                            "                              [--feedback] "
+                            "[--no-click] [--no-hold] [--hold-ms N] "
+                            "[--ripple-radius PX]\n",
                             stderr );
         ( void )std::fputs( "\nglobal options, accepted by every verb:\n", stderr );
         ( void )std::fputs( grab::cli::log_options_usage().data(), stderr );
