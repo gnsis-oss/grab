@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-unknown-path-command",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "arc-is-not-in-the-grammar", "op": "overlay.add",
+      "shape": { "path": [ { "move": [0, 0] },
+                           { "line": [10, 10] },
+                           { "arc": [[20, 0], [30, 20]] },
+                           "close" ] } }
+  ]
+}

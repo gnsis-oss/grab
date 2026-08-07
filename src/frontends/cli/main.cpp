@@ -13,6 +13,7 @@
 #include "frontends/cli/input_command.hpp"
 #include "frontends/cli/log_options.hpp"
 #include "frontends/cli/overlay_command.hpp"
+#include "frontends/cli/play_command.hpp"
 #include "frontends/cli/session_command.hpp"
 #include "frontends/cli/sketch_command.hpp"
 #include "frontends/cli/watch_daemon.hpp"
@@ -274,6 +275,20 @@ namespace
                             "[--color RRGGBB]\n"
                             "       grab overlay rect|ellipse|path --at VALUES "
                             "[--ttl MS | --fade MS | --hold]\n",
+                            stderr );
+        // print_usage is hand-written rather than generated from the
+        // descriptor table, so a new verb is invisible here until it is added
+        // by hand. The other sequence-era CommandKinds are deliberately absent:
+        // they are document ops, not CLI verbs.
+        ( void )std::fputs( "       grab play SEQUENCE.json "
+                            "[--pacing strict|grace|precise] [--grace-ms N] "
+                            "[--dry-run] [--report PATH.jsonl] [--trace]\n"
+                            "                              [--trail] "
+                            "[--trail-color RRGGBB] [--injected-color RRGGBB] "
+                            "[--fade-ms N] [--trail-width F]\n"
+                            "                              [--feedback] "
+                            "[--no-click] [--no-hold] [--hold-ms N] "
+                            "[--ripple-radius PX]\n",
                             stderr );
         ( void )std::fputs( "\nglobal options, accepted by every verb:\n", stderr );
         ( void )std::fputs( grab::cli::log_options_usage().data(), stderr );
@@ -1665,14 +1680,11 @@ namespace
             return 0;
         }
 
-        auto input = grab::Input::open( options->display, options->layout );
-        if( !input.has_value() )
-        {
-            print_fatal( input.error().message.c_str() );
-            return runtimeError;
-        }
-
-        auto result = input->type_text( options->text );
+        // Through the command layer, not straight at grab::Input: see the
+        // note on play_type_text in input_command.hpp.
+        auto result = grab::cli::play_type_text( options->display,
+                                                 options->layout,
+                                                 options->text );
         if( !result.has_value() )
         {
             print_fatal( result.error().message.c_str() );
@@ -1718,16 +1730,8 @@ namespace
             return 0;
         }
 
-        auto input = grab::Input::open( options->display );
-        if( !input.has_value() )
-        {
-            print_fatal( input.error().message.c_str() );
-            return runtimeError;
-        }
-
-        auto result = input->click_at( static_cast<std::int16_t>( options->at.x ),
-                                       static_cast<std::int16_t>( options->at.y ),
-                                       options->button );
+        auto result =
+            grab::cli::play_click_at( options->display, options->at, options->button );
         if( !result.has_value() )
         {
             print_fatal( result.error().message.c_str() );
@@ -1747,14 +1751,8 @@ namespace
             return usageError;
         }
 
-        auto input = grab::Input::open( options->display );
-        if( !input.has_value() )
-        {
-            print_fatal( input.error().message.c_str() );
-            return runtimeError;
-        }
-
-        auto result = input->drag( options->from, options->to );
+        auto result =
+            grab::cli::play_drag( options->display, options->from, options->to );
         if( !result.has_value() )
         {
             print_fatal( result.error().message.c_str() );
@@ -2514,6 +2512,43 @@ namespace
                 return grab::cli::run_feedback_command( cli_args.subspan( 1 ) );
             case grab::CommandKind::OverlaySketch :
                 return grab::cli::run_sketch_command( cli_args.subspan( 1 ) );
+            // Sequence-only ops. They are real descriptor rows so a sequence
+            // document can name them, but they are not CLI verbs: a one-shot
+            // process per waypoint is exactly the shape `grab play` exists to
+            // replace.
+            case grab::CommandKind::Move :
+            case grab::CommandKind::Warp :
+            case grab::CommandKind::Follow :
+            case grab::CommandKind::Press :
+            case grab::CommandKind::Release :
+            case grab::CommandKind::Scroll :
+            case grab::CommandKind::ClickAt :
+            case grab::CommandKind::KeyDown :
+            case grab::CommandKind::KeyUp :
+            case grab::CommandKind::Wait :
+            // The overlay STEPS, which are not the overlay verbs above: a
+            // shape placed by a one-shot process disappears with it, so they
+            // only mean anything inside a run that outlives them.
+            case grab::CommandKind::OverlayAdd :
+            case grab::CommandKind::OverlayUpdate :
+            case grab::CommandKind::OverlayRemove :
+            case grab::CommandKind::OverlayClear :
+            case grab::CommandKind::OverlayGrab :
+            case grab::CommandKind::OverlayRelease :
+            case grab::CommandKind::OverlayAttach :
+            case grab::CommandKind::OverlayDetach :
+                print_error( "not available as a CLI verb; use `grab play`" );
+                return usageError;
+            case grab::CommandKind::Play :
+                {
+                    std::vector<std::string_view> play_args;
+                    play_args.reserve( cli_args.size() - 1U );
+                    for( const char* arg : cli_args.subspan( 1 ) )
+                    {
+                        play_args.emplace_back( arg );
+                    }
+                    return grab::cli::run_play_command( play_args );
+                }
             case grab::CommandKind::Count :
                 break;
         }

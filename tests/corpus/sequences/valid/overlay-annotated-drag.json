@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-annotated-drag",
+  "pacing": { "mode": "grace", "grace_ms": 40 },
+  "steps": [
+    { "id": "highlight-source", "op": "overlay.add", "handle": "source",
+      "shape": { "rect":   { "x": 180, "y": 180, "w": 120, "h": 60 },
+                 "stroke": { "color": "#4ecea9", "width": 3 },
+                 "z":      10 } },
+
+    { "id": "highlight-target", "op": "overlay.add", "handle": "target",
+      "shape": { "rect":     { "x": 640, "y": 400, "w": 120, "h": 60 },
+                 "stroke":   { "color": "#edce59", "width": 3 },
+                 "z":        10,
+                 "animation": { "opacity": { "easing": "in_out_quad",
+                                             "duration_ms": 200,
+                                             "from": 0.0, "to": 1.0 } } } },
+
+    { "id": "settle", "op": "time.wait", "ms": 120 },
+
+    { "id": "reach-the-source", "op": "input.warp", "to": [240, 210] },
+
+    { "id": "take-hold", "op": "input.press", "button": "left" },
+
+    { "id": "carry-the-highlight", "op": "overlay.attach", "handle": "source",
+      "offset": [-60, -30] },
+
+    { "id": "drag-across", "op": "input.move", "to": [700, 430],
+      "options": { "steps": 24, "step_dwell_ms": 8, "path": "linear" } },
+
+    { "id": "stop-carrying", "op": "overlay.detach", "handle": "source" },
+
+    { "id": "let-go", "op": "input.release", "button": "left" },
+
+    { "id": "mark-the-landing", "op": "overlay.update", "handle": "source",
+      "shape": { "rect":     { "x": 640, "y": 400, "w": 120, "h": 60 },
+                 "stroke":   { "color": "#4ecea9", "width": 3 },
+                 "fill":     { "color": "#4ecea922" },
+                 "z":        11,
+                 "lifetime": { "fade_ms": 400 } } },
+
+    { "id": "trail-crumb", "op": "overlay.add",
+      "shape": { "ellipse":  { "center": [700, 430], "radius": 6 },
+                 "fill":     { "color": "#4ecea9aa" },
+                 "band":     "trail",
+                 "lifetime": { "ttl_ms": 250 } } },
+
+    { "id": "prove-it", "op": "screen.capture", "out": "annotated-drag.png",
+      "after": ["let-go"] },
+
+    { "id": "drop-the-target-marker", "op": "overlay.remove", "handle": "target",
+      "after": ["prove-it"] },
+
+    { "id": "drop-the-source-marker", "op": "overlay.remove", "handle": "source",
+      "after": ["prove-it"] },
+
+    { "id": "wipe-the-scene", "op": "overlay.clear",
+      "after": ["drop-the-target-marker", "drop-the-source-marker"] }
+  ]
+}

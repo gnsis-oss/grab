@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "sequence": "cycle-3",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "a", "op": "input.click", "after": ["c"] },
+    { "id": "b", "op": "input.click", "after": ["a"] },
+    { "id": "c", "op": "input.click", "after": ["b"] }
+  ]
+}

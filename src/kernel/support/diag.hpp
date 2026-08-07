@@ -11,6 +11,7 @@
 // thread every 16.7 ms would perturb the very latency being measured. They
 // accumulate in memory and are reported on a slow cadence.
 
+#include "kernel/support/drift.hpp"
 #include "kernel/support/log.hpp"
 
 #include <chrono>
@@ -83,18 +84,41 @@ namespace grab::diag
     // is meaningless. This ties the two domains together by sampling both at a
     // known instant, which is the only way input-to-present latency means
     // anything.
+    //
+    // The correlation is a *drift estimate*, not a single calibration point.
+    // One sample carries whatever scheduling delay was in flight when it was
+    // taken; a window of them, reduced by median, does not. `spread()` reports
+    // the standard deviation of that window, which is the error bar on every
+    // instant_of() answer.
     class ServerClock
     {
         public:
 
-            // Record that `server_ms` was the server's time approximately now.
-            void
-            calibrate( std::uint32_t server_ms ) noexcept;
+            // Offset samples the estimate is drawn from.
+            static constexpr std::size_t driftWindow = 16U;
 
-            // Steady-clock instant corresponding to an event's server time,
-            // or nullopt when uncalibrated or when the offset looks stale
-            // (the event predates the calibration point, or is implausibly
-            // far ahead of it).
+            // Record that `server_ms` was the server's time at `observed_at`,
+            // by default now. Calling this repeatedly sharpens the estimate;
+            // calling it once still yields a usable clock, because staleness
+            // is judged against the local clock rather than against the first
+            // sample (see instant_of).
+            //
+            // `observed_at` is explicit so a caller — in practice a test — can
+            // lay out a long session without living through it. Production
+            // call sites omit it.
+            void
+            calibrate( std::uint32_t                         server_ms,
+                       std::chrono::steady_clock::time_point observed_at =
+                           std::chrono::steady_clock::now() ) noexcept;
+
+            // Steady-clock instant corresponding to an event's server time, or
+            // nullopt when uncalibrated or when the answer would be
+            // implausible — further from now than `maximumServerSkew`
+            // (diag.cpp), in either direction. Judging staleness against *now*
+            // rather than against the calibration point is what keeps a
+            // long-lived session working: a session older than that window
+            // would otherwise reject every event it ever saw again, silently
+            // and permanently.
             [[nodiscard]]
             std::optional<std::chrono::steady_clock::time_point>
             instant_of( std::uint32_t server_ms ) const noexcept;
@@ -106,11 +130,38 @@ namespace grab::diag
                 return calibrated_;
             }
 
+            // Standard deviation of the offset window — the confidence
+            // interval on instant_of(). Zero below two samples.
+            [[nodiscard]]
+            std::chrono::nanoseconds
+            spread() const noexcept
+            {
+                return offsets_.spread();
+            }
+
+            [[nodiscard]]
+            std::size_t
+            samples() const noexcept
+            {
+                return offsets_.samples();
+            }
+
         private:
 
-            std::chrono::steady_clock::time_point base_steady_{};
-            std::uint32_t                         base_server_ms_ = 0;
-            bool                                  calibrated_     = false;
+            // Samples are residuals against `origin_`, not absolute offsets:
+            // "how far the local clock has moved beyond the server's own
+            // account of the same interval". That keeps every value small and
+            // centred on zero, so the spread reads as jitter instead of being
+            // swamped by the distance between two unrelated epochs.
+            core::Drift<driftWindow, core::drift::Median> offsets_{};
+
+            std::chrono::steady_clock::time_point         origin_{};
+
+            // Server milliseconds since `origin_`, unwrapped past the 32-bit
+            // counter's rollover by accumulating signed steps.
+            std::int64_t                                  elapsed_server_ms_ = 0;
+            std::uint32_t                                 last_server_ms_    = 0;
+            bool                                          calibrated_        = false;
     };
 
     // ── Samples ────────────────────────────────────────────

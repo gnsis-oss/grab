@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-attach-detach",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "add-carried", "op": "overlay.add", "handle": "carried",
+      "shape": { "rect":   { "x": 200, "y": 200, "w": 48, "h": 48 },
+                 "stroke": { "color": "#4ecea9", "width": 2 },
+                 "fill":   { "color": "#4ecea933" } } },
+
+    { "id": "warp-to-the-corner", "op": "input.warp", "to": [200, 200] },
+
+    { "id": "attach-implicit-offset", "op": "overlay.attach", "handle": "carried" },
+
+    { "id": "carry-it", "op": "input.move", "to": [600, 420] },
+
+    { "id": "detach-implicit-offset", "op": "overlay.detach", "handle": "carried" },
+
+    { "id": "add-badge", "op": "overlay.add", "handle": "badge",
+      "shape": { "ellipse": { "center": [600, 420], "radius": 10 },
+                 "fill":    { "color": "#ed5a49" } } },
+
+    { "id": "attach-explicit-offset", "op": "overlay.attach", "handle": "badge",
+      "offset": [-24, -24] },
+
+    { "id": "carry-the-badge", "op": "input.move", "to": [320, 180] },
+
+    { "id": "attach-zero-offset-again", "op": "overlay.attach", "handle": "carried",
+      "offset": [0, 0] },
+
+    { "id": "detach-badge", "op": "overlay.detach", "handle": "badge" },
+
+    { "id": "detach-carried", "op": "overlay.detach", "handle": "carried" },
+
+    { "id": "clean-up", "op": "overlay.clear" }
+  ]
+}

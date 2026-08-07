@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-malformed-color",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "good-color", "op": "overlay.add",
+      "shape": { "rect": { "x": 0, "y": 0, "w": 20, "h": 20 },
+                 "fill": { "color": "#4ecea9" } } },
+    { "id": "non-hex-digits", "op": "overlay.add",
+      "shape": { "rect":   { "x": 40, "y": 0, "w": 20, "h": 20 },
+                 "stroke": { "color": "#gg0000", "width": 2 } } }
+  ]
+}

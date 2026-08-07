@@ -1,5 +1,6 @@
 #pragma once
 
+#include "grab/geometry/point.hpp"
 #include "grab/result.hpp"
 
 #include <cstdint>
@@ -25,5 +26,33 @@ namespace grab::cli
 
     int
     run_drag_curve_command( std::span<char* const> args );
+
+    // THE PARITY FORCING FUNCTION. `grab click --at`, `grab type` and
+    // `grab drag` do their work by building a one-step Sequence and playing
+    // it, rather than by calling grab::Input directly. Without a real consumer
+    // the command layer drifts behind grab::Input -- which is exactly what the
+    // descriptor table had already done, covering 5 of Input's 12 operations.
+    //
+    // `grab drag-curve` CANNOT be routed: there is no DragCurveCommand among
+    // the fifteen alternatives of grab::sequence::Command, so it keeps its own
+    // path through Session::perform above. This is parity for three verbs, not
+    // for all four.
+    [[nodiscard]]
+    grab::Result<void>
+    play_click_at( const char*           display,
+                   grab::geometry::Point at,
+                   std::uint8_t          button );
+
+    [[nodiscard]]
+    grab::Result<void>
+    play_type_text( const char*      display,
+                    std::string_view layout,
+                    std::string_view text );
+
+    [[nodiscard]]
+    grab::Result<void>
+    play_drag( const char*           display,
+               grab::geometry::Point from,
+               grab::geometry::Point to );
 
 }    // namespace grab::cli

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "sequence": "self-edge",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "root", "op": "input.warp",  "to": [0, 0] },
+    { "id": "loop", "op": "input.click", "after": ["loop"] },
+    { "id": "tail", "op": "input.type",  "text": "unreachable", "after": ["loop"] }
+  ]
+}

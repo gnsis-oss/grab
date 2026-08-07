@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-animation-without-duration",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "a-fade-with-no-span", "op": "overlay.add",
+      "shape": { "ellipse":   { "center": [300, 200], "radius": 48 },
+                 "fill":      { "color": "#4ecea933" },
+                 "animation": { "opacity": { "easing": "in_out_quad",
+                                             "from": 0.0, "to": 1.0 } } } }
+  ]
+}

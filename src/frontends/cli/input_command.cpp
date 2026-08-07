@@ -1,5 +1,7 @@
 #include "frontends/cli/common.hpp"
 #include "frontends/cli/input_command.hpp"
+#include "frontends/cli/play_command.hpp"
+#include "grab/command.hpp"
 #include "grab/drag.hpp"
 #include "grab/geometry/point.hpp"
 #include "grab/input.hpp"
@@ -608,6 +610,55 @@ namespace grab::cli
                                    " coordinate is outside int16 range" );
         }
         return static_cast<std::int16_t>( absolute );
+    }
+
+    grab::Result<void>
+    play_click_at( const char*           display,
+                   grab::geometry::Point at,
+                   std::uint8_t          button )
+    {
+        return play_single_command(
+            grab::sequence::ClickAtCommand{
+                .at     = at,
+                .button = button,
+            },
+            display,
+            std::string_view{}
+        );
+    }
+
+    grab::Result<void>
+    play_type_text( const char*      display,
+                    std::string_view layout,
+                    std::string_view text )
+    {
+        return play_single_command(
+            grab::sequence::TypeCommand{
+                .text = std::string{ text },
+            },
+            display,
+            layout
+        );
+    }
+
+    grab::Result<void>
+    play_drag( const char*           display,
+               grab::geometry::Point from,
+               grab::geometry::Point to )
+    {
+        // Not execute_drag: the command layer walks the same waypoints()
+        // helper the recipe was refactored around, presses before the walk and
+        // releases after it, and its exit() releases the button on every
+        // failure path. `grab drag` therefore no longer goes through
+        // x11_drag_recipe, which is the point of routing it.
+        return play_single_command(
+            grab::sequence::DragCommand{
+                .from = from,
+                .to   = to,
+            },
+            display,
+            std::string_view{}
+        );
     }
 
     int

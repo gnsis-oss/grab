@@ -124,6 +124,12 @@ add_library(grab_kernel STATIC
     src/kernel/capture/damage_hint_auditor.cpp
     src/kernel/capture/inject_gate.cpp
     src/kernel/scheduling/pacing_governor.cpp
+    src/kernel/scheduling/timer_thread.cpp
+    src/kernel/sequence/sequence.cpp
+    src/kernel/sequence/sequence_ops.cpp
+    src/kernel/sequence/interpreter.cpp
+    src/kernel/sequence/execute.cpp
+    src/kernel/sequence/player.cpp
     src/kernel/capture/tile_differ.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp
@@ -343,6 +349,7 @@ add_executable(grab_cli
     src/frontends/cli/input_command.cpp
     src/frontends/cli/log_options.cpp
     src/frontends/cli/overlay_command.cpp
+    src/frontends/cli/play_command.cpp
     src/frontends/cli/session_command.cpp
     src/frontends/cli/sketch_command.cpp
     src/frontends/cli/watch_daemon.cpp

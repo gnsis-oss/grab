@@ -1,5 +1,7 @@
 #include "grab/result.hpp"
 #include "kernel/scheduling/reactor.hpp"
+#include "kernel/support/log.hpp"
+#include "kernel/support/log_tags.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <exception>
 #include <expected>
 #include <functional>
@@ -19,6 +22,8 @@
 #include <string_view>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/timerfd.h>
+#include <sys/types.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
@@ -43,12 +48,33 @@ namespace grab::core
         constexpr eventfd_t     emptyEventfdValue = 0U;
         constexpr eventfd_t     wakeEventfdValue  = 1U;
 
+        // Reserved epoll `data.u64` for the deadline timerfd. Client tokens
+        // come from a monotonic counter starting at `firstToken`, so the top
+        // of the range is unreachable and cannot collide with one.
+        constexpr std::uint64_t timerToken = std::numeric_limits<std::uint64_t>::max();
+
+        constexpr std::uint64_t noExpirations = 0U;
+        constexpr ssize_t       noBytesRead   = 0;
+
+        // `timerfd_settime` reads an all-zero `it_value` as *disarm*, so a
+        // deadline that lands exactly on the monotonic epoch has to be nudged
+        // to the smallest representable non-zero instant to still arm.
+        constexpr long          leastArmedNanoseconds = 1;
+
         [[nodiscard]]
         constexpr int
         eventfd_flags() noexcept
         {
             return static_cast<int>( static_cast<unsigned int>( EFD_CLOEXEC ) |
                                      static_cast<unsigned int>( EFD_NONBLOCK ) );
+        }
+
+        [[nodiscard]]
+        constexpr int
+        timerfd_flags() noexcept
+        {
+            return static_cast<int>( static_cast<unsigned int>( TFD_CLOEXEC ) |
+                                     static_cast<unsigned int>( TFD_NONBLOCK ) );
         }
 
         [[nodiscard]]
@@ -209,6 +235,26 @@ namespace grab::core
             void
             dispatch_ready_event( const epoll_event& event );
 
+            // Arms `timer_fd_` at the nearest deadline, or disarms it when no
+            // timer is pending. False means the arm failed and the caller must
+            // fall back to a finite epoll timeout.
+            [[nodiscard]]
+            bool
+            arm_timer_fd() const;
+
+            void
+            drain_timer_fd() const noexcept;
+
+            // What `epoll_wait` is given. `infiniteWait` once the timerfd
+            // holds the deadline; the millisecond fallback when it does not.
+            [[nodiscard]]
+            int
+            wait_timeout() const;
+
+            // Millisecond fallback, used only when the timerfd is
+            // unavailable. `ceil` to milliseconds is exactly the precision
+            // loss the timerfd exists to avoid, so this is a degraded mode,
+            // not the normal path.
             [[nodiscard]]
             int
             epoll_timeout() const;
@@ -219,6 +265,7 @@ namespace grab::core
 
             int                         epoll_fd_ = invalidFd;
             int                         wake_fd_  = invalidFd;
+            int                         timer_fd_ = invalidFd;
             std::mutex                  mutex_;
             std::vector<PendingOp>      pending_ops_;
             std::vector<FdRegistration> fds_;
@@ -253,12 +300,65 @@ namespace grab::core
         if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_ADD, wake_fd_, &event ) == posixFailure )
         {
             startup_error_ = posix_error( "epoll_ctl wake add", errno );
+            return;
+        }
+
+        // The deadline source. `epoll_wait`'s timeout is milliseconds, so a
+        // 100 us delay used to become 1 ms: a nanosecond API whose
+        // implementation threw the nanoseconds away. A timerfd in the same
+        // epoll set carries the deadline at nanosecond resolution instead.
+        timer_fd_ = ::timerfd_create( CLOCK_MONOTONIC, timerfd_flags() );
+        if( timer_fd_ == posixFailure )
+        {
+            // NOT a startup error: the reactor stays fully functional on the
+            // millisecond fallback, and failing construction here would take
+            // the overlay's present loop down with it. Precision degrades;
+            // nothing stops.
+            const int error_number = errno;
+            timer_fd_              = invalidFd;
+            log::nominal(
+                [error_number]( auto& record )
+                {
+                    record.tag( log::tags::reactor )
+                        .value( "timerfd_create", "failed" )
+                        .value( "errno", error_number )
+                        .value( "fallback", "epoll_timeout_ms" );
+                }
+            );
+            return;
+        }
+
+        epoll_event timer_event{};
+        timer_event.events   = EPOLLIN;
+        timer_event.data.u64 = timerToken;
+        if( ::epoll_ctl( epoll_fd_, EPOLL_CTL_ADD, timer_fd_, &timer_event ) ==
+            posixFailure )
+        {
+            const int error_number = errno;
+            log::nominal(
+                [error_number]( auto& record )
+                {
+                    record.tag( log::tags::reactor )
+                        .value( "epoll_ctl", "timer add failed" )
+                        .value( "errno", error_number )
+                        .value( "fallback", "epoll_timeout_ms" );
+                }
+            );
+            const auto close_result = ::close( timer_fd_ );
+            static_cast<void>( close_result );
+            timer_fd_ = invalidFd;
         }
     }
 
     Reactor::Impl::~Impl() noexcept
     {
         stop();
+        if( timer_fd_ != invalidFd )
+        {
+            const auto close_result = ::close( timer_fd_ );
+            static_cast<void>( close_result );
+            timer_fd_ = invalidFd;
+        }
         if( wake_fd_ != invalidFd )
         {
             const auto close_result = ::close( wake_fd_ );
@@ -300,7 +400,7 @@ namespace grab::core
                     return {};
                 }
 
-                const int timeout = epoll_timeout();
+                const int timeout = wait_timeout();
                 const int ready_count =
                     ::epoll_wait( epoll_fd_,
                                   ready_events_.data(),
@@ -559,6 +659,14 @@ namespace grab::core
     void
     Reactor::Impl::add_timer_on_reactor( PendingOp op )
     {
+        // The deadline is RELATIVE: `now()` as observed on this drain, plus
+        // the delay. A caller that rearms from inside its own callback
+        // therefore re-bases on however late the previous firing was, and
+        // that overshoot compounds across a chain. The absolute timerfd arm
+        // does not fix this and was never meant to — it removes the
+        // ceil-to-millisecond and the per-arm rounding, nothing more. An
+        // interval that must not drift needs an absolute deadline in the API,
+        // which `add_timer` does not offer.
         timers_.push_back( TimerRegistration{
             .token    = op.token,
             .deadline = std::chrono::steady_clock::now() + op.delay,
@@ -593,6 +701,17 @@ namespace grab::core
             return;
         }
 
+        if( event.data.u64 == timerToken )
+        {
+            // Level-triggered: an undrained expiry would make every
+            // subsequent `epoll_wait` return instantly. The timers it stands
+            // for are fired by `dispatch_expired_timers()` at the top of the
+            // next iteration, not here — the heap, not the fd, decides which
+            // callbacks are due.
+            drain_timer_fd();
+            return;
+        }
+
         const auto registration =
             std::ranges::find_if( fds_,
                                   [&event]( const FdRegistration& candidate )
@@ -604,6 +723,109 @@ namespace grab::core
             return;
         }
         registration->callback( event.events );
+    }
+
+    bool
+    Reactor::Impl::arm_timer_fd() const
+    {
+        // An all-zero `it_value` disarms, which is exactly right with no
+        // timer pending: the only remaining wakeups are fd readiness and the
+        // wake eventfd, both of which epoll reports on their own.
+        ::itimerspec spec{};
+        if( !timers_.empty() )
+        {
+            // TFD_TIMER_ABSTIME wants a CLOCK_MONOTONIC instant. On
+            // glibc/libstdc++ `steady_clock` IS CLOCK_MONOTONIC — same epoch,
+            // same tick — so a `steady_clock::time_point`'s
+            // `time_since_epoch()` is already expressed in the timer's own
+            // time base and needs no offset. That identity is what makes an
+            // absolute arm correct here; it is not universal, and a port to
+            // another platform has to re-establish it before reusing this.
+            //
+            // `timers_` is a binary heap ordered by `TimerLater`, so
+            // `front()` is the *earliest* deadline: arming from it is
+            // arming from the next thing due.
+            const auto since_epoch = timers_.front().deadline.time_since_epoch();
+            const auto whole_seconds =
+                std::chrono::duration_cast<std::chrono::seconds>( since_epoch );
+            const auto remainder =
+                std::chrono::duration_cast<std::chrono::nanoseconds>( since_epoch -
+                                                                      whole_seconds );
+
+            spec.it_value.tv_sec =
+                static_cast<decltype( spec.it_value.tv_sec )>( whole_seconds.count() );
+            spec.it_value.tv_nsec =
+                static_cast<decltype( spec.it_value.tv_nsec )>( remainder.count() );
+            if( spec.it_value.tv_sec == 0 && spec.it_value.tv_nsec == 0 )
+            {
+                spec.it_value.tv_nsec = leastArmedNanoseconds;
+            }
+        }
+
+        // A deadline already in the past is not an error: an absolute arm in
+        // the past expires immediately, which is what a missed deadline
+        // should do.
+        if( ::timerfd_settime( timer_fd_, TFD_TIMER_ABSTIME, &spec, nullptr ) ==
+            posixFailure )
+        {
+            const int error_number = errno;
+            log::nominal(
+                [error_number]( auto& record )
+                {
+                    record.tag( log::tags::reactor )
+                        .value( "timerfd_settime", "failed" )
+                        .value( "errno", error_number )
+                        .value( "fallback", "epoll_timeout_ms" );
+                }
+            );
+            return false;
+        }
+        return true;
+    }
+
+    void
+    Reactor::Impl::drain_timer_fd() const noexcept
+    {
+        if( timer_fd_ == invalidFd )
+        {
+            return;
+        }
+
+        while( true )
+        {
+            std::uint64_t expirations = noExpirations;
+            const ssize_t bytes =
+                ::read( timer_fd_, &expirations, sizeof( expirations ) );
+            if( bytes > noBytesRead )
+            {
+                continue;
+            }
+
+            const int error_number = errno;
+            if( bytes == posixFailure && error_number == EINTR )
+            {
+                continue;
+            }
+            return;
+        }
+    }
+
+    int
+    Reactor::Impl::wait_timeout() const
+    {
+        // Without a working timerfd the loop MUST keep computing a finite
+        // timeout. Waiting forever with nothing armed is a deadlock, not a
+        // degraded mode: every `add_timer` client — the overlay's 60 FPS
+        // present loop included — would hang behind it.
+        if( timer_fd_ == invalidFd )
+        {
+            return epoll_timeout();
+        }
+        if( !arm_timer_fd() )
+        {
+            return epoll_timeout();
+        }
+        return infiniteWait;
     }
 
     int

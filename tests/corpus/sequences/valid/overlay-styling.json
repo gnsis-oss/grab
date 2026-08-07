@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-styling",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "stroke-only", "op": "overlay.add",
+      "shape": { "rect":   { "x": 10, "y": 10, "w": 80, "h": 40 },
+                 "stroke": { "color": "#4ecea9", "width": 3 } } },
+
+    { "id": "stroke-default-width", "op": "overlay.add",
+      "shape": { "rect":   { "x": 10, "y": 60, "w": 80, "h": 40 },
+                 "stroke": { "color": "#ed5a49" } } },
+
+    { "id": "stroke-zero-width", "op": "overlay.add",
+      "shape": { "rect":   { "x": 10, "y": 110, "w": 80, "h": 40 },
+                 "stroke": { "color": "#ed5a49", "width": 0 } } },
+
+    { "id": "fill-only-opaque", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [200, 100], "radius": 30 },
+                 "fill":    { "color": "#4ecea9" } } },
+
+    { "id": "fill-only-translucent", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [280, 100], "radius": 30 },
+                 "fill":    { "color": "#4ecea933" } } },
+
+    { "id": "stroke-and-fill", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [300, 200], "radius": 48 },
+                 "stroke":  { "color": "#4ecea9", "width": 3 },
+                 "fill":    { "color": "#4ecea933" },
+                 "z": 10 } },
+
+    { "id": "uppercase-hex", "op": "overlay.add",
+      "shape": { "rect": { "x": 120, "y": 10, "w": 40, "h": 40 },
+                 "fill": { "color": "#4ECEA9" },
+                 "stroke": { "color": "#FFFFFFAA", "width": 2 } } },
+
+    { "id": "fully-transparent", "op": "overlay.add",
+      "shape": { "rect": { "x": 180, "y": 10, "w": 40, "h": 40 },
+                 "fill": { "color": "#00000000" } } },
+
+    { "id": "neither-stroke-nor-fill", "op": "overlay.add",
+      "shape": { "rect": { "x": 240, "y": 10, "w": 40, "h": 40 } } },
+
+    { "id": "trail-band-negative-z", "op": "overlay.add",
+      "shape": { "polygon": [[0, 0], [12, 0], [6, 10]],
+                 "fill":    { "color": "#edce59" },
+                 "band":    "trail",
+                 "z":       -5 } },
+
+    { "id": "annotation-band-explicit", "op": "overlay.add",
+      "shape": { "rect": { "x": 300, "y": 10, "w": 40, "h": 40 },
+                 "fill": { "color": "#edce59" },
+                 "band": "annotation",
+                 "z":    0 } }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-geometry",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "rect", "op": "overlay.add",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 } } },
+
+    { "id": "ellipse-radius", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [300, 200], "radius": 48 } } },
+
+    { "id": "ellipse-radius-xy", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [300, 200], "radius_x": 60, "radius_y": 40 } } },
+
+    { "id": "polygon", "op": "overlay.add",
+      "shape": { "polygon": [[0, 0], [10, 0], [10, 10]] } },
+
+    { "id": "path", "op": "overlay.add",
+      "shape": { "path": [ { "move": [0, 0] },
+                           { "line": [10, 10] },
+                           { "bezier": [[20, 0], [30, 20], [40, 10]] },
+                           "close" ] } },
+
+    { "id": "path-single-control-bezier", "op": "overlay.add",
+      "shape": { "path": [ { "move": [0, 0] }, { "bezier": [[5, 5]] } ] } },
+
+    { "id": "path-closed-object", "op": "overlay.add",
+      "shape": { "path": { "commands": [ { "move": [0, 0] },
+                                         { "line": [40, 0] },
+                                         { "line": [40, 40] } ],
+                           "closed": true } } },
+
+    { "id": "fractional-coordinates", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [300.5, 200.25], "radius": 12.75 } } },
+
+    { "id": "zero-extent-rect", "op": "overlay.add",
+      "shape": { "rect": { "x": -40.5, "y": -40.5, "w": 0, "h": 0 } } }
+  ]
+}

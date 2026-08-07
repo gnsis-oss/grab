@@ -11,6 +11,7 @@ add_executable(grab_core_tests
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/feedback_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/input_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/overlay_command.cpp
+    ${CMAKE_SOURCE_DIR}/src/frontends/cli/play_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/sketch_command.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/watch_daemon.cpp
     ${CMAKE_SOURCE_DIR}/src/frontends/cli/windows_command.cpp
@@ -21,6 +22,20 @@ add_executable(grab_core_tests
     cli/watch_daemon_test.cpp
     cli/windows_command_test.cpp
     cli/command_table_test.cpp
+    cli/play_command_test.cpp
+    core/test_sequence_types.cpp
+    core/test_command.cpp
+    core/test_command_descriptor_ext.cpp
+    kernel/test_topological_order.cpp
+    kernel/test_waypoints.cpp
+    kernel/test_reactor_timing.cpp
+    kernel/test_drift.cpp
+    kernel/test_sequence.cpp
+    kernel/test_sequence_ops.cpp
+    kernel/test_timer_thread.cpp
+    kernel/test_interpreter.cpp
+    kernel/test_execute.cpp
+    kernel/test_player.cpp
     config/test_batch_manifest.cpp
     config/test_environment.cpp
     config/test_load.cpp
@@ -84,6 +99,7 @@ target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMA
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
 target_compile_definitions(grab_core_tests PRIVATE
     GRAB_CODEC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/codec/pngs"
+    GRAB_SEQUENCE_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus/sequences"
     GRAB_PROFILES_DIR="${CMAKE_SOURCE_DIR}/profiles")
 include(GoogleTest)
 
@@ -256,11 +272,21 @@ gtest_discover_tests(grab_driver_webextension_tests)
 option(GRAB_TEST_PROVISION_XVFB
     "Auto-provision Xvfb displays for X-backed tests via a CTest fixture" ON)
 
+# The two tolerance-based timing suites are labelled so a loaded machine can
+# exclude them with `ctest -LE timing`: they assert scheduler accuracy in
+# microseconds, which a busy box will not deliver. They are labelled through a
+# third discovery pass because gtest_discover_tests adds its tests at test
+# time, where set_tests_properties() at configure time cannot see them.
+set(GRAB_TIMING_TEST_FILTER "ReactorTiming.*:TimerThreadTiming.*")
+
 if(GRAB_TEST_PROVISION_XVFB)
     gtest_discover_tests(grab_core_tests TEST_FILTER "Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference:Config*.*")
     gtest_discover_tests(grab_core_tests
-        TEST_FILTER "-Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference:Config*.*"
+        TEST_FILTER "-Compare.*:Diff.*:Workflow.CompareFilesDetectsDifference:Config*.*:${GRAB_TIMING_TEST_FILTER}"
         PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
+    gtest_discover_tests(grab_core_tests
+        TEST_FILTER "${GRAB_TIMING_TEST_FILTER}"
+        PROPERTIES LABELS "timing" FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
     add_test(NAME grab_xvfb_setup
         COMMAND ${CMAKE_COMMAND} -E env XVFB_PIDFILE=${CMAKE_BINARY_DIR}/grab-xvfb.pids
                 sh ${CMAKE_CURRENT_SOURCE_DIR}/xvfb_fixture.sh start)
@@ -287,7 +313,10 @@ if(GRAB_TEST_PROVISION_XVFB)
         DISCOVERY_MODE PRE_TEST
         PROPERTIES FIXTURES_REQUIRED grab_xvfb ENVIRONMENT "DISPLAY=:87")
 else()
-    gtest_discover_tests(grab_core_tests)
+    gtest_discover_tests(grab_core_tests TEST_FILTER "-${GRAB_TIMING_TEST_FILTER}")
+    gtest_discover_tests(grab_core_tests
+        TEST_FILTER "${GRAB_TIMING_TEST_FILTER}"
+        PROPERTIES LABELS "timing")
     gtest_discover_tests(grab_integration_tests DISCOVERY_MODE PRE_TEST)
     gtest_discover_tests(grab_driver_x11_tests DISCOVERY_MODE PRE_TEST)
     gtest_discover_tests(grab_client_tests DISCOVERY_MODE PRE_TEST)
@@ -323,3 +352,36 @@ if(GRAB_TEST_PROVISION_XVFB)
 else()
     gtest_discover_tests(grab_x11_tests)
 endif()
+
+# ── Sequence corpus ──────────────────────────────────────────
+# One test per document, per CLAUDE.md 6.1: the assertion is that the loader
+# neither crashes nor trips a sanitizer, NOT that it accepts. An adversarial
+# corpus is valuable precisely because it pushes the parser.
+#
+# The glob is deliberate. Adding a .json file to either directory registers a
+# test with no CMake edit, which is what keeps the corpus cheap to extend.
+# Re-run cmake after adding one.
+file(GLOB grab_sequence_corpus_valid
+     CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/corpus/sequences/valid/*.json")
+file(GLOB grab_sequence_corpus_invalid
+     CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/corpus/sequences/invalid/*.json")
+
+foreach(corpus_file IN LISTS grab_sequence_corpus_valid)
+    get_filename_component(corpus_name "${corpus_file}" NAME_WE)
+    add_test(NAME sequence_corpus_valid_${corpus_name}
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/corpus/run_sequence_corpus.sh
+                     $<TARGET_FILE:grab_cli> "${corpus_file}" expect-valid)
+    set_tests_properties(sequence_corpus_valid_${corpus_name}
+                         PROPERTIES LABELS "sequence_corpus"
+                                    PASS_REGULAR_EXPRESSION "\\[VALID\\]")
+endforeach()
+
+foreach(corpus_file IN LISTS grab_sequence_corpus_invalid)
+    get_filename_component(corpus_name "${corpus_file}" NAME_WE)
+    add_test(NAME sequence_corpus_invalid_${corpus_name}
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/corpus/run_sequence_corpus.sh
+                     $<TARGET_FILE:grab_cli> "${corpus_file}" expect-rejected)
+    set_tests_properties(sequence_corpus_invalid_${corpus_name}
+                         PROPERTIES LABELS "sequence_corpus"
+                                    PASS_REGULAR_EXPRESSION "\\[REJECTED\\]")
+endforeach()

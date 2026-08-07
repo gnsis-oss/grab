@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "sequence": "unknown-pacing-mode",
+  "pacing": { "mode": "sloppy", "grace_ms": 10 },
+  "steps": [
+    { "id": "only", "op": "input.click" }
+  ]
+}

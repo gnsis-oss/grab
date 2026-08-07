@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-unknown-easing",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "bouncy-is-not-an-easing", "op": "overlay.add",
+      "shape": { "rect":      { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "fill":      { "color": "#4ecea933" },
+                 "animation": { "scale": { "easing": "bouncy",
+                                           "duration_ms": 200,
+                                           "from": 0.5, "to": 1.0 } } } }
+  ]
+}

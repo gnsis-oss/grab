@@ -272,16 +272,28 @@ namespace grab
 
             // Adds many shapes for the price of one call.
             //
-            // Every mutating call here is a synchronous round trip to the
-            // session's reactor thread, serviced on its frame clock — measured
-            // at ~32 ms, and paid by the CALLER, who is blocked for all of it.
-            // The cost is per call and nearly independent of what the call
-            // carries, so anything animated (a cursor trail, a path being drawn,
-            // a sweep of highlights) adding one shape at a time is capped near
-            // thirty shapes per second AND stalls its own producer each time.
+            // A mutating call from a FOREIGN thread is a round trip to the
+            // session's reactor thread. From the reactor thread itself it runs
+            // inline and costs nothing extra — Overlay::Impl::invoke
+            // (src/kernel/lifecycle/session.cpp) dispatches directly when the
+            // caller is already there, which is why an observation-driven tool
+            // mutating from its own callback is cheap.
             //
-            // Prefer this wherever more than one shape is known at once. It is
-            // all-or-nothing: if any shape fails preflight, none are added.
+            // Measured on a 1920x1080 surface (examples/osu_stress.cpp, 471
+            // calls): add_many of 56 shapes 1.1 ms; add/remove/update ~0.02 ms
+            // mean from the reactor thread. The frame is paid by flush(), not
+            // by the mutations — the first composited frame of a 56-shape scene
+            // took 47 ms, the only call of the run to exceed the 16.7 ms budget.
+            //
+            // Prefer this wherever more than one shape is known at once: the
+            // cost is per call rather than per shape, so a producer adding one
+            // shape at a time pays the round trip every time. It is
+            // all-or-nothing — if any shape fails preflight, none are added.
+            //
+            // (An earlier revision of this comment put the round trip at ~32 ms
+            // and claimed one-at-a-time adds were "capped near thirty shapes per
+            // second". Neither reproduces; the frame clock is 16.7 ms and the
+            // mutations are sub-millisecond.)
             [[nodiscard]]
             Result<std::vector<overlay::ShapeId>>
             add_many( std::span<overlay::Shape> shapes );

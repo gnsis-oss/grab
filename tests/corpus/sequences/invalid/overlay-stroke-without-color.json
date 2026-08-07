@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-stroke-without-color",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "no-stroke-at-all-is-legal", "op": "overlay.add",
+      "shape": { "rect": { "x": 0, "y": 0, "w": 20, "h": 20 } } },
+    { "id": "a-width-with-no-color", "op": "overlay.add",
+      "shape": { "rect":   { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "stroke": { "width": 3 } } }
+  ]
+}

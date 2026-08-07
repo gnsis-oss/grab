@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-empty-handle",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "handle-present-but-blank", "op": "overlay.add", "handle": "",
+      "shape": { "rect": { "x": 100, "y": 100, "w": 90, "h": 90 },
+                 "fill": { "color": "#4ecea933" } } }
+  ]
+}

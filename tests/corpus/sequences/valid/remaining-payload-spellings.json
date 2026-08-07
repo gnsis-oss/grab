@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "sequence": "remaining-payload-spellings",
+  "pacing": { "mode": "precise", "grace_ms": 10 },
+  "steps": [
+    { "id": "middle-click", "op": "input.click", "button": "middle" },
+
+    { "id": "right-click", "op": "input.click", "button": "right",
+      "on_error": "continue" },
+
+    { "id": "wheel-code-click", "op": "input.click_at", "at": [120, 90],
+      "button": 4 },
+
+    { "id": "press-secondary-alias", "op": "input.press", "button": "secondary" },
+
+    { "id": "release-secondary-alias", "op": "input.release", "button": "right" },
+
+    { "id": "drag-with-overrides", "op": "input.drag",
+      "from": [100, 100], "to": [400, 300], "button": "middle",
+      "options": { "steps": 32, "step_dwell_ms": 4, "path": "cubic" } },
+
+    { "id": "move-with-overrides", "op": "input.move", "from": [400, 300],
+      "to": [200, 200],
+      "options": { "steps": 8, "step_dwell_ms": 12, "path": "linear" } },
+
+    { "id": "follow-with-overrides", "op": "input.follow",
+      "curve": [[200, 200], [260, 140], [320, 260], [380, 200]],
+      "options": { "steps": 48, "step_dwell_ms": 2, "path": "cubic" } },
+
+    { "id": "sub-millisecond-wait", "op": "time.wait", "ns": 750000 },
+
+    { "id": "whole-millisecond-wait", "op": "time.wait", "ms": 25 },
+
+    { "id": "capture-by-locator", "op": "screen.capture",
+      "locator": "role=window name=Terminal",
+      "on_error": "goto:recover", "extra_grace_ms": 120 },
+
+    { "id": "capture-by-path", "op": "screen.capture", "out": "spellings.png",
+      "on_error": "abort" },
+
+    { "id": "recover", "op": "input.key", "key": "Escape",
+      "after": ["capture-by-path"] }
+  ]
+}

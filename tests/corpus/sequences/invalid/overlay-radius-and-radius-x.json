@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "sequence": "overlay-radius-and-radius-x",
+  "pacing": { "mode": "strict", "grace_ms": 0 },
+  "steps": [
+    { "id": "both-spellings", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [300, 200],
+                              "radius": 48,
+                              "radius_x": 60,
+                              "radius_y": 40 },
+                 "stroke":  { "color": "#4ecea9", "width": 3 } } }
+  ]
+}
