@@ -138,6 +138,7 @@ add_library(grab_kernel STATIC
     src/kernel/input/gesture_classifier.cpp
     src/kernel/presentation/cursor_feedback.cpp
     src/kernel/presentation/overlay_draw.cpp
+    src/kernel/presentation/overlay_animation.cpp
     src/kernel/presentation/overlay_edit.cpp
     src/kernel/presentation/overlay_edit_session.cpp
     src/kernel/presentation/overlay_raster.cpp
