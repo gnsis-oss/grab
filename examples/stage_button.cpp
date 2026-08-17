@@ -38,6 +38,7 @@
 
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
+#include "support/pixel.hpp"
 #include "support/motion/trajectory.hpp"
 #include "support/stage/assert.hpp"
 #include "support/stage/probe.hpp"
@@ -74,6 +75,7 @@ namespace
     namespace stage  = ladder::view::stage;
     namespace motion = ladder::view::motion;
     namespace view   = ladder::view;
+    namespace pixel  = ladder::view::pixel;
 
     // ── The authored page ───────────────────────────────────────────────────
     //
@@ -271,80 +273,6 @@ namespace
         return text;
     }
 
-    struct Rgb
-    {
-            double r_ = 0.0;
-            double g_ = 0.0;
-            double b_ = 0.0;
-    };
-
-    // Mean colour of a rect in a capture. Compared as a distance rather than
-    // for equality: a real browser antialiases, and the question is whether the
-    // button changed, not whether it matches a hex string exactly.
-    [[nodiscard]]
-    std::optional<Rgb>
-    mean_colour( const grab::Image&    frame,
-                 const view::ViewRect& rect )
-    {
-        if( frame.empty() )
-        {
-            return std::nullopt;
-        }
-        const std::uint32_t bpp = grab::bytes_per_pixel( frame.format );
-        const bool          bgr = frame.format ==
-                                  grab::PixelFormat::Bgra ||
-                                  frame.format == grab::PixelFormat::Bgr;
-
-        const auto          x0  = static_cast<std::uint32_t>( std::max( 0.0, rect.x_ ) );
-        const auto          y0  = static_cast<std::uint32_t>( std::max( 0.0, rect.y_ ) );
-        const auto x1 = static_cast<std::uint32_t>( std::max( 0.0, rect.x_ + rect.w_ ) );
-        const auto y1 = static_cast<std::uint32_t>( std::max( 0.0, rect.y_ + rect.h_ ) );
-
-        double     red = 0.0, grn = 0.0, blu = 0.0;
-        std::uint64_t seen = 0U;
-        for( std::uint32_t row = y0; row < y1 && row < frame.height; ++row )
-        {
-            for( std::uint32_t col = x0; col < x1 && col < frame.width; ++col )
-            {
-                const std::size_t at =
-                    ( static_cast<std::size_t>( row ) * frame.stride ) +
-                    ( static_cast<std::size_t>( col ) * bpp );
-                if( at + 2U >= frame.pixels.size() )
-                {
-                    continue;
-                }
-                const auto b0 =
-                    static_cast<double>( static_cast<std::uint8_t>( frame.pixels[at] ) );
-                const auto b1 = static_cast<double>(
-                    static_cast<std::uint8_t>( frame.pixels[at + 1U] )
-                );
-                const auto b2 = static_cast<double>(
-                    static_cast<std::uint8_t>( frame.pixels[at + 2U] )
-                );
-                red += bgr ? b2 : b0;
-                grn += b1;
-                blu += bgr ? b0 : b2;
-                ++seen;
-            }
-        }
-        if( seen == 0U )
-        {
-            return std::nullopt;
-        }
-        const auto count = static_cast<double>( seen );
-        return Rgb{ red / count, grn / count, blu / count };
-    }
-
-    [[nodiscard]]
-    double
-    distance( const Rgb& lhs,
-              const Rgb& rhs )
-    {
-        const double d_r = lhs.r_ - rhs.r_;
-        const double d_g = lhs.g_ - rhs.g_;
-        const double d_b = lhs.b_ - rhs.b_;
-        return std::sqrt( ( d_r * d_r ) + ( d_g * d_g ) + ( d_b * d_b ) );
-    }
 
     // The button's accessible name, and its screen rect, read live.
     struct Live
@@ -404,37 +332,6 @@ namespace
             };
         }
         return std::nullopt;
-    }
-
-    // One frame to disk. Factored out because --trail adds a SECOND capture
-    // (mid-flight, 02-approach) alongside the post-click 03-after, and two
-    // copies of a pixel-format branch is two chances to get the channel order
-    // wrong in only one of them.
-    void
-    write_ppm( const grab::Image&           frame,
-               const std::filesystem::path& path )
-    {
-        std::ofstream shot( path, std::ios::binary );
-        shot << "P6\n" << frame.width << " " << frame.height << "\n255\n";
-        const std::uint32_t bpp = grab::bytes_per_pixel( frame.format );
-        const bool          bgr = frame.format ==
-                                  grab::PixelFormat::Bgra ||
-                                  frame.format == grab::PixelFormat::Bgr;
-        for( std::uint32_t row = 0U; row < frame.height; ++row )
-        {
-            for( std::uint32_t col = 0U; col < frame.width; ++col )
-            {
-                const std::size_t at =
-                    ( static_cast<std::size_t>( row ) * frame.stride ) +
-                    ( static_cast<std::size_t>( col ) * bpp );
-                const auto b0 = static_cast<char>( frame.pixels[at] );
-                const auto b1 = static_cast<char>( frame.pixels[at + 1U] );
-                const auto b2 = static_cast<char>( frame.pixels[at + 2U] );
-                shot.put( bgr ? b2 : b0 );
-                shot.put( b1 );
-                shot.put( bgr ? b0 : b2 );
-            }
-        }
     }
 
     struct Options
@@ -926,7 +823,7 @@ main( int    argc,
             const auto during = ( *screen ).display();
             if( during.has_value() )
             {
-                write_ppm( *during, options.out / "02-approach.ppm" );
+                pixel::write_ppm( *during, options.out / "02-approach.ppm" );
             }
         }
 
@@ -1063,11 +960,11 @@ main( int    argc,
         std::string flipped = "unreadable";
         if( before.has_value() && after.has_value() )
         {
-            const auto was = mean_colour( *before, live->rect_ );
-            const auto now = mean_colour( *after, live->rect_ );
+            const auto was = pixel::mean_colour( *before, live->rect_ );
+            const auto now = pixel::mean_colour( *after, live->rect_ );
             if( was.has_value() && now.has_value() )
             {
-                const double moved = distance( *was, *now );
+                const double moved = pixel::distance( *was, *now );
                 flipped            = moved >= colour_match ? "changed" : "unchanged";
                 std::cout << "  pixel     mean colour moved "
                           << static_cast<int>( moved )
@@ -1083,7 +980,7 @@ main( int    argc,
 
         if( after.has_value() )
         {
-            write_ppm( *after, options.out / "03-after.ppm" );
+            pixel::write_ppm( *after, options.out / "03-after.ppm" );
         }
 
         // ── 7. SCORE ────────────────────────────────────────────────────────

@@ -52,3 +52,21 @@ target_link_libraries(stage_button PRIVATE
     grab_codec)
 target_include_directories(stage_button PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(stage_button PRIVATE cxx_std_23)
+
+# Rung 8: press-drag-release — the macOS-install gesture against a real
+# page. Grabs an authored icon, carries it with the button held on a human
+# trajectory, drops it in a zone, and verifies on a11y, pixel and device
+# channels. Same host and support set as stage_button.
+add_executable(stage_drag stage_drag.cpp)
+target_link_libraries(stage_drag PRIVATE
+    grab_core
+    grab_kernel
+    grab_session
+    grab_platform_x11
+    grab_input
+    grab_input_x11
+    grab_screen
+    grab_image
+    grab_codec)
+target_include_directories(stage_drag PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_features(stage_drag PRIVATE cxx_std_23)
