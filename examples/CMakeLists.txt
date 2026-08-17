@@ -87,3 +87,22 @@ target_link_libraries(stage_scroll PRIVATE
     grab_codec)
 target_include_directories(stage_scroll PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(stage_scroll PRIVATE cxx_std_23)
+
+# Rung 9, long form: a variable-speed scroll journey — down slowly to a
+# bottom button, back up at walking pace to a midway one, down again on a
+# ramp to a third, clicking each stop. Each leg's necessity is asserted
+# before it runs, and the event stream must carry wheel events in both
+# directions.
+add_executable(stage_scroll_tour stage_scroll_tour.cpp)
+target_link_libraries(stage_scroll_tour PRIVATE
+    grab_core
+    grab_kernel
+    grab_session
+    grab_platform_x11
+    grab_input
+    grab_input_x11
+    grab_screen
+    grab_image
+    grab_codec)
+target_include_directories(stage_scroll_tour PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_features(stage_scroll_tour PRIVATE cxx_std_23)
