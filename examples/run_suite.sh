@@ -11,8 +11,14 @@
 #   examples/run_suite.sh --local 01       # modes combine
 #   examples/run_suite.sh --list           # list the suite and exit
 #
-# The suite is examples/suite/NN_*.json, played in filename order — adding
-# 03_whatever.json makes it part of every full run, no registration step.
+# The suite is examples/suite/NN_*.json (sequence documents, played by
+# `grab play`) and examples/suite/NN_*.sh (wrappers around built example
+# binaries), run in filename order — adding NN_whatever.{json,sh} makes it
+# part of every full run, no registration step. A wrapper runs with cwd set
+# to its artifact directory and sees: SUITE_MODE (owned|local), SUITE_BUILD
+# (the build directory), GRAB_BIN, and DISPLAY already pointing at the run's
+# display. GRAB_LOG=debug/GRAB_LOG_FILE are exported so library logging is
+# on for binaries too.
 #
 # Every example runs with:
 #   - full debug logging   (--log-level debug --log-file grab.log, plus --trace)
@@ -49,18 +55,24 @@ for arg in "$@"; do
 done
 
 # ── Discover the suite ──────────────────────────────────────────────────────
-mapfile -t DOCS < <(find "$SUITE_DIR" -maxdepth 1 -name '[0-9][0-9]_*.json' | sort)
+mapfile -t DOCS < <(find "$SUITE_DIR" -maxdepth 1 \( -name '[0-9][0-9]_*.json' -o -name '[0-9][0-9]_*.sh' \) | sort)
 [ "${#DOCS[@]}" -gt 0 ] || { echo "no examples found in $SUITE_DIR" >&2; exit 1; }
 
+stem_of() {
+  local base; base="$(basename "$1")"
+  base="${base%.json}"; base="${base%.sh}"
+  printf '%s' "$base"
+}
+
 if [ "$LIST" -eq 1 ]; then
-  for doc in "${DOCS[@]}"; do basename "$doc" .json; done
+  for doc in "${DOCS[@]}"; do stem_of "$doc"; echo; done
   exit 0
 fi
 
 if [ -n "$PICK" ]; then
   MATCHED=()
   for doc in "${DOCS[@]}"; do
-    stem="$(basename "$doc" .json)"
+    stem="$(stem_of "$doc")"
     num="${stem%%_*}"
     name="${stem#*_}"
     if [ "$PICK" = "$stem" ] || [ "$PICK" = "$num" ] || [ "$PICK" = "$name" ]; then
@@ -69,7 +81,7 @@ if [ -n "$PICK" ]; then
   done
   [ "${#MATCHED[@]}" -eq 1 ] || {
     echo "no unique example matches '$PICK' — try one of:" >&2
-    for doc in "${DOCS[@]}"; do basename "$doc" .json >&2; done
+    for doc in "${DOCS[@]}"; do stem_of "$doc" >&2; echo >&2; done
     exit 2
   }
   DOCS=("${MATCHED[@]}")
@@ -138,16 +150,28 @@ echo
 # ── Play ────────────────────────────────────────────────────────────────────
 declare -a RESULTS
 FAILED=0
+MODE="owned"; [ "$LOCAL" -eq 1 ] && MODE="local"
+BUILD_DIR="$(dirname "$GRAB")"
 for doc in "${DOCS[@]}"; do
-  stem="$(basename "$doc" .json)"
+  stem="$(stem_of "$doc")"
   out="$OUT_ROOT/$stem"
   rm -rf "$out" && mkdir -p "$out"
   start=$SECONDS
-  ( cd "$out" && "$GRAB" play "$doc" \
-        --trail --feedback --trace \
-        --report run.jsonl \
-        --log-level debug --log-file grab.log ) >"$out/play.log" 2>&1
-  rc=$?
+  case "$doc" in
+    *.json)
+      ( cd "$out" && "$GRAB" play "$doc" \
+            --trail --feedback --trace \
+            --report run.jsonl \
+            --log-level debug --log-file grab.log ) >"$out/play.log" 2>&1
+      rc=$?
+      ;;
+    *.sh)
+      ( cd "$out" && SUITE_MODE="$MODE" SUITE_BUILD="$BUILD_DIR" \
+            GRAB_BIN="$GRAB" GRAB_LOG=debug GRAB_LOG_FILE="$out/grab.log" \
+            bash "$doc" ) >"$out/play.log" 2>&1
+      rc=$?
+      ;;
+  esac
   took=$(( SECONDS - start ))
   if [ "$rc" -eq 0 ]; then
     RESULTS+=("PASS  ${took}s  $stem")

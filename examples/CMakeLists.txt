@@ -32,3 +32,23 @@ target_link_libraries(event_logger PRIVATE
     grab_driver_webextension
     grab_storage)
 target_compile_features(event_logger PRIVATE cxx_std_23)
+
+# Rung 4 of the visual capability ladder, ported from the spider work
+# (l0/.worktrees/spider-visual): one authored page, one button, a human
+# trajectory with a live trail, and a click proved three independent ways
+# (a11y name flip, pixel flip, device-read press point). Brings up its own
+# X session + WM + compositor + a11y bus + Firefox via support/host.hpp,
+# or drives the current display with --session.
+add_executable(stage_button stage_button.cpp)
+target_link_libraries(stage_button PRIVATE
+    grab_core
+    grab_kernel
+    grab_session
+    grab_platform_x11
+    grab_input
+    grab_input_x11
+    grab_screen
+    grab_image
+    grab_codec)
+target_include_directories(stage_button PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_features(stage_button PRIVATE cxx_std_23)
