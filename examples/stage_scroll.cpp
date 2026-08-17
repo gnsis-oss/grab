@@ -28,8 +28,8 @@
 #include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
-#include "support/overlay_align.hpp"
 #include "support/motion/trajectory.hpp"
+#include "support/overlay_align.hpp"
 #include "support/pixel.hpp"
 #include "support/stage/assert.hpp"
 #include "support/stage/scene.hpp"
@@ -71,36 +71,36 @@ namespace
 
     // ── The authored page ───────────────────────────────────────────────────
 
-    constexpr int           viewport_w = 1'000;
-    constexpr int           viewport_h = 700;
-    constexpr int           document_h = 2'800;    // four screenfuls
+    constexpr int                  viewport_w = 1'000;
+    constexpr int                  viewport_h = 700;
+    constexpr int                  document_h = 2'800;    // four screenfuls
 
     // The button, in PAGE coordinates — deliberately in the last screenful.
-    constexpr int           button_x = 300;
-    constexpr int           button_y = 2'400;
-    constexpr int           button_w = 400;
-    constexpr int           button_h = 160;
+    constexpr int                  button_x       = 300;
+    constexpr int                  button_y       = 2'400;
+    constexpr int                  button_w       = 400;
+    constexpr int                  button_h       = 160;
 
-    constexpr const char*   idle_label    = "BOTTOM";
-    constexpr const char*   clicked_label = "CLICKED";
-    constexpr const char*   idle_fill     = "#1d4e89";
-    constexpr const char*   clicked_fill  = "#c1121f";
-    constexpr const char*   title_marker  = "Stage Scroll";
+    constexpr const char*          idle_label     = "BOTTOM";
+    constexpr const char*          clicked_label  = "CLICKED";
+    constexpr const char*          idle_fill      = "#1d4e89";
+    constexpr const char*          clicked_fill   = "#c1121f";
+    constexpr const char*          title_marker   = "Stage Scroll";
 
-    constexpr std::uint32_t primary_button = 1U;    // X11 primary pointer button
-    constexpr std::uint32_t wheel_down     = 5U;    // X11 wheel-down button code
+    constexpr std::uint32_t        primary_button = 1U;    // X11 primary pointer button
+    constexpr std::uint32_t        wheel_down     = 5U;    // X11 wheel-down button code
 
-    constexpr const char*   subject       = "btn_bottom";
-    constexpr const char*   start_subject = "start";
-    constexpr const char*   view_subject  = "scrolled";
-    constexpr const char*   wheel_subject = "wheel";
+    constexpr const char*          subject        = "btn_bottom";
+    constexpr const char*          start_subject  = "start";
+    constexpr const char*          view_subject   = "scrolled";
+    constexpr const char*          wheel_subject  = "wheel";
 
     constexpr grab::overlay::Color cyan{ .r = 0U, .g = 217U, .b = 255U, .a = 242U };
     constexpr grab::overlay::Color amber{ .r = 255U, .g = 184U, .b = 26U, .a = 242U };
 
     constexpr double               stroke_px       = 3.0;
     constexpr double               trail_stroke_px = 2.0;
-    constexpr auto                 trail_slack = std::chrono::milliseconds{ 8 };
+    constexpr auto                 trail_slack     = std::chrono::milliseconds{ 8 };
 
     // Where the pointer parks to scroll, as FRACTIONS of the browser window's
     // frame. Absolute screen coordinates were the first version, and they are
@@ -109,23 +109,23 @@ namespace
     // absolute park point can sit over the chrome, another application, or
     // the desktop. Right of centre and two thirds down: over the page, below
     // the chrome, clear of the column the button rises through.
-    constexpr double        park_fraction_x = 0.72;
-    constexpr double        park_fraction_y = 0.66;
+    constexpr double               park_fraction_x = 0.72;
+    constexpr double               park_fraction_y = 0.66;
 
     // Wheel bursts: a few notches, then re-read the live rect. The distance
     // one notch travels is a browser setting (ladder §5.4), so the loop is
     // bounded by rounds, never by an assumed pixels-per-notch.
-    constexpr int           notches_per_round = 3;
-    constexpr int           max_scroll_rounds = 40;
-    constexpr int           scroll_settle_ms  = 180;
+    constexpr int                  notches_per_round = 3;
+    constexpr int                  max_scroll_rounds = 40;
+    constexpr int                  scroll_settle_ms  = 180;
     // Fully visible means the whole rect inside the screen with this margin.
-    constexpr double        visible_margin = 8.0;
+    constexpr double               visible_margin = 8.0;
 
-    constexpr std::uint64_t seed        = 0X5'D1'DE'00'09ULL;
-    constexpr int           settle_ms   = 700;
-    constexpr int           announce_ms = 900;
-    constexpr int           react_ms    = 900;
-    constexpr int           poll_ms     = 200;
+    constexpr std::uint64_t        seed           = 0X5'D1'DE'00'09ULL;
+    constexpr int                  settle_ms      = 700;
+    constexpr int                  announce_ms    = 900;
+    constexpr int                  react_ms       = 900;
+    constexpr int                  poll_ms        = 200;
     constexpr int    poll_tries   = 150;    // 30 s: Firefox builds its a11y tree lazily
     constexpr double colour_match = 40.0;
 
@@ -146,8 +146,11 @@ namespace
         std::string   sections;
         for( int top = mark_first; top < document_h - mark_bottom; top += mark_step )
         {
-            sections += "<div class=\"mark\" style=\"top:" + px( top ) + "\">page y " +
-                        std::to_string( top ) + "</div>\n";
+            sections += "<div class=\"mark\" style=\"top:" +
+                        px( top ) +
+                        "\">page y " +
+                        std::to_string( top ) +
+                        "</div>\n";
         }
         return std::string{ "<!doctype html>\n"
                             "<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
@@ -164,9 +167,15 @@ namespace
                "font:600 44px sans-serif;color:#33415c;}\n"
                "  #btn_bottom{position:absolute;box-sizing:border-box;"
                "left:" +
-               px( button_x ) + ";top:" + px( button_y ) + ";width:" + px( button_w ) +
-               ";height:" + px( button_h ) +
-               ";background:" + idle_fill +
+               px( button_x ) +
+               ";top:" +
+               px( button_y ) +
+               ";width:" +
+               px( button_w ) +
+               ";height:" +
+               px( button_h ) +
+               ";background:" +
+               idle_fill +
                ";color:#fff;border:0;font:600 40px sans-serif;}\n"
                "</style></head><body>\n" +
                ladder::view::fid::patches_html() +
@@ -183,7 +192,9 @@ namespace
                "background:#000;\"></button>\n"
                "<div id=\"hint\">SCROLL DOWN &#8595;</div>\n" +
                sections +
-               "<button id=\"btn_bottom\" aria-label=\"" + idle_label + "\">" +
+               "<button id=\"btn_bottom\" aria-label=\"" +
+               idle_label +
+               "\">" +
                idle_label +
                "</button>\n"
                "<script>\n"
@@ -208,13 +219,17 @@ namespace
     {
         stage::Scene scene;
         scene.id_ = "scroll";
-        scene.pages_.push_back( stage::ScenePage{ .name_   = "scroll",
-                                                  .html_   = page_html(),
-                                                  .marker_ = title_marker } );
-        scene.viewport_ = stage::ViewportSpec{ .viewport_w_ = viewport_w,
-                                               .viewport_h_ = viewport_h,
-                                               .document_h_ = document_h };
-        scene.frames_   = { "01-top", "02-scrolled", "03-after" };
+        scene.pages_.push_back( stage::ScenePage{
+            .name_   = "scroll",
+            .html_   = page_html(),
+            .marker_ = title_marker
+        } );
+        scene.viewport_ = stage::ViewportSpec{
+            .viewport_w_ = viewport_w,
+            .viewport_h_ = viewport_h,
+            .document_h_ = document_h
+        };
+        scene.frames_ = { "01-top", "02-scrolled", "03-after" };
 
         // DECLARED BEFORE THE ACT.
         const auto expect = [&]( std::string    name,
@@ -222,14 +237,16 @@ namespace
                                  std::string    subj,
                                  std::string    value )
         {
-            scene.expect_.push_back( stage::Expectation{ .name_    = std::move( name ),
-                                                         .observe_ = observe,
-                                                         .subject_ = std::move( subj ),
-                                                         .value_   = std::move( value ),
-                                                         .tolerance_ = 0.0,
-                                                         .low_       = 0.0,
-                                                         .high_      = 0.0,
-                                                         .ranged_    = false } );
+            scene.expect_.push_back( stage::Expectation{
+                .name_      = std::move( name ),
+                .observe_   = observe,
+                .subject_   = std::move( subj ),
+                .value_     = std::move( value ),
+                .tolerance_ = 0.0,
+                .low_       = 0.0,
+                .high_      = 0.0,
+                .ranged_    = false
+            } );
         };
         expect( "overlay_is_live", stage::Observe::Capability, "overlay", "live" );
         expect( "button_below_fold_at_start",
@@ -315,11 +332,12 @@ namespace
                 {
                     return Live{
                         .name_  = info.name,
-                        .rect_  = ladder::view::fid::current().rect(
-                            view::ViewRect{ .x_ = info.bounds.x,
-                                            .y_ = info.bounds.y,
-                                            .w_ = info.bounds.w,
-                                            .h_ = info.bounds.h } ),
+                        .rect_  = ladder::view::fid::current().rect( view::ViewRect{
+                            .x_ = info.bounds.x,
+                            .y_ = info.bounds.y,
+                            .w_ = info.bounds.w,
+                            .h_ = info.bounds.h
+                        } ),
                         .space_ = info.bounds.space,
                     };
                 }
@@ -344,12 +362,24 @@ namespace
                   double                screen_w,
                   double                screen_h )
     {
-        return rect.y_ >= content_top + visible_margin &&
-               ( rect.y_ + rect.h_ ) <= content_bottom - visible_margin &&
-               rect.x_ >= window.x_ &&
-               ( rect.x_ + rect.w_ ) <= window.x_ + window.w_ &&
-               rect.y_ >= 0.0 && ( rect.y_ + rect.h_ ) <= screen_h &&
-               rect.x_ >= 0.0 && ( rect.x_ + rect.w_ ) <= screen_w;
+        return rect.y_ >=
+               content_top +
+               visible_margin &&
+               ( rect.y_ + rect.h_ ) <=
+               content_bottom -
+               visible_margin &&
+               rect.x_ >=
+               window.x_ &&
+               ( rect.x_ + rect.w_ ) <=
+               window.x_ +
+               window.w_ &&
+               rect.y_ >=
+               0.0 &&
+               ( rect.y_ + rect.h_ ) <=
+               screen_h &&
+               rect.x_ >=
+               0.0 &&
+               ( rect.x_ + rect.w_ ) <= screen_w;
     }
 
     struct Options
@@ -501,19 +531,20 @@ main( int    argc,
         out << scene.pages_.front().html_;
     }
     std::cout << "AUTHOR\n  document  " << viewport_w << "x" << document_h
-              << " (viewport " << viewport_w << "x" << viewport_h
-              << ")\n  button    (" << button_x << "," << button_y << " " << button_w
-              << "x" << button_h << ", page coords) -> " << page << '\n';
+              << " (viewport " << viewport_w << "x" << viewport_h << ")\n  button    ("
+              << button_x << "," << button_y << " " << button_w << "x" << button_h
+              << ", page coords) -> " << page << '\n';
 
     // ── 2. HOST ─────────────────────────────────────────────────────────────
     std::cout << "\nHOST\n";
-    ladder::host::Host host{ options.display,
-                             options.out,
-                             std::to_string( viewport_w ) + "x" +
-                                 std::to_string( viewport_h ),
-                             options.host_display,
-                             options.attach,
-                             title_marker };
+    ladder::host::Host host{
+        options.display,
+        options.out,
+        std::to_string( viewport_w ) + "x" + std::to_string( viewport_h ),
+        options.host_display,
+        options.attach,
+        title_marker
+    };
     if( !host.start( "file://" + std::filesystem::absolute( page ).string() ) )
     {
         std::cerr << "host did not come up\n";
@@ -557,9 +588,11 @@ main( int    argc,
         std::optional<grab::Subscription> button_subscription;
         {
             grab::SubscriptionScope button_scope;
-            button_scope.kinds = { grab::EventKind::MouseButtonDown,
-                                   grab::EventKind::MouseButtonUp };
-            auto btn_sub       = ( *session )->watch( button_scope );
+            button_scope.kinds = {
+                grab::EventKind::MouseButtonDown,
+                grab::EventKind::MouseButtonUp
+            };
+            auto btn_sub = ( *session )->watch( button_scope );
             if( btn_sub.has_value() )
             {
                 button_subscription = std::move( *btn_sub );
@@ -587,9 +620,11 @@ main( int    argc,
         {
             std::cerr << "overlay: " << why( handle.error() ) << '\n';
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::Capability,
-                                            .subject_ = "overlay",
-                                            .value_   = overlay_state } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::Capability,
+            .subject_ = "overlay",
+            .value_   = overlay_state
+        } );
         std::cout << "  overlay   " << overlay_state << '\n';
 
         // ── 3. RESOLVE — the button must start BELOW the fold ───────────────
@@ -645,9 +680,11 @@ main( int    argc,
                   << " (from the page's fixed anchors)\n";
 
         const bool below = live->rect_.y_ >= content_bottom;
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yBounds,
-                                            .subject_ = start_subject,
-                                            .value_ = below ? "below" : "on screen" } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::A11yBounds,
+            .subject_ = start_subject,
+            .value_   = below ? "below" : "on screen"
+        } );
         std::cout << "  button    a11y (" << static_cast<int>( live->rect_.x_ ) << ","
                   << static_cast<int>( live->rect_.y_ ) << " "
                   << static_cast<int>( live->rect_.w_ ) << "x"
@@ -667,9 +704,12 @@ main( int    argc,
 
         // Where do overlay shapes ACTUALLY land? Measured over the page,
         // just under the content top — the button itself is below the fold.
-        const auto omap = ladder::view::align::measure(
-            overlay, *screen, space,
-            window_rect.x_ + ( window_rect.w_ * 0.55 ), content_top + 60.0 );
+        const auto omap =
+            ladder::view::align::measure( overlay,
+                                          *screen,
+                                          space,
+                                          window_rect.x_ + ( window_rect.w_ * 0.55 ),
+                                          content_top + 60.0 );
 
         // ── 4. SCROLL — measured, never assumed ─────────────────────────────
         // The wheel goes to the window under the pointer, so park over the
@@ -677,41 +717,48 @@ main( int    argc,
         // round turns a few notches, waits for the browser to settle, and
         // re-reads the LIVE rect; pixels-per-notch is a browser setting
         // nothing here relies on.
-        const auto park_x = static_cast<std::int16_t>(
-            window_rect.x_ + ( window_rect.w_ * park_fraction_x )
-        );
-        const auto park_y = static_cast<std::int16_t>(
-            window_rect.y_ + ( window_rect.h_ * park_fraction_y )
-        );
+        const auto park_x =
+            static_cast<std::int16_t>( window_rect.x_ +
+                                       ( window_rect.w_ * park_fraction_x ) );
+        const auto park_y =
+            static_cast<std::int16_t>( window_rect.y_ +
+                                       ( window_rect.h_ * park_fraction_y ) );
         ( void )( *input ).move( park_x, park_y );
         std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
 
         int rounds = 0;
-        while( rounds < max_scroll_rounds &&
-               !fully_inside( live->rect_, window_rect, content_top,
-                              content_bottom, screen_w, screen_h ) )
+        while( rounds <
+               max_scroll_rounds &&
+               !fully_inside( live->rect_,
+                              window_rect,
+                              content_top,
+                              content_bottom,
+                              screen_w,
+                              screen_h ) )
         {
             ( void )( *input ).scroll( 0, notches_per_round );
             ++rounds;
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds{ scroll_settle_ms }
-            );
+            std::this_thread::sleep_for( std::chrono::milliseconds{ scroll_settle_ms } );
             if( auto again = resolve_named( **session, { idle_label } );
                 again.has_value() )
             {
                 live = again;
             }
         }
-        const bool visible = fully_inside( live->rect_, window_rect, content_top,
-                                           content_bottom, screen_w, screen_h );
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yBounds,
-                                            .subject_ = view_subject,
-                                            .value_   = visible ? "visible"
-                                                                : "still hidden" } );
+        const bool visible = fully_inside( live->rect_,
+                                           window_rect,
+                                           content_top,
+                                           content_bottom,
+                                           screen_w,
+                                           screen_h );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::A11yBounds,
+            .subject_ = view_subject,
+            .value_   = visible ? "visible" : "still hidden"
+        } );
         std::cout << "  scroll    " << rounds << " round(s) of " << notches_per_round
-                  << " notch(es); button now at ("
-                  << static_cast<int>( live->rect_.x_ ) << ","
-                  << static_cast<int>( live->rect_.y_ ) << ") — "
+                  << " notch(es); button now at (" << static_cast<int>( live->rect_.x_ )
+                  << "," << static_cast<int>( live->rect_.y_ ) << ") — "
                   << ( visible ? "fully on screen" : "STILL HIDDEN" ) << '\n';
         if( !visible )
         {
@@ -729,13 +776,16 @@ main( int    argc,
                 .geometry =
                     grab::overlay::Rect{
                                         .bounds =
-                            grab::SpaceRect{ .x     = omap.x( live->rect_.x_ ),
-                                             .y     = omap.y( live->rect_.y_ ),
-                                             .w     = live->rect_.w_ / omap.sx_,
-                                             .h     = live->rect_.h_ / omap.sy_,
-                                             .space = space } },
-                .stroke   = grab::overlay::StrokeStyle{ .color    = colour,
-                                                        .width_px = stroke_px },
+                            grab::SpaceRect{
+                                .x     = omap.x( live->rect_.x_ ),
+                                .y     = omap.y( live->rect_.y_ ),
+                                .w     = live->rect_.w_ / omap.sx_,
+                                .h     = live->rect_.h_ / omap.sy_,
+                                .space = space
+                            }
+                    },
+                .stroke =
+                    grab::overlay::StrokeStyle{ .color = colour, .width_px = stroke_px },
                 .fill     = std::nullopt,
                 .lifetime = grab::overlay::Persistent{},
                 .band     = grab::overlay::Band::Annotation,
@@ -765,20 +815,29 @@ main( int    argc,
             std::vector<grab::overlay::PathCommand> commands;
             commands.reserve( pending.size() );
             commands.emplace_back( grab::overlay::MoveTo{
-                .point = grab::SpacePoint{ .x     = omap.x( pending.front().x_ ),
-                                           .y     = omap.y( pending.front().y_ ),
-                                           .space = space } } );
+                .point = grab::SpacePoint{
+                                          .x     = omap.x( pending.front().x_ ),
+                                          .y     = omap.y( pending.front().y_ ),
+                                          .space = space
+                }
+            } );
             for( std::size_t step = 1U; step < pending.size(); ++step )
             {
                 commands.emplace_back( grab::overlay::LineTo{
-                    .point = grab::SpacePoint{ .x     = omap.x( pending[step].x_ ),
-                                               .y     = omap.y( pending[step].y_ ),
-                                               .space = space } } );
+                    .point = grab::SpacePoint{
+                                              .x     = omap.x( pending[step].x_ ),
+                                              .y     = omap.y( pending[step].y_ ),
+                                              .space = space
+                    }
+                } );
             }
             auto added = overlay->add( grab::overlay::Shape{
                 .geometry = grab::overlay::Path{ .commands = std::move( commands ) },
-                .stroke   = grab::overlay::StrokeStyle{ .color    = amber,
-                                                        .width_px = trail_stroke_px },
+                .stroke =
+                    grab::overlay::StrokeStyle{
+                                                .color    = amber,
+                                                .width_px = trail_stroke_px
+                    },
                 .fill     = std::nullopt,
                 .lifetime = grab::overlay::Persistent{},
                 .band     = grab::overlay::Band::Trail,
@@ -794,16 +853,16 @@ main( int    argc,
         };
 
         const auto   start = ( *input ).position();
-        motion::Vec2 cursor{ start.has_value() ? static_cast<double>( start->x )
-                                               : static_cast<double>( park_x ),
-                             start.has_value() ? static_cast<double>( start->y )
-                                               : static_cast<double>( park_y ) };
-        const motion::Rect aim{ live->rect_.x_,
-                                live->rect_.y_,
-                                live->rect_.w_,
-                                live->rect_.h_ };
-        const auto movement = motion::plan_move( rng, cursor, aim,
-                                                 motion::MotionConfig{} );
+        motion::Vec2 cursor{
+            start.has_value() ? static_cast<double>( start->x )
+                              : static_cast<double>( park_x ),
+            start.has_value() ? static_cast<double>( start->y )
+                              : static_cast<double>( park_y )
+        };
+        const motion::Rect
+                   aim{ live->rect_.x_, live->rect_.y_, live->rect_.w_, live->rect_.h_ };
+        const auto movement =
+            motion::plan_move( rng, cursor, aim, motion::MotionConfig{} );
         {
             const double lead =
                 movement.samples_.empty() ? 0.0 : movement.samples_.front().t_s_;
@@ -825,10 +884,10 @@ main( int    argc,
                 {
                     continue;
                 }
-                pending.push_back(
-                    motion::Vec2{ .x_ = static_cast<double>( sample.x_ ),
-                                  .y_ = static_cast<double>( sample.y_ ) }
-                );
+                pending.push_back( motion::Vec2{
+                    .x_ = static_cast<double>( sample.x_ ),
+                    .y_ = static_cast<double>( sample.y_ )
+                } );
                 const bool final_sample = step + 1U == movement.samples_.size();
                 if( final_sample ||
                     ( deadline_of( movement.samples_[step + 1U] ) -
@@ -844,15 +903,16 @@ main( int    argc,
             ( void )overlay->flush();
         }
 
-        const auto at_press     = ( *input ).position();
-        const bool press_inside = at_press.has_value() &&
-                                  live->rect_.contains(
-                                      static_cast<double>( at_press->x ),
-                                      static_cast<double>( at_press->y ) );
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::CursorPosition,
-                                            .subject_ = subject,
-                                            .value_ = press_inside ? "inside"
-                                                                   : "outside" } );
+        const auto at_press = ( *input ).position();
+        const bool press_inside =
+            at_press.has_value() &&
+            live->rect_.contains( static_cast<double>( at_press->x ),
+                                  static_cast<double>( at_press->y ) );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::CursorPosition,
+            .subject_ = subject,
+            .value_   = press_inside ? "inside" : "outside"
+        } );
         if( at_press.has_value() )
         {
             std::cout << "  press     (" << at_press->x << "," << at_press->y << ") "
@@ -889,7 +949,8 @@ main( int    argc,
                 {
                     continue;
                 }
-                if( mb->button == wheel_down &&
+                if( mb->button ==
+                    wheel_down &&
                     btn_event->kind == grab::EventKind::MouseButtonDown )
                 {
                     ++wheel_downs;
@@ -898,12 +959,14 @@ main( int    argc,
                 {
                     continue;
                 }
-                if( btn_event->kind == grab::EventKind::MouseButtonDown &&
+                if( btn_event->kind ==
+                    grab::EventKind::MouseButtonDown &&
                     mb->position.has_value() )
                 {
                     down_pos = mb->position;
                 }
-                else if( btn_event->kind == grab::EventKind::MouseButtonUp &&
+                else if( btn_event->kind ==
+                         grab::EventKind::MouseButtonUp &&
                          mb->position.has_value() )
                 {
                     up_pos = mb->position;
@@ -913,22 +976,27 @@ main( int    argc,
             {
                 wheel_seen = "scrolled";
             }
-            if( down_pos.has_value() && up_pos.has_value() &&
+            if( down_pos.has_value() &&
+                up_pos.has_value() &&
                 live->rect_.contains( down_pos->x, down_pos->y ) &&
                 live->rect_.contains( up_pos->x, up_pos->y ) )
             {
                 click_seen = "clicked";
             }
             std::cout << "  events    " << wheel_downs << " wheel notch(es), click "
-                      << click_seen << "  hold "
-                      << static_cast<int>( hold_s * 1000.0 ) << " ms\n";
+                      << click_seen << "  hold " << static_cast<int>( hold_s * 1000.0 )
+                      << " ms\n";
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::ButtonClick,
-                                            .subject_ = wheel_subject,
-                                            .value_   = wheel_seen } );
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::ButtonClick,
-                                            .subject_ = subject,
-                                            .value_   = click_seen } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::ButtonClick,
+            .subject_ = wheel_subject,
+            .value_   = wheel_seen
+        } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::ButtonClick,
+            .subject_ = subject,
+            .value_   = click_seen
+        } );
 
         std::this_thread::sleep_for( std::chrono::milliseconds{ react_ms } );
 
@@ -936,8 +1004,7 @@ main( int    argc,
         std::string a11y_after = "(unresolved)";
         for( int attempt = 0; attempt < poll_tries; ++attempt )
         {
-            if( auto again = resolve_named( **session,
-                                            { clicked_label, idle_label } );
+            if( auto again = resolve_named( **session, { clicked_label, idle_label } );
                 again.has_value() )
             {
                 a11y_after = again->name_;
@@ -948,9 +1015,11 @@ main( int    argc,
             }
             std::this_thread::sleep_for( std::chrono::milliseconds{ poll_ms } );
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yName,
-                                            .subject_ = subject,
-                                            .value_   = a11y_after } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::A11yName,
+            .subject_ = subject,
+            .value_   = a11y_after
+        } );
         std::cout << "  a11y      name=\"" << a11y_after << "\"\n";
 
         std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
@@ -965,14 +1034,16 @@ main( int    argc,
                 const double moved = pixel::distance( *was, *now );
                 flipped            = moved >= colour_match ? "changed" : "unchanged";
                 std::cout << "  pixel     mean colour moved "
-                          << static_cast<int>( moved ) << " (>= "
-                          << static_cast<int>( colour_match )
+                          << static_cast<int>( moved )
+                          << " (>= " << static_cast<int>( colour_match )
                           << " counts as changed)\n";
             }
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::PixelColour,
-                                            .subject_ = subject,
-                                            .value_   = flipped } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::PixelColour,
+            .subject_ = subject,
+            .value_   = flipped
+        } );
         if( after.has_value() )
         {
             pixel::write_ppm( *after, options.out / "03-after.ppm" );

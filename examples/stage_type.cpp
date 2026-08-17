@@ -30,8 +30,8 @@
 #include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
-#include "support/overlay_align.hpp"
 #include "support/motion/trajectory.hpp"
+#include "support/overlay_align.hpp"
 #include "support/pixel.hpp"
 #include "support/stage/assert.hpp"
 #include "support/stage/scene.hpp"
@@ -73,18 +73,18 @@ namespace
 
     // ── The authored page ───────────────────────────────────────────────────
 
-    constexpr int         viewport_w = 1'000;
-    constexpr int         viewport_h = 700;
+    constexpr int         viewport_w     = 1'000;
+    constexpr int         viewport_h     = 700;
 
-    constexpr int         field_x = 150;
-    constexpr int         field_y = 120;
-    constexpr int         field_w = 700;
-    constexpr int         field_h = 240;
+    constexpr int         field_x        = 150;
+    constexpr int         field_y        = 120;
+    constexpr int         field_w        = 700;
+    constexpr int         field_h        = 240;
 
-    constexpr int         send_x = 150;
-    constexpr int         send_y = 410;
-    constexpr int         send_w = 200;
-    constexpr int         send_h = 80;
+    constexpr int         send_x         = 150;
+    constexpr int         send_y         = 410;
+    constexpr int         send_w         = 200;
+    constexpr int         send_h         = 80;
 
     constexpr const char* field_label    = "MESSAGE";
     constexpr const char* send_idle      = "SEND";
@@ -102,23 +102,23 @@ namespace
         "breathes at full stops, and then, letter by letter, it finishes "
         "the note.";
 
-    constexpr std::uint32_t primary_button = 1U;    // X11 primary pointer button
+    constexpr std::uint32_t        primary_button  = 1U;    // X11 primary pointer button
 
-    constexpr const char*   field_subject   = "msg";
-    constexpr const char*   send_subject    = "send";
-    constexpr const char*   receipt_subject = "receipt";
-    constexpr const char*   keys_subject    = "keys";
+    constexpr const char*          field_subject   = "msg";
+    constexpr const char*          send_subject    = "send";
+    constexpr const char*          receipt_subject = "receipt";
+    constexpr const char*          keys_subject    = "keys";
 
     constexpr grab::overlay::Color cyan{ .r = 0U, .g = 217U, .b = 255U, .a = 242U };
     constexpr grab::overlay::Color amber{ .r = 255U, .g = 184U, .b = 26U, .a = 242U };
 
     constexpr double               stroke_px       = 3.0;
     constexpr double               trail_stroke_px = 2.0;
-    constexpr auto                 trail_slack = std::chrono::milliseconds{ 8 };
+    constexpr auto                 trail_slack     = std::chrono::milliseconds{ 8 };
 
     // Park bottom-left of the window (fractions of its live frame).
-    constexpr double        park_fx = 0.08;
-    constexpr double        park_fy = 0.88;
+    constexpr double               park_fx = 0.08;
+    constexpr double               park_fy = 0.88;
 
     // ── The typing rhythm ───────────────────────────────────────────────────
     //
@@ -126,19 +126,19 @@ namespace
     // longer beat at a comma, longer still at a full stop, and now and then
     // a mid-sentence think. All sampled from the run's seeded Rng, so two
     // runs type with the same rhythm.
-    constexpr double        key_gap_ln_mean  = 4.01;    // ln(55 ms)
-    constexpr double        key_gap_ln_sigma = 0.35;
-    constexpr double        word_gap_ms      = 90.0;
-    constexpr double        comma_gap_ms     = 260.0;
-    constexpr double        stop_gap_ms      = 450.0;
-    constexpr double        think_gap_ms     = 650.0;
-    constexpr double        think_chance     = 0.03;
+    constexpr double               key_gap_ln_mean  = 4.01;    // ln(55 ms)
+    constexpr double               key_gap_ln_sigma = 0.35;
+    constexpr double               word_gap_ms      = 90.0;
+    constexpr double               comma_gap_ms     = 260.0;
+    constexpr double               stop_gap_ms      = 450.0;
+    constexpr double               think_gap_ms     = 650.0;
+    constexpr double               think_chance     = 0.03;
 
-    constexpr std::uint64_t seed        = 0X5'D1'DE'00'06ULL;
-    constexpr int           settle_ms   = 700;
-    constexpr int           announce_ms = 700;
-    constexpr int           react_ms    = 800;
-    constexpr int           poll_ms     = 200;
+    constexpr std::uint64_t        seed             = 0X5'D1'DE'00'06ULL;
+    constexpr int                  settle_ms        = 700;
+    constexpr int                  announce_ms      = 700;
+    constexpr int                  react_ms         = 800;
+    constexpr int                  poll_ms          = 200;
     constexpr int    poll_tries   = 150;    // 30 s: Firefox builds its a11y tree lazily
     constexpr double colour_match = 40.0;
 
@@ -156,43 +156,77 @@ namespace
                             "<style>\n"
                             "  html,body{margin:0;padding:0;background:#f4f4f4;}\n"
                             "  #msg{position:absolute;box-sizing:border-box;" } +
-               "left:" + px( field_x ) + ";top:" + px( field_y ) +
-               ";width:" + px( field_w ) + ";height:" + px( field_h ) +
+               "left:" +
+               px( field_x ) +
+               ";top:" +
+               px( field_y ) +
+               ";width:" +
+               px( field_w ) +
+               ";height:" +
+               px( field_h ) +
                ";font:400 22px sans-serif;padding:12px;resize:none;"
                "border:3px solid #8fa3c0;background:#ffffff;}\n"
                "  #send{position:absolute;box-sizing:border-box;"
-               "left:" + px( send_x ) + ";top:" + px( send_y ) +
-               ";width:" + px( send_w ) + ";height:" + px( send_h ) +
-               ";background:" + send_idle_fill +
+               "left:" +
+               px( send_x ) +
+               ";top:" +
+               px( send_y ) +
+               ";width:" +
+               px( send_w ) +
+               ";height:" +
+               px( send_h ) +
+               ";background:" +
+               send_idle_fill +
                ";color:#fff;border:0;font:600 32px sans-serif;}\n"
-               "  #receipt{position:absolute;left:" + px( send_x + send_w + 40 ) +
-               ";top:" + px( send_y ) + ";width:" +
+               "  #receipt{position:absolute;left:" +
+               px( send_x + send_w + 40 ) +
+               ";top:" +
+               px( send_y ) +
+               ";width:" +
                px( viewport_w - ( send_x + send_w + 80 ) ) +
                ";font:400 16px sans-serif;color:#33415c;}\n"
                "</style></head><body>\n" +
                ladder::view::fid::patches_html() +
                ""
-               "<textarea id=\"msg\" aria-label=\"" + field_label +
+               "<textarea id=\"msg\" aria-label=\"" +
+               field_label +
                "\"></textarea>\n"
-               "<button id=\"send\" aria-label=\"" + send_idle + "\">" + send_idle +
+               "<button id=\"send\" aria-label=\"" +
+               send_idle +
+               "\">" +
+               send_idle +
                "</button>\n"
-               "<button id=\"receipt\" aria-label=\"" + receipt_empty +
-               "\" style=\"position:absolute;left:" + px( send_x + send_w + 40 ) +
-               ";top:" + px( send_y ) + ";width:" +
-               px( viewport_w - ( send_x + send_w + 80 ) ) + ";height:" +
+               "<button id=\"receipt\" aria-label=\"" +
+               receipt_empty +
+               "\" style=\"position:absolute;left:" +
+               px( send_x + send_w + 40 ) +
+               ";top:" +
+               px( send_y ) +
+               ";width:" +
+               px( viewport_w - ( send_x + send_w + 80 ) ) +
+               ";height:" +
                px( send_h ) +
                ";background:#e8e8e8;border:2px dashed #8a8a8a;color:#555;"
-               "font:400 14px sans-serif;\">" + receipt_empty +
+               "font:400 14px sans-serif;\">" +
+               receipt_empty +
                "</button>\n"
                "<script>\n"
                "  var m=document.getElementById('msg');\n"
                "  var s=document.getElementById('send');\n"
                "  var r=document.getElementById('receipt');\n"
                "  s.addEventListener('click',function(){\n"
-               "    s.style.background='" + send_done_fill + "';\n"
-               "    s.setAttribute('aria-label','" + send_done + "');\n"
-               "    s.textContent='" + send_done + "';\n"
-               "    var got='" + receipt_prefix + "'+m.value;\n"
+               "    s.style.background='" +
+               send_done_fill +
+               "';\n"
+               "    s.setAttribute('aria-label','" +
+               send_done +
+               "');\n"
+               "    s.textContent='" +
+               send_done +
+               "';\n"
+               "    var got='" +
+               receipt_prefix +
+               "'+m.value;\n"
                "    r.setAttribute('aria-label',got);\n"
                "    r.textContent=got;\n"
                "  });\n"
@@ -205,13 +239,17 @@ namespace
     {
         stage::Scene scene;
         scene.id_ = "type";
-        scene.pages_.push_back( stage::ScenePage{ .name_   = "type",
-                                                  .html_   = page_html(),
-                                                  .marker_ = title_marker } );
-        scene.viewport_ = stage::ViewportSpec{ .viewport_w_ = viewport_w,
-                                               .viewport_h_ = viewport_h,
-                                               .document_h_ = viewport_h };
-        scene.frames_   = { "01-empty", "02-typed", "03-after" };
+        scene.pages_.push_back( stage::ScenePage{
+            .name_   = "type",
+            .html_   = page_html(),
+            .marker_ = title_marker
+        } );
+        scene.viewport_ = stage::ViewportSpec{
+            .viewport_w_ = viewport_w,
+            .viewport_h_ = viewport_h,
+            .document_h_ = viewport_h
+        };
+        scene.frames_ = { "01-empty", "02-typed", "03-after" };
 
         // DECLARED BEFORE THE ACT.
         const auto expect = [&]( std::string    name,
@@ -219,14 +257,16 @@ namespace
                                  std::string    subj,
                                  std::string    value )
         {
-            scene.expect_.push_back( stage::Expectation{ .name_    = std::move( name ),
-                                                         .observe_ = observe,
-                                                         .subject_ = std::move( subj ),
-                                                         .value_   = std::move( value ),
-                                                         .tolerance_ = 0.0,
-                                                         .low_       = 0.0,
-                                                         .high_      = 0.0,
-                                                         .ranged_    = false } );
+            scene.expect_.push_back( stage::Expectation{
+                .name_      = std::move( name ),
+                .observe_   = observe,
+                .subject_   = std::move( subj ),
+                .value_     = std::move( value ),
+                .tolerance_ = 0.0,
+                .low_       = 0.0,
+                .high_      = 0.0,
+                .ranged_    = false
+            } );
         };
         expect( "overlay_is_live", stage::Observe::Capability, "overlay", "live" );
         expect( "field_is_labelled",
@@ -253,16 +293,12 @@ namespace
                 stage::Observe::ButtonClick,
                 send_subject,
                 "clicked" );
-        expect( "send_reports_sent",
-                stage::Observe::A11yName,
-                send_subject,
-                send_done );
+        expect( "send_reports_sent", stage::Observe::A11yName, send_subject, send_done );
         expect( "receipt_matches",
                 stage::Observe::A11yName,
                 receipt_subject,
                 std::string{ receipt_prefix } + paragraph );
-        expect( "pixels_flipped", stage::Observe::PixelColour, send_subject,
-                "changed" );
+        expect( "pixels_flipped", stage::Observe::PixelColour, send_subject, "changed" );
         return scene;
     }
 
@@ -298,10 +334,9 @@ namespace
         {
             return std::nullopt;
         }
-        auto matches =
-            session.resolve_all( grab::sel::role( role_id ).and_(
-                grab::sel::descendant_of( grab::sel::role( grab::role::document ) )
-            ) );
+        auto matches = session.resolve_all( grab::sel::role( role_id ).and_(
+            grab::sel::descendant_of( grab::sel::role( grab::role::document ) )
+        ) );
         if( !matches.has_value() )
         {
             return std::nullopt;
@@ -325,11 +360,12 @@ namespace
                     return Live{
                         .name_  = info.name,
                         .text_  = info.text,
-                        .rect_  = ladder::view::fid::current().rect(
-                            view::ViewRect{ .x_ = info.bounds.x,
-                                            .y_ = info.bounds.y,
-                                            .w_ = info.bounds.w,
-                                            .h_ = info.bounds.h } ),
+                        .rect_  = ladder::view::fid::current().rect( view::ViewRect{
+                            .x_ = info.bounds.x,
+                            .y_ = info.bounds.y,
+                            .w_ = info.bounds.w,
+                            .h_ = info.bounds.h
+                        } ),
                         .space_ = info.bounds.space,
                     };
                 }
@@ -493,13 +529,14 @@ main( int    argc,
 
     // ── 2. HOST ─────────────────────────────────────────────────────────────
     std::cout << "\nHOST\n";
-    ladder::host::Host host{ options.display,
-                             options.out,
-                             std::to_string( viewport_w ) + "x" +
-                                 std::to_string( viewport_h ),
-                             options.host_display,
-                             options.attach,
-                             title_marker };
+    ladder::host::Host host{
+        options.display,
+        options.out,
+        std::to_string( viewport_w ) + "x" + std::to_string( viewport_h ),
+        options.host_display,
+        options.attach,
+        title_marker
+    };
     if( !host.start( "file://" + std::filesystem::absolute( page ).string() ) )
     {
         std::cerr << "host did not come up\n";
@@ -542,10 +579,12 @@ main( int    argc,
         std::optional<grab::Subscription> event_subscription;
         {
             grab::SubscriptionScope scope;
-            scope.kinds = { grab::EventKind::KeyDown,
-                            grab::EventKind::MouseButtonDown,
-                            grab::EventKind::MouseButtonUp };
-            auto sub    = ( *session )->watch( scope );
+            scope.kinds = {
+                grab::EventKind::KeyDown,
+                grab::EventKind::MouseButtonDown,
+                grab::EventKind::MouseButtonUp
+            };
+            auto sub = ( *session )->watch( scope );
             if( sub.has_value() )
             {
                 event_subscription = std::move( *sub );
@@ -573,9 +612,11 @@ main( int    argc,
         {
             std::cerr << "overlay: " << why( handle.error() ) << '\n';
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::Capability,
-                                            .subject_ = "overlay",
-                                            .value_   = overlay_state } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::Capability,
+            .subject_ = "overlay",
+            .value_   = overlay_state
+        } );
         std::cout << "  overlay   " << overlay_state << '\n';
 
         // ── 3. RESOLVE ──────────────────────────────────────────────────────
@@ -583,10 +624,8 @@ main( int    argc,
         std::optional<Live> send;
         for( int attempt = 0; attempt < poll_tries; ++attempt )
         {
-            field = resolve_role_named( **session, grab::role::entry,
-                                        { field_label } );
-            send  = resolve_role_named( **session, grab::role::button,
-                                        { send_idle } );
+            field = resolve_role_named( **session, grab::role::entry, { field_label } );
+            send  = resolve_role_named( **session, grab::role::button, { send_idle } );
             if( field.has_value() && send.has_value() )
             {
                 break;
@@ -600,9 +639,11 @@ main( int    argc,
             host.stop();
             return 1;
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yName,
-                                            .subject_ = field_subject,
-                                            .value_   = field->name_ } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::A11yName,
+            .subject_ = field_subject,
+            .value_   = field->name_
+        } );
         std::cout << "  field     a11y (" << static_cast<int>( field->rect_.x_ ) << ","
                   << static_cast<int>( field->rect_.y_ ) << " "
                   << static_cast<int>( field->rect_.w_ ) << "x"
@@ -620,12 +661,15 @@ main( int    argc,
         }
 
         // Where do overlay shapes ACTUALLY land? Measured, at the field.
-        const auto omap = ladder::view::align::measure(
-            overlay, *screen, space, field->rect_.x_, field->rect_.y_ );
+        const auto                omap = ladder::view::align::measure( overlay,
+                                                                       *screen,
+                                                                       space,
+                                                                       field->rect_.x_,
+                                                                       field->rect_.y_ );
 
         // ── 4. THE ACT ──────────────────────────────────────────────────────
-        motion::Rng                         rng{ seed };
-        std::vector<motion::Vec2>           pending;
+        motion::Rng               rng{ seed };
+        std::vector<motion::Vec2> pending;
         std::vector<grab::overlay::ShapeId> trail_ids;
         const auto                          stroke = [&]()
         {
@@ -636,20 +680,29 @@ main( int    argc,
             std::vector<grab::overlay::PathCommand> commands;
             commands.reserve( pending.size() );
             commands.emplace_back( grab::overlay::MoveTo{
-                .point = grab::SpacePoint{ .x     = omap.x( pending.front().x_ ),
-                                           .y     = omap.y( pending.front().y_ ),
-                                           .space = space } } );
+                .point = grab::SpacePoint{
+                                          .x     = omap.x( pending.front().x_ ),
+                                          .y     = omap.y( pending.front().y_ ),
+                                          .space = space
+                }
+            } );
             for( std::size_t step = 1U; step < pending.size(); ++step )
             {
                 commands.emplace_back( grab::overlay::LineTo{
-                    .point = grab::SpacePoint{ .x     = omap.x( pending[step].x_ ),
-                                               .y     = omap.y( pending[step].y_ ),
-                                               .space = space } } );
+                    .point = grab::SpacePoint{
+                                              .x     = omap.x( pending[step].x_ ),
+                                              .y     = omap.y( pending[step].y_ ),
+                                              .space = space
+                    }
+                } );
             }
             auto added = overlay->add( grab::overlay::Shape{
                 .geometry = grab::overlay::Path{ .commands = std::move( commands ) },
-                .stroke   = grab::overlay::StrokeStyle{ .color    = amber,
-                                                        .width_px = trail_stroke_px },
+                .stroke =
+                    grab::overlay::StrokeStyle{
+                                                .color    = amber,
+                                                .width_px = trail_stroke_px
+                    },
                 .fill     = std::nullopt,
                 .lifetime = grab::overlay::Persistent{},
                 .band     = grab::overlay::Band::Trail,
@@ -684,36 +737,49 @@ main( int    argc,
         {
             if( overlay != nullptr )
             {
-                ( void )overlay->add( grab::overlay::Shape{
-                    .geometry = grab::overlay::Rect{
-                        .bounds = grab::SpaceRect{ .x = omap.x( target.rect_.x_ ),
-                                                   .y     = omap.y( target.rect_.y_ ),
-                                                   .w     = target.rect_.w_ / omap.sx_,
-                                                   .h     = target.rect_.h_ / omap.sy_,
-                                                   .space = space } },
-                    .stroke   = grab::overlay::StrokeStyle{ .color    = cyan,
-                                                            .width_px = stroke_px },
-                    .fill     = std::nullopt,
-                    .lifetime =
-                        grab::overlay::Ttl{
-                            .duration = std::chrono::milliseconds{ 1'600 } },
-                    .band = grab::overlay::Band::Annotation,
-                    .z    = 0,
-                } );
+                ( void )overlay->add(
+                    grab::overlay::Shape{
+                        .geometry =
+                            grab::overlay::Rect{
+                                                .bounds =
+                                    grab::SpaceRect{
+                                        .x     = omap.x( target.rect_.x_ ),
+                                        .y     = omap.y( target.rect_.y_ ),
+                                        .w     = target.rect_.w_ / omap.sx_,
+                                        .h     = target.rect_.h_ / omap.sy_,
+                                        .space = space
+                                    }
+                            },
+                        .stroke =
+                            grab::overlay::StrokeStyle{
+                                                .color    = cyan,
+                                                .width_px = stroke_px
+                            },
+                        .fill = std::nullopt,
+                        .lifetime =
+                            grab::overlay::Ttl{
+                                                .duration = std::chrono::milliseconds{ 1'600 }
+                            },
+                        .band = grab::overlay::Band::Annotation,
+                        .z    = 0,
+                }
+                );
                 ( void )overlay->flush();
             }
             std::this_thread::sleep_for( std::chrono::milliseconds{ announce_ms } );
 
             const auto   at = ( *input ).position();
-            motion::Vec2 cursor{ at.has_value() ? static_cast<double>( at->x )
-                                                : target.rect_.x_,
-                                 at.has_value() ? static_cast<double>( at->y )
-                                                : target.rect_.y_ };
-            const motion::Rect aim{ target.rect_.x_,
-                                    target.rect_.y_,
-                                    target.rect_.w_,
-                                    target.rect_.h_ };
-            const auto         movement =
+            motion::Vec2 cursor{
+                at.has_value() ? static_cast<double>( at->x ) : target.rect_.x_,
+                at.has_value() ? static_cast<double>( at->y ) : target.rect_.y_
+            };
+            const motion::Rect aim{
+                target.rect_.x_,
+                target.rect_.y_,
+                target.rect_.w_,
+                target.rect_.h_
+            };
+            const auto movement =
                 motion::plan_move( rng, cursor, aim, motion::MotionConfig{} );
             const double lead =
                 movement.samples_.empty() ? 0.0 : movement.samples_.front().t_s_;
@@ -735,10 +801,10 @@ main( int    argc,
                 {
                     continue;
                 }
-                pending.push_back(
-                    motion::Vec2{ .x_ = static_cast<double>( sample.x_ ),
-                                  .y_ = static_cast<double>( sample.y_ ) }
-                );
+                pending.push_back( motion::Vec2{
+                    .x_ = static_cast<double>( sample.x_ ),
+                    .y_ = static_cast<double>( sample.y_ )
+                } );
                 const bool final_sample = step + 1U == movement.samples_.size();
                 if( final_sample ||
                     ( deadline_of( movement.samples_[step + 1U] ) -
@@ -753,10 +819,10 @@ main( int    argc,
             }
 
             const auto at_press = ( *input ).position();
-            const bool inside   = at_press.has_value() &&
-                                target.rect_.contains(
-                                    static_cast<double>( at_press->x ),
-                                    static_cast<double>( at_press->y ) );
+            const bool inside =
+                at_press.has_value() &&
+                target.rect_.contains( static_cast<double>( at_press->x ),
+                                       static_cast<double>( at_press->y ) );
             const double hold_s = std::exp( rng.normal( std::log( 0.080 ), 0.35 ) );
             ( void )( *input ).press();
             std::this_thread::sleep_for( std::chrono::duration<double>( hold_s ) );
@@ -784,11 +850,11 @@ main( int    argc,
         std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
 
         const bool field_click_inside = approach_and_click( *field );
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::CursorPosition,
-                                            .subject_ = field_subject,
-                                            .value_ = field_click_inside
-                                                          ? "inside"
-                                                          : "outside" } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::CursorPosition,
+            .subject_ = field_subject,
+            .value_   = field_click_inside ? "inside" : "outside"
+        } );
         std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
 
         // ── 5. TYPE, letter by letter ───────────────────────────────────────
@@ -801,8 +867,7 @@ main( int    argc,
             {
                 ++typed;
             }
-            double gap_ms =
-                std::exp( rng.normal( key_gap_ln_mean, key_gap_ln_sigma ) );
+            double gap_ms = std::exp( rng.normal( key_gap_ln_mean, key_gap_ln_sigma ) );
             const char just = text[index];
             if( just == ' ' )
             {
@@ -832,8 +897,8 @@ main( int    argc,
         std::string value_seen = "(unresolved)";
         for( int attempt = 0; attempt < poll_tries; ++attempt )
         {
-            if( auto again = resolve_role_named( **session, grab::role::entry,
-                                                 { field_label } );
+            if( auto again =
+                    resolve_role_named( **session, grab::role::entry, { field_label } );
                 again.has_value() )
             {
                 value_seen = again->text_;
@@ -844,9 +909,11 @@ main( int    argc,
             }
             std::this_thread::sleep_for( std::chrono::milliseconds{ poll_ms } );
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yValue,
-                                            .subject_ = field_subject,
-                                            .value_   = value_seen } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::A11yValue,
+            .subject_ = field_subject,
+            .value_   = value_seen
+        } );
         std::cout << "  a11y      value "
                   << ( value_seen == text ? "matches, exactly"
                                           : "MISMATCH: \"" + value_seen + "\"" )
@@ -860,16 +927,18 @@ main( int    argc,
 
         // ── 6. SEND ─────────────────────────────────────────────────────────
         const bool send_click_inside = approach_and_click( *send );
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::CursorPosition,
-                                            .subject_ = send_subject,
-                                            .value_ = send_click_inside ? "inside"
-                                                                        : "outside" } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::CursorPosition,
+            .subject_ = send_subject,
+            .value_   = send_click_inside ? "inside" : "outside"
+        } );
         std::this_thread::sleep_for( std::chrono::milliseconds{ react_ms } );
 
         std::string send_after = "(unresolved)";
         for( int attempt = 0; attempt < poll_tries; ++attempt )
         {
-            if( auto again = resolve_role_named( **session, grab::role::button,
+            if( auto again = resolve_role_named( **session,
+                                                 grab::role::button,
                                                  { send_done, send_idle } );
                 again.has_value() )
             {
@@ -881,23 +950,28 @@ main( int    argc,
             }
             std::this_thread::sleep_for( std::chrono::milliseconds{ poll_ms } );
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yName,
-                                            .subject_ = send_subject,
-                                            .value_   = send_after } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::A11yName,
+            .subject_ = send_subject,
+            .value_   = send_after
+        } );
 
         // The receipt: what the PAGE's own script says it received.
         const std::string expected_receipt = std::string{ receipt_prefix } + paragraph;
         std::string       receipt_seen     = "(unresolved)";
-        if( auto receipt = resolve_role_named(
-                **session, grab::role::button,
-                { std::string_view{ expected_receipt }, receipt_empty } );
+        if( auto receipt = resolve_role_named( **session,
+                                               grab::role::button,
+                                               { std::string_view{ expected_receipt },
+                                                 receipt_empty } );
             receipt.has_value() )
         {
             receipt_seen = receipt->name_;
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yName,
-                                            .subject_ = receipt_subject,
-                                            .value_   = receipt_seen } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::A11yName,
+            .subject_ = receipt_subject,
+            .value_   = receipt_seen
+        } );
         std::cout << "  send      \"" << send_after << "\", receipt "
                   << ( receipt_seen == expected_receipt ? "carries the exact text"
                                                         : "MISMATCH" )
@@ -915,14 +989,16 @@ main( int    argc,
                 const double moved = pixel::distance( *was, *now );
                 flipped            = moved >= colour_match ? "changed" : "unchanged";
                 std::cout << "  pixel     send mean colour moved "
-                          << static_cast<int>( moved ) << " (>= "
-                          << static_cast<int>( colour_match )
+                          << static_cast<int>( moved )
+                          << " (>= " << static_cast<int>( colour_match )
                           << " counts as changed)\n";
             }
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::PixelColour,
-                                            .subject_ = send_subject,
-                                            .value_   = flipped } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::PixelColour,
+            .subject_ = send_subject,
+            .value_   = flipped
+        } );
         if( after.has_value() )
         {
             pixel::write_ppm( *after, options.out / "03-after.ppm" );
@@ -950,12 +1026,14 @@ main( int    argc,
                 {
                     continue;
                 }
-                if( event->kind == grab::EventKind::MouseButtonDown &&
+                if( event->kind ==
+                    grab::EventKind::MouseButtonDown &&
                     mb->position.has_value() )
                 {
                     down_pos = mb->position;
                 }
-                else if( event->kind == grab::EventKind::MouseButtonUp &&
+                else if( event->kind ==
+                         grab::EventKind::MouseButtonUp &&
                          mb->position.has_value() )
                 {
                     up_pos = mb->position;
@@ -976,15 +1054,19 @@ main( int    argc,
                 send_click_seen = "clicked";
             }
             std::cout << "  events    " << key_downs << " key-down(s) for "
-                      << text.size() << " characters, send click "
-                      << send_click_seen << '\n';
+                      << text.size() << " characters, send click " << send_click_seen
+                      << '\n';
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::ButtonClick,
-                                            .subject_ = keys_subject,
-                                            .value_   = keys_seen } );
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::ButtonClick,
-                                            .subject_ = send_subject,
-                                            .value_   = send_click_seen } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::ButtonClick,
+            .subject_ = keys_subject,
+            .value_   = keys_seen
+        } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::ButtonClick,
+            .subject_ = send_subject,
+            .value_   = send_click_seen
+        } );
 
         // ── 7. SCORE ────────────────────────────────────────────────────────
         const stage::Scorecard card = stage::evaluate( scene, seen );

@@ -1089,6 +1089,24 @@ namespace grab::screen
         };
     }
 
+    void
+    X11Capturer::refresh_screen_size() noexcept
+    {
+        xcb_generic_error_t* raw_error{};
+        const auto           reply = take_xcb_owned(
+            xcb_get_geometry_reply( connection_,
+                                    xcb_get_geometry( connection_, root_ ),
+                                    &raw_error )
+        );
+        const auto error = take_xcb_owned( raw_error );
+        if( error != nullptr || reply == nullptr )
+        {
+            return;
+        }
+        screen_width_  = reply->width;
+        screen_height_ = reply->height;
+    }
+
     grab::Result<grab::Image>
     X11Capturer::capture_window( std::uint32_t window )
     {
@@ -1175,6 +1193,7 @@ namespace grab::screen
             return std::unexpected( std::move( open_result.error() ) );
         }
 
+        refresh_screen_size();
         const grab::geometry::Rectangle bounds{
             .x      = 0,
             .y      = 0,
@@ -1202,6 +1221,7 @@ namespace grab::screen
             return std::unexpected( std::move( open_result.error() ) );
         }
 
+        refresh_screen_size();
         auto region =
             validate_region( x, y, width, height, screen_width_, screen_height_ );
         if( !region.has_value() )

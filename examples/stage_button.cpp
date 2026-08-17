@@ -39,9 +39,9 @@
 #include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
+#include "support/motion/trajectory.hpp"
 #include "support/overlay_align.hpp"
 #include "support/pixel.hpp"
-#include "support/motion/trajectory.hpp"
 #include "support/stage/assert.hpp"
 #include "support/stage/probe.hpp"
 #include "support/stage/scene.hpp"
@@ -281,7 +281,6 @@ namespace
         return text;
     }
 
-
     // The button's accessible name, and its screen rect, read live.
     struct Live
     {
@@ -335,12 +334,13 @@ namespace
                 continue;
             }
             return Live{
-                .name_ = info.name,
-                .rect_ = ladder::view::fid::current().rect( view::ViewRect{
+                .name_  = info.name,
+                .rect_  = ladder::view::fid::current().rect( view::ViewRect{
                     .x_ = info.bounds.x,
                     .y_ = info.bounds.y,
                     .w_ = info.bounds.w,
-                    .h_ = info.bounds.h } ),
+                    .h_ = info.bounds.h
+                } ),
                 .space_ = info.bounds.space
             };
         }
@@ -677,8 +677,11 @@ main( int    argc,
 
         // ── 4. DRAW ─────────────────────────────────────────────────────────
         // Where do overlay shapes ACTUALLY land? Measured, at the button.
-        const auto omap = ladder::view::align::measure(
-            overlay, *screen, space, live->rect_.x_, live->rect_.y_ );
+        const auto omap = ladder::view::align::measure( overlay,
+                                                        *screen,
+                                                        space,
+                                                        live->rect_.x_,
+                                                        live->rect_.y_ );
         const auto goal = [&]( const grab::overlay::Color& colour )
         {
             if( overlay == nullptr )

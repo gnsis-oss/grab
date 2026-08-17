@@ -224,6 +224,17 @@ target_include_directories(grab_driver_atspi_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/tests)
 gtest_discover_tests(grab_driver_atspi_tests DISCOVERY_MODE PRE_TEST)
 
+add_executable(grab_driver_x11_policy_tests
+    drivers/x11/test_present_policy.cpp
+)
+target_link_libraries(grab_driver_x11_policy_tests PRIVATE
+    GTest::gtest_main
+)
+target_include_directories(grab_driver_x11_policy_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests)
+gtest_discover_tests(grab_driver_x11_policy_tests)
+
 add_executable(grab_driver_evdev_tests
     drivers/device/evdev/test_evdev_source.cpp
 )

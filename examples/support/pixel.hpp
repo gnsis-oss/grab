@@ -49,9 +49,9 @@ namespace ladder::view::pixel
         const auto x1 = static_cast<std::uint32_t>( std::max( 0.0, rect.x_ + rect.w_ ) );
         const auto y1 = static_cast<std::uint32_t>( std::max( 0.0, rect.y_ + rect.h_ ) );
 
-        double        red  = 0.0;
-        double        grn  = 0.0;
-        double        blu  = 0.0;
+        double     red     = 0.0;
+        double     grn     = 0.0;
+        double     blu     = 0.0;
         std::uint64_t seen = 0U;
         for( std::uint32_t row = y0; row < y1 && row < frame.height; ++row )
         {

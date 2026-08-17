@@ -62,18 +62,25 @@ namespace ladder::view::align
             view::ViewRect
             rect( const view::ViewRect& device ) const noexcept
             {
-                return view::ViewRect{ .x_ = x( device.x_ ),
-                                       .y_ = y( device.y_ ),
-                                       .w_ = device.w_ / sx_,
-                                       .h_ = device.h_ / sy_ };
+                return view::ViewRect{
+                    .x_ = x( device.x_ ),
+                    .y_ = y( device.y_ ),
+                    .w_ = device.w_ / sx_,
+                    .h_ = device.h_ / sy_
+                };
             }
 
             [[nodiscard]]
             bool
             identity() const noexcept
             {
-                return std::abs( sx_ - 1.0 ) < 0.01 && std::abs( sy_ - 1.0 ) < 0.01 &&
-                       std::abs( dx_ ) < 1.5 && std::abs( dy_ ) < 1.5;
+                return std::abs( sx_ - 1.0 ) <
+                       0.01 &&
+                       std::abs( sy_ - 1.0 ) <
+                       0.01 &&
+                       std::abs( dx_ ) <
+                       1.5 &&
+                       std::abs( dy_ ) < 1.5;
             }
     };
 
@@ -94,27 +101,31 @@ namespace ladder::view::align
         {
             return map;
         }
-        constexpr double        probe_size = 24.0;
+        constexpr double       probe_size = 24.0;
         // Full magenta, nearly opaque: a colour no page in this suite uses.
-        constexpr std::uint8_t  probe_r    = 255U;
-        constexpr std::uint8_t  probe_b    = 255U;
-        constexpr int           settle_ms  = 150;
-        constexpr std::uint8_t  tolerance  = 40U;
+        constexpr std::uint8_t probe_r   = 255U;
+        constexpr std::uint8_t probe_b   = 255U;
+        constexpr int          settle_ms = 150;
+        constexpr std::uint8_t tolerance = 40U;
 
-        auto added = overlay->add( grab::overlay::Shape{
-            .geometry = grab::overlay::Rect{
-                .bounds = grab::SpaceRect{ .x     = probe_x,
-                                           .y     = probe_y,
-                                           .w     = probe_size,
-                                           .h     = probe_size,
-                                           .space = space } },
-            .stroke   = std::nullopt,
+        auto                   added     = overlay->add( grab::overlay::Shape{
+            .geometry =
+                grab::overlay::Rect{
+                    .bounds =
+                        grab::SpaceRect{
+                            .x     = probe_x,
+                            .y     = probe_y,
+                            .w     = probe_size,
+                            .h     = probe_size,
+                            .space = space
+                        }
+                },
+            .stroke = std::nullopt,
             .fill =
                 grab::overlay::FillStyle{
-                    .color = grab::overlay::Color{ .r = probe_r,
-                                                   .g = 0U,
-                                                   .b = probe_b,
-                                                   .a = 250U } },
+                    .color = grab::overlay::
+                        Color{ .r = probe_r, .g = 0U, .b = probe_b, .a = 250U }
+                },
             .lifetime = grab::overlay::Persistent{},
             .band     = grab::overlay::Band::Annotation,
             .z        = 90,
@@ -137,32 +148,37 @@ namespace ladder::view::align
             return map;
         }
 
-        const std::uint32_t bpp = grab::bytes_per_pixel( frame->format );
-        const bool          bgr = frame->format == grab::PixelFormat::Bgra ||
-                         frame->format == grab::PixelFormat::Bgr;
-        double        min_x = 1E9;
-        double        min_y = 1E9;
-        double        max_x = -1.0;
-        double        max_y = -1.0;
-        std::uint64_t hits  = 0U;
+        const std::uint32_t bpp   = grab::bytes_per_pixel( frame->format );
+        const bool          bgr   = frame->format ==
+                                    grab::PixelFormat::Bgra ||
+                                    frame->format == grab::PixelFormat::Bgr;
+        double              min_x = 1E9;
+        double              min_y = 1E9;
+        double              max_x = -1.0;
+        double              max_y = -1.0;
+        std::uint64_t       hits  = 0U;
         for( std::uint32_t row = 0U; row < frame->height; ++row )
         {
             const std::size_t base = static_cast<std::size_t>( row ) * frame->stride;
             for( std::uint32_t col = 0U; col < frame->width; ++col )
             {
-                const std::size_t at = base +
-                                       ( static_cast<std::size_t>( col ) * bpp );
+                const std::size_t at = base + ( static_cast<std::size_t>( col ) * bpp );
                 if( at + 2U >= frame->pixels.size() )
                 {
                     continue;
                 }
-                const auto b0 = static_cast<std::uint8_t>( frame->pixels[at] );
-                const auto b1 = static_cast<std::uint8_t>( frame->pixels[at + 1U] );
-                const auto b2 = static_cast<std::uint8_t>( frame->pixels[at + 2U] );
+                const auto b0    = static_cast<std::uint8_t>( frame->pixels[at] );
+                const auto b1    = static_cast<std::uint8_t>( frame->pixels[at + 1U] );
+                const auto b2    = static_cast<std::uint8_t>( frame->pixels[at + 2U] );
                 const auto red   = bgr ? b2 : b0;
                 const auto green = b1;
                 const auto blue  = bgr ? b0 : b2;
-                if( red >= probe_r - tolerance && blue >= probe_b - tolerance &&
+                if( red >=
+                    probe_r -
+                    tolerance &&
+                    blue >=
+                    probe_b -
+                    tolerance &&
                     green <= tolerance )
                 {
                     min_x = std::min( min_x, static_cast<double>( col ) );
@@ -177,11 +193,24 @@ namespace ladder::view::align
         // something else magenta on screen.
         const double found_w = max_x - min_x + 1.0;
         const double found_h = max_y - min_y + 1.0;
-        const bool   sane    = hits > 0U && found_w >= probe_size * 0.5 &&
-                          found_w <= probe_size * 4.0 &&
-                          found_h >= probe_size * 0.5 &&
-                          found_h <= probe_size * 4.0 &&
-                          static_cast<double>( hits ) >= 0.5 * found_w * found_h;
+        const bool   sane    = hits >
+                               0U &&
+                               found_w >=
+                               probe_size *
+                               0.5 &&
+                               found_w <=
+                               probe_size *
+                               4.0 &&
+                               found_h >=
+                               probe_size *
+                               0.5 &&
+                               found_h <=
+                               probe_size *
+                               4.0 &&
+                               static_cast<double>( hits ) >=
+                               0.5 *
+                               found_w *
+                               found_h;
         if( !sane )
         {
             std::cout << "  align     probe not found on screen (hits=" << hits
@@ -194,12 +223,10 @@ namespace ladder::view::align
         // pixels of authored is scale one, exactly; only a substantial
         // difference is a real scale.
         constexpr double size_slack = 3.0;
-        map.sx_ = std::abs( found_w - probe_size ) <= size_slack
-                      ? 1.0
-                      : found_w / probe_size;
-        map.sy_ = std::abs( found_h - probe_size ) <= size_slack
-                      ? 1.0
-                      : found_h / probe_size;
+        map.sx_ =
+            std::abs( found_w - probe_size ) <= size_slack ? 1.0 : found_w / probe_size;
+        map.sy_ =
+            std::abs( found_h - probe_size ) <= size_slack ? 1.0 : found_h / probe_size;
         map.dx_       = min_x - ( map.sx_ * probe_x );
         map.dy_       = min_y - ( map.sy_ * probe_y );
         map.measured_ = true;
@@ -214,9 +241,8 @@ namespace ladder::view::align
         else
         {
             std::cout << "  align     overlay -> display scale (" << map.sx_ << ","
-                      << map.sy_ << ") offset (" << static_cast<int>( map.dx_ )
-                      << "," << static_cast<int>( map.dy_ )
-                      << ") — correcting every shape\n";
+                      << map.sy_ << ") offset (" << static_cast<int>( map.dx_ ) << ","
+                      << static_cast<int>( map.dy_ ) << ") — correcting every shape\n";
         }
         return map;
     }

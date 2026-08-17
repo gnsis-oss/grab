@@ -29,8 +29,8 @@
 #include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
-#include "support/overlay_align.hpp"
 #include "support/motion/trajectory.hpp"
+#include "support/overlay_align.hpp"
 #include "support/pixel.hpp"
 #include "support/stage/assert.hpp"
 #include "support/stage/scene.hpp"
@@ -74,19 +74,19 @@ namespace
 
     // ── The authored page ───────────────────────────────────────────────────
 
-    constexpr int           viewport_w = 1'000;
-    constexpr int           viewport_h = 700;
-    constexpr int           document_h = 3'600;    // five screenfuls
+    constexpr int viewport_w = 1'000;
+    constexpr int viewport_h = 700;
+    constexpr int document_h = 3'600;    // five screenfuls
 
     // The three stops, in PAGE coordinates. The tour visits them in the
     // order FIRST (bottom), SECOND (midway, above FIRST), THIRD (between
     // the two) — down, up, down again.
-    constexpr int           button_w = 400;
-    constexpr int           button_h = 160;
-    constexpr int           button_x = 300;
-    constexpr int           first_y  = 3'000;
-    constexpr int           second_y = 1'500;
-    constexpr int           third_y  = 2'400;
+    constexpr int button_w = 400;
+    constexpr int button_h = 160;
+    constexpr int button_x = 300;
+    constexpr int first_y  = 3'000;
+    constexpr int second_y = 1'500;
+    constexpr int third_y  = 2'400;
 
     struct Stop
     {
@@ -100,44 +100,47 @@ namespace
     // Distinct idle fills, one shared done colour: "which button is this"
     // and "has it been clicked" are different questions and read on
     // different channels.
-    constexpr const char* done_fill = "#2a9d3a";
+    constexpr const char*          done_fill = "#2a9d3a";
     constexpr std::array<Stop, 3U> stops{
-        Stop{ .subject_    = "btn_first",
-              .idle_label_ = "FIRST",
-              .done_label_ = "FIRST DONE",
-              .idle_fill_  = "#1d4e89",
-              .page_y_     = first_y },
-        Stop{ .subject_    = "btn_second",
-              .idle_label_ = "SECOND",
-              .done_label_ = "SECOND DONE",
-              .idle_fill_  = "#5b3a8f",
-              .page_y_     = second_y },
-        Stop{ .subject_    = "btn_third",
-              .idle_label_ = "THIRD",
-              .done_label_ = "THIRD DONE",
-              .idle_fill_  = "#0f6b6b",
-              .page_y_     = third_y },
+        Stop{
+             .subject_    = "btn_first",
+             .idle_label_ = "FIRST",
+             .done_label_ = "FIRST DONE",
+             .idle_fill_  = "#1d4e89",
+             .page_y_     = first_y },
+        Stop{
+             .subject_    = "btn_second",
+             .idle_label_ = "SECOND",
+             .done_label_ = "SECOND DONE",
+             .idle_fill_  = "#5b3a8f",
+             .page_y_     = second_y},
+        Stop{
+             .subject_    = "btn_third",
+             .idle_label_ = "THIRD",
+             .done_label_ = "THIRD DONE",
+             .idle_fill_  = "#0f6b6b",
+             .page_y_     = third_y },
     };
 
-    constexpr const char*   title_marker = "Stage Scroll Tour";
+    constexpr const char*          title_marker    = "Stage Scroll Tour";
 
-    constexpr std::uint32_t wheel_up   = 4U;    // X11 wheel-up button code
-    constexpr std::uint32_t wheel_down = 5U;    // X11 wheel-down button code
+    constexpr std::uint32_t        wheel_up        = 4U;    // X11 wheel-up button code
+    constexpr std::uint32_t        wheel_down      = 5U;    // X11 wheel-down button code
 
-    constexpr const char*   wheel_subject   = "wheel";
-    constexpr const char*   presses_subject = "presses";
-    constexpr const char*   buttons_subject = "buttons";
+    constexpr const char*          wheel_subject   = "wheel";
+    constexpr const char*          presses_subject = "presses";
+    constexpr const char*          buttons_subject = "buttons";
 
     constexpr grab::overlay::Color cyan{ .r = 0U, .g = 217U, .b = 255U, .a = 242U };
     constexpr grab::overlay::Color amber{ .r = 255U, .g = 184U, .b = 26U, .a = 242U };
 
     constexpr double               stroke_px       = 3.0;
     constexpr double               trail_stroke_px = 2.0;
-    constexpr auto                 trail_slack = std::chrono::milliseconds{ 8 };
+    constexpr auto                 trail_slack     = std::chrono::milliseconds{ 8 };
 
     // Wheel park, as fractions of the live window frame (see stage_scroll).
-    constexpr double        park_fraction_x = 0.72;
-    constexpr double        park_fraction_y = 0.66;
+    constexpr double               park_fraction_x = 0.72;
+    constexpr double               park_fraction_y = 0.66;
 
     // ── The three paces ─────────────────────────────────────────────────────
     //
@@ -157,27 +160,33 @@ namespace
     constexpr std::array<int, 2U> walk_pattern{ 2, 1 };
     constexpr std::array<int, 6U> ramp_pattern{ 1, 2, 3, 3, 2, 1 };
 
-    constexpr Pace slow_pace{ .name_      = "slow",
-                              .pattern_   = slow_pattern,
-                              .settle_ms_ = 350 };
-    constexpr Pace walk_pace{ .name_      = "walk",
-                              .pattern_   = walk_pattern,
-                              .settle_ms_ = 220 };
-    constexpr Pace ramp_pace{ .name_      = "ramp",
-                              .pattern_   = ramp_pattern,
-                              .settle_ms_ = 180 };
+    constexpr Pace                slow_pace{
+        .name_      = "slow",
+        .pattern_   = slow_pattern,
+        .settle_ms_ = 350
+    };
+    constexpr Pace walk_pace{
+        .name_      = "walk",
+        .pattern_   = walk_pattern,
+        .settle_ms_ = 220
+    };
+    constexpr Pace ramp_pace{
+        .name_      = "ramp",
+        .pattern_   = ramp_pattern,
+        .settle_ms_ = 180
+    };
 
-    constexpr int           max_leg_rounds   = 80;
-    constexpr double        visible_margin   = 8.0;
+    constexpr int           max_leg_rounds = 80;
+    constexpr double        visible_margin = 8.0;
     // A leg only ends when its target reads fully inside across TWO reads
     // this far apart — the settled rect is the one the click will aim at.
     constexpr int           stable_settle_ms = 300;
 
-    constexpr std::uint64_t seed        = 0X5'D1'DE'00'0AULL;
-    constexpr int           settle_ms   = 700;
-    constexpr int           announce_ms = 700;
-    constexpr int           react_ms    = 800;
-    constexpr int           poll_ms     = 200;
+    constexpr std::uint64_t seed             = 0X5'D1'DE'00'0AULL;
+    constexpr int           settle_ms        = 700;
+    constexpr int           announce_ms      = 700;
+    constexpr int           react_ms         = 800;
+    constexpr int           poll_ms          = 200;
     constexpr int    poll_tries   = 150;    // 30 s: Firefox builds its a11y tree lazily
     constexpr double colour_match = 40.0;
 
@@ -195,28 +204,43 @@ namespace
         std::string   sections;
         for( int top = mark_first; top < document_h - mark_bottom; top += mark_step )
         {
-            sections += "<div class=\"mark\" style=\"top:" + px( top ) + "\">page y " +
-                        std::to_string( top ) + "</div>\n";
+            sections += "<div class=\"mark\" style=\"top:" +
+                        px( top ) +
+                        "\">page y " +
+                        std::to_string( top ) +
+                        "</div>\n";
         }
         std::string buttons;
         std::string script = "<script>\n";
         for( const Stop& stop : stops )
         {
-            buttons += "<button id=\"" + std::string{ stop.subject_ } +
-                       "\" aria-label=\"" + stop.idle_label_ +
+            buttons += "<button id=\"" +
+                       std::string{ stop.subject_ } +
+                       "\" aria-label=\"" +
+                       stop.idle_label_ +
                        "\" style=\"position:absolute;box-sizing:border-box;left:" +
-                       px( button_x ) + ";top:" + px( stop.page_y_ ) +
-                       ";width:" + px( button_w ) + ";height:" + px( button_h ) +
-                       ";background:" + stop.idle_fill_ +
+                       px( button_x ) +
+                       ";top:" +
+                       px( stop.page_y_ ) +
+                       ";width:" +
+                       px( button_w ) +
+                       ";height:" +
+                       px( button_h ) +
+                       ";background:" +
+                       stop.idle_fill_ +
                        ";color:#fff;border:0;font:600 36px sans-serif;\">" +
-                       stop.idle_label_ + "</button>\n";
-            script += "  (function(){var b=document.getElementById('" +
-                      std::string{ stop.subject_ } +
-                      "');b.addEventListener('click',function(){"
-                      "b.style.background='" +
-                      done_fill + "';b.setAttribute('aria-label','" +
-                      stop.done_label_ + "');b.textContent='" + stop.done_label_ +
-                      "';});})();\n";
+                       stop.idle_label_ +
+                       "</button>\n";
+            script  += "  (function(){var b=document.getElementById('" +
+                       std::string{ stop.subject_ } +
+                       "');b.addEventListener('click',function(){"
+                       "b.style.background='" +
+                       done_fill +
+                       "';b.setAttribute('aria-label','" +
+                       stop.done_label_ +
+                       "');b.textContent='" +
+                       stop.done_label_ +
+                       "';});})();\n";
         }
         script += "</script>\n";
         return std::string{ "<!doctype html>\n"
@@ -250,7 +274,10 @@ namespace
                "opacity:0.05;border:0;padding:0;pointer-events:none;"
                "background:#000;\"></button>\n"
                "<div id=\"hint\">THE TOUR &#8595; &#8593; &#8595;</div>\n" +
-               sections + buttons + script + "</body></html>\n";
+               sections +
+               buttons +
+               script +
+               "</body></html>\n";
     }
 
     [[nodiscard]]
@@ -259,13 +286,17 @@ namespace
     {
         stage::Scene scene;
         scene.id_ = "scroll-tour";
-        scene.pages_.push_back( stage::ScenePage{ .name_   = "tour",
-                                                  .html_   = page_html(),
-                                                  .marker_ = title_marker } );
-        scene.viewport_ = stage::ViewportSpec{ .viewport_w_ = viewport_w,
-                                               .viewport_h_ = viewport_h,
-                                               .document_h_ = document_h };
-        scene.frames_   = { "01-top", "02-first", "03-second", "04-third" };
+        scene.pages_.push_back( stage::ScenePage{
+            .name_   = "tour",
+            .html_   = page_html(),
+            .marker_ = title_marker
+        } );
+        scene.viewport_ = stage::ViewportSpec{
+            .viewport_w_ = viewport_w,
+            .viewport_h_ = viewport_h,
+            .document_h_ = document_h
+        };
+        scene.frames_ = { "01-top", "02-first", "03-second", "04-third" };
 
         // DECLARED BEFORE THE ACT.
         const auto expect = [&]( std::string    name,
@@ -273,30 +304,23 @@ namespace
                                  std::string    subj,
                                  std::string    value )
         {
-            scene.expect_.push_back( stage::Expectation{ .name_    = std::move( name ),
-                                                         .observe_ = observe,
-                                                         .subject_ = std::move( subj ),
-                                                         .value_   = std::move( value ),
-                                                         .tolerance_ = 0.0,
-                                                         .low_       = 0.0,
-                                                         .high_      = 0.0,
-                                                         .ranged_    = false } );
+            scene.expect_.push_back( stage::Expectation{
+                .name_      = std::move( name ),
+                .observe_   = observe,
+                .subject_   = std::move( subj ),
+                .value_     = std::move( value ),
+                .tolerance_ = 0.0,
+                .low_       = 0.0,
+                .high_      = 0.0,
+                .ranged_    = false
+            } );
         };
         expect( "overlay_is_live", stage::Observe::Capability, "overlay", "live" );
         // Each leg's necessity: the target is off-screen in the stated
         // direction BEFORE its leg runs.
-        expect( "first_starts_below",
-                stage::Observe::A11yBounds,
-                "leg1",
-                "below" );
-        expect( "second_starts_above",
-                stage::Observe::A11yBounds,
-                "leg2",
-                "above" );
-        expect( "third_starts_below",
-                stage::Observe::A11yBounds,
-                "leg3",
-                "below" );
+        expect( "first_starts_below", stage::Observe::A11yBounds, "leg1", "below" );
+        expect( "second_starts_above", stage::Observe::A11yBounds, "leg2", "above" );
+        expect( "third_starts_below", stage::Observe::A11yBounds, "leg3", "below" );
         // Each stop clicked, on the a11y channel.
         for( const Stop& stop : stops )
         {
@@ -378,11 +402,12 @@ namespace
                 {
                     return Live{
                         .name_  = info.name,
-                        .rect_  = ladder::view::fid::current().rect(
-                            view::ViewRect{ .x_ = info.bounds.x,
-                                            .y_ = info.bounds.y,
-                                            .w_ = info.bounds.w,
-                                            .h_ = info.bounds.h } ),
+                        .rect_  = ladder::view::fid::current().rect( view::ViewRect{
+                            .x_ = info.bounds.x,
+                            .y_ = info.bounds.y,
+                            .w_ = info.bounds.w,
+                            .h_ = info.bounds.h
+                        } ),
                         .space_ = info.bounds.space,
                     };
                 }
@@ -413,12 +438,24 @@ namespace
                   double                screen_w,
                   double                screen_h )
     {
-        return rect.y_ >= content_top + visible_margin &&
-               ( rect.y_ + rect.h_ ) <= content_bottom - visible_margin &&
-               rect.x_ >= window.x_ &&
-               ( rect.x_ + rect.w_ ) <= window.x_ + window.w_ &&
-               rect.y_ >= 0.0 && ( rect.y_ + rect.h_ ) <= screen_h &&
-               rect.x_ >= 0.0 && ( rect.x_ + rect.w_ ) <= screen_w;
+        return rect.y_ >=
+               content_top +
+               visible_margin &&
+               ( rect.y_ + rect.h_ ) <=
+               content_bottom -
+               visible_margin &&
+               rect.x_ >=
+               window.x_ &&
+               ( rect.x_ + rect.w_ ) <=
+               window.x_ +
+               window.w_ &&
+               rect.y_ >=
+               0.0 &&
+               ( rect.y_ + rect.h_ ) <=
+               screen_h &&
+               rect.x_ >=
+               0.0 &&
+               ( rect.x_ + rect.w_ ) <= screen_w;
     }
 
     struct Options
@@ -434,16 +471,15 @@ namespace
     void
     usage()
     {
-        std::cout
-            << "stage_scroll_tour — rung 9 long form: down, up, down, a click "
-               "at every stop\n\n"
-               "  --display :N   display to create (ignored with --session)\n"
-               "  --out DIR      where the page, frames and scorecard land\n"
-               "  --session      drive the display you are already on\n"
-               "  --watch        show the nested display in a window here\n"
-               "  --trail        draw the approaches on the overlay\n"
-               "  --keep         leave the session up afterwards\n"
-               "  --help         this text\n";
+        std::cout << "stage_scroll_tour — rung 9 long form: down, up, down, a click "
+                     "at every stop\n\n"
+                     "  --display :N   display to create (ignored with --session)\n"
+                     "  --out DIR      where the page, frames and scorecard land\n"
+                     "  --session      drive the display you are already on\n"
+                     "  --watch        show the nested display in a window here\n"
+                     "  --trail        draw the approaches on the overlay\n"
+                     "  --keep         leave the session up afterwards\n"
+                     "  --help         this text\n";
     }
 
     [[nodiscard]]
@@ -575,20 +611,22 @@ main( int    argc,
               << " (viewport " << viewport_w << "x" << viewport_h << ")\n";
     for( const Stop& stop : stops )
     {
-        std::cout << "  " << stop.idle_label_ << std::string(
-                         10U - std::string_view{ stop.idle_label_ }.size(), ' ' )
+        std::cout << "  " << stop.idle_label_
+                  << std::string( 10U - std::string_view{ stop.idle_label_ }.size(),
+                                  ' ' )
                   << "page y " << stop.page_y_ << '\n';
     }
 
     // ── 2. HOST ─────────────────────────────────────────────────────────────
     std::cout << "\nHOST\n";
-    ladder::host::Host host{ options.display,
-                             options.out,
-                             std::to_string( viewport_w ) + "x" +
-                                 std::to_string( viewport_h ),
-                             options.host_display,
-                             options.attach,
-                             title_marker };
+    ladder::host::Host host{
+        options.display,
+        options.out,
+        std::to_string( viewport_w ) + "x" + std::to_string( viewport_h ),
+        options.host_display,
+        options.attach,
+        title_marker
+    };
     if( !host.start( "file://" + std::filesystem::absolute( page ).string() ) )
     {
         std::cerr << "host did not come up\n";
@@ -630,9 +668,11 @@ main( int    argc,
         std::optional<grab::Subscription> button_subscription;
         {
             grab::SubscriptionScope button_scope;
-            button_scope.kinds = { grab::EventKind::MouseButtonDown,
-                                   grab::EventKind::MouseButtonUp };
-            auto btn_sub       = ( *session )->watch( button_scope );
+            button_scope.kinds = {
+                grab::EventKind::MouseButtonDown,
+                grab::EventKind::MouseButtonUp
+            };
+            auto btn_sub = ( *session )->watch( button_scope );
             if( btn_sub.has_value() )
             {
                 button_subscription = std::move( *btn_sub );
@@ -660,9 +700,11 @@ main( int    argc,
         {
             std::cerr << "overlay: " << why( handle.error() ) << '\n';
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::Capability,
-                                            .subject_ = "overlay",
-                                            .value_   = overlay_state } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::Capability,
+            .subject_ = "overlay",
+            .value_   = overlay_state
+        } );
         std::cout << "  overlay   " << overlay_state << '\n';
 
         // ── 3. RESOLVE ──────────────────────────────────────────────────────
@@ -717,7 +759,7 @@ main( int    argc,
         // bottom edge (which, under mutter, includes the CSD shadow and
         // admitted a bottom-clipped target whose mid-click focus scroll
         // swallowed the click).
-        const auto view_top = resolve_named( **session, { "VIEWTOP" } );
+        const auto view_top    = resolve_named( **session, { "VIEWTOP" } );
         const auto view_bottom = resolve_named( **session, { "VIEWBOTTOM" } );
         if( !view_top.has_value() || !view_bottom.has_value() )
         {
@@ -733,17 +775,20 @@ main( int    argc,
                   << " (from the page's fixed anchors)\n";
 
         // Where do overlay shapes ACTUALLY land? Measured over the page.
-        const auto omap = ladder::view::align::measure(
-            overlay, *screen, space,
-            window_rect.x_ + ( window_rect.w_ * 0.55 ), content_top + 60.0 );
+        const auto omap =
+            ladder::view::align::measure( overlay,
+                                          *screen,
+                                          space,
+                                          window_rect.x_ + ( window_rect.w_ * 0.55 ),
+                                          content_top + 60.0 );
 
         // ── 4. THE TOUR ─────────────────────────────────────────────────────
-        const auto park_x = static_cast<std::int16_t>(
-            window_rect.x_ + ( window_rect.w_ * park_fraction_x )
-        );
-        const auto park_y = static_cast<std::int16_t>(
-            window_rect.y_ + ( window_rect.h_ * park_fraction_y )
-        );
+        const auto park_x =
+            static_cast<std::int16_t>( window_rect.x_ +
+                                       ( window_rect.w_ * park_fraction_x ) );
+        const auto park_y =
+            static_cast<std::int16_t>( window_rect.y_ +
+                                       ( window_rect.h_ * park_fraction_y ) );
         ( void )( *input ).move( park_x, park_y );
         std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
 
@@ -759,20 +804,29 @@ main( int    argc,
             std::vector<grab::overlay::PathCommand> commands;
             commands.reserve( pending.size() );
             commands.emplace_back( grab::overlay::MoveTo{
-                .point = grab::SpacePoint{ .x     = omap.x( pending.front().x_ ),
-                                           .y     = omap.y( pending.front().y_ ),
-                                           .space = space } } );
+                .point = grab::SpacePoint{
+                                          .x     = omap.x( pending.front().x_ ),
+                                          .y     = omap.y( pending.front().y_ ),
+                                          .space = space
+                }
+            } );
             for( std::size_t step = 1U; step < pending.size(); ++step )
             {
                 commands.emplace_back( grab::overlay::LineTo{
-                    .point = grab::SpacePoint{ .x     = omap.x( pending[step].x_ ),
-                                               .y     = omap.y( pending[step].y_ ),
-                                               .space = space } } );
+                    .point = grab::SpacePoint{
+                                              .x     = omap.x( pending[step].x_ ),
+                                              .y     = omap.y( pending[step].y_ ),
+                                              .space = space
+                    }
+                } );
             }
             auto added = overlay->add( grab::overlay::Shape{
                 .geometry = grab::overlay::Path{ .commands = std::move( commands ) },
-                .stroke   = grab::overlay::StrokeStyle{ .color    = amber,
-                                                        .width_px = trail_stroke_px },
+                .stroke =
+                    grab::overlay::StrokeStyle{
+                                                .color    = amber,
+                                                .width_px = trail_stroke_px
+                    },
                 .fill     = std::nullopt,
                 .lifetime = grab::overlay::Persistent{},
                 .band     = grab::overlay::Band::Trail,
@@ -804,17 +858,20 @@ main( int    argc,
         // One scroll leg: burst notches at the pace's rhythm, re-reading the
         // live rect and choosing the direction from where the target IS —
         // which is also what makes an overshoot self-correcting.
-        const auto bring_into_view =
-            [&]( std::string_view label,
-                 const Pace&      pace ) -> std::optional<Live>
+        const auto bring_into_view = [&]( std::string_view label,
+                                          const Pace&      pace ) -> std::optional<Live>
         {
             std::optional<Live> target = resolve_named( **session, { label } );
             int                 rounds = 0;
             std::size_t         beat   = 0U;
             while( target.has_value() && rounds < max_leg_rounds )
             {
-                if( fully_inside( target->rect_, window_rect, content_top,
-                                  content_bottom, screen_w, screen_h ) )
+                if( fully_inside( target->rect_,
+                                  window_rect,
+                                  content_top,
+                                  content_bottom,
+                                  screen_w,
+                                  screen_h ) )
                 {
                     // The predicate held once — but the browser may still be
                     // settling the last burst. The rect the CLICK will aim at
@@ -825,9 +882,12 @@ main( int    argc,
                         std::chrono::milliseconds{ stable_settle_ms }
                     );
                     target = resolve_named( **session, { label } );
-                    if( target.has_value() &&
-                        fully_inside( target->rect_, window_rect, content_top,
-                                      content_bottom, screen_w, screen_h ) )
+                    if( target.has_value() && fully_inside( target->rect_,
+                                                            window_rect,
+                                                            content_top,
+                                                            content_bottom,
+                                                            screen_w,
+                                                            screen_h ) )
                     {
                         break;
                     }
@@ -835,9 +895,9 @@ main( int    argc,
                 }
                 const int notches = pace.pattern_[beat % pace.pattern_.size()];
                 ++beat;
-                const bool needs_down =
-                    ( target->rect_.y_ + target->rect_.h_ ) >
-                    content_bottom - visible_margin;
+                const bool needs_down = ( target->rect_.y_ + target->rect_.h_ ) >
+                                        content_bottom -
+                                        visible_margin;
                 ( void )( *input ).scroll( 0, needs_down ? notches : -notches );
                 ++rounds;
                 std::this_thread::sleep_for(
@@ -849,8 +909,8 @@ main( int    argc,
                       << " burst(s)";
             if( target.has_value() )
             {
-                std::cout << ", now at (" << static_cast<int>( target->rect_.x_ )
-                          << "," << static_cast<int>( target->rect_.y_ ) << ")";
+                std::cout << ", now at (" << static_cast<int>( target->rect_.x_ ) << ","
+                          << static_cast<int>( target->rect_.y_ ) << ")";
             }
             std::cout << '\n';
             return target;
@@ -862,36 +922,49 @@ main( int    argc,
         {
             if( overlay != nullptr )
             {
-                ( void )overlay->add( grab::overlay::Shape{
-                    .geometry = grab::overlay::Rect{
-                        .bounds = grab::SpaceRect{ .x = omap.x( target.rect_.x_ ),
-                                                   .y     = omap.y( target.rect_.y_ ),
-                                                   .w     = target.rect_.w_ / omap.sx_,
-                                                   .h     = target.rect_.h_ / omap.sy_,
-                                                   .space = space } },
-                    .stroke   = grab::overlay::StrokeStyle{ .color    = cyan,
-                                                            .width_px = stroke_px },
-                    .fill     = std::nullopt,
-                    .lifetime =
-                        grab::overlay::Ttl{
-                            .duration = std::chrono::milliseconds{ 1'600 } },
-                    .band = grab::overlay::Band::Annotation,
-                    .z    = 0,
-                } );
+                ( void )overlay->add(
+                    grab::overlay::Shape{
+                        .geometry =
+                            grab::overlay::Rect{
+                                                .bounds =
+                                    grab::SpaceRect{
+                                        .x     = omap.x( target.rect_.x_ ),
+                                        .y     = omap.y( target.rect_.y_ ),
+                                        .w     = target.rect_.w_ / omap.sx_,
+                                        .h     = target.rect_.h_ / omap.sy_,
+                                        .space = space
+                                    }
+                            },
+                        .stroke =
+                            grab::overlay::StrokeStyle{
+                                                .color    = cyan,
+                                                .width_px = stroke_px
+                            },
+                        .fill = std::nullopt,
+                        .lifetime =
+                            grab::overlay::Ttl{
+                                                .duration = std::chrono::milliseconds{ 1'600 }
+                            },
+                        .band = grab::overlay::Band::Annotation,
+                        .z    = 0,
+                }
+                );
                 ( void )overlay->flush();
             }
             std::this_thread::sleep_for( std::chrono::milliseconds{ announce_ms } );
 
             const auto   at = ( *input ).position();
-            motion::Vec2 cursor{ at.has_value() ? static_cast<double>( at->x )
-                                                : target.rect_.x_,
-                                 at.has_value() ? static_cast<double>( at->y )
-                                                : target.rect_.y_ };
-            const motion::Rect aim{ target.rect_.x_,
-                                    target.rect_.y_,
-                                    target.rect_.w_,
-                                    target.rect_.h_ };
-            const auto         movement =
+            motion::Vec2 cursor{
+                at.has_value() ? static_cast<double>( at->x ) : target.rect_.x_,
+                at.has_value() ? static_cast<double>( at->y ) : target.rect_.y_
+            };
+            const motion::Rect aim{
+                target.rect_.x_,
+                target.rect_.y_,
+                target.rect_.w_,
+                target.rect_.h_
+            };
+            const auto movement =
                 motion::plan_move( rng, cursor, aim, motion::MotionConfig{} );
             const double lead =
                 movement.samples_.empty() ? 0.0 : movement.samples_.front().t_s_;
@@ -913,10 +986,10 @@ main( int    argc,
                 {
                     continue;
                 }
-                pending.push_back(
-                    motion::Vec2{ .x_ = static_cast<double>( sample.x_ ),
-                                  .y_ = static_cast<double>( sample.y_ ) }
-                );
+                pending.push_back( motion::Vec2{
+                    .x_ = static_cast<double>( sample.x_ ),
+                    .y_ = static_cast<double>( sample.y_ )
+                } );
                 const bool final_sample = step + 1U == movement.samples_.size();
                 if( final_sample ||
                     ( deadline_of( movement.samples_[step + 1U] ) -
@@ -931,10 +1004,10 @@ main( int    argc,
             }
 
             const auto at_press = ( *input ).position();
-            const bool inside   = at_press.has_value() &&
-                                target.rect_.contains(
-                                    static_cast<double>( at_press->x ),
-                                    static_cast<double>( at_press->y ) );
+            const bool inside =
+                at_press.has_value() &&
+                target.rect_.contains( static_cast<double>( at_press->x ),
+                                       static_cast<double>( at_press->y ) );
             const double hold_s = std::exp( rng.normal( std::log( 0.080 ), 0.35 ) );
             ( void )( *input ).press();
             std::this_thread::sleep_for( std::chrono::duration<double>( hold_s ) );
@@ -948,10 +1021,12 @@ main( int    argc,
         // capture the after frame, compare the pixels.
         const std::array<const char*, 3U> leg_subjects{ "leg1", "leg2", "leg3" };
         const std::array<bool, 3U>        leg_expect_below{ true, false, true };
-        const std::array<Pace, 3U> leg_paces{ slow_pace, walk_pace, ramp_pace };
-        const std::array<const char*, 3U> after_frames{ "02-first.ppm",
-                                                        "03-second.ppm",
-                                                        "04-third.ppm" };
+        const std::array<Pace, 3U>        leg_paces{ slow_pace, walk_pace, ramp_pace };
+        const std::array<const char*, 3U> after_frames{
+            "02-first.ppm",
+            "03-second.ppm",
+            "04-third.ppm"
+        };
         bool all_presses_inside = true;
         bool all_pixels_flipped = true;
 
@@ -968,8 +1043,7 @@ main( int    argc,
                 {
                     direction = "below";
                 }
-                else if( before_leg->rect_.y_ + before_leg->rect_.h_ <=
-                         content_top )
+                else if( before_leg->rect_.y_ + before_leg->rect_.h_ <= content_top )
                 {
                     direction = "above";
                 }
@@ -977,18 +1051,22 @@ main( int    argc,
             seen.push_back( stage::Observation{
                 .observe_ = stage::Observe::A11yBounds,
                 .subject_ = leg_subjects[leg],
-                .value_   = direction } );
+                .value_   = direction
+            } );
             std::cout << "  " << stop.idle_label_ << " starts " << direction
-                      << " — expected "
-                      << ( leg_expect_below[leg] ? "below" : "above" ) << '\n';
+                      << " — expected " << ( leg_expect_below[leg] ? "below" : "above" )
+                      << '\n';
 
-            const auto target = bring_into_view( stop.idle_label_,
-                                                 leg_paces[leg] );
-            if( !target.has_value() ||
-                !fully_inside( target->rect_, window_rect, content_top,
-                               content_bottom, screen_w, screen_h ) )
+            const auto target = bring_into_view( stop.idle_label_, leg_paces[leg] );
+            if( !target.has_value() || !fully_inside( target->rect_,
+                                                      window_rect,
+                                                      content_top,
+                                                      content_bottom,
+                                                      screen_w,
+                                                      screen_h ) )
             {
-                std::cerr << "leg " << leg + 1U << " never brought "
+                std::cerr << "leg " << leg +
+                    1U << " never brought "
                           << stop.idle_label_ << " on screen\n";
                 continue;
             }
@@ -1003,8 +1081,8 @@ main( int    argc,
             std::string name_after = "(unresolved)";
             for( int attempt = 0; attempt < poll_tries; ++attempt )
             {
-                if( auto again = resolve_named(
-                        **session, { stop.done_label_, stop.idle_label_ } );
+                if( auto again = resolve_named( **session,
+                                                { stop.done_label_, stop.idle_label_ } );
                     again.has_value() )
                 {
                     name_after = again->name_;
@@ -1015,9 +1093,11 @@ main( int    argc,
                 }
                 std::this_thread::sleep_for( std::chrono::milliseconds{ poll_ms } );
             }
-            seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yName,
-                                                .subject_ = stop.subject_,
-                                                .value_   = name_after } );
+            seen.push_back( stage::Observation{
+                .observe_ = stage::Observe::A11yName,
+                .subject_ = stop.subject_,
+                .value_   = name_after
+            } );
 
             const auto after_click = ( *screen ).display();
             if( after_click.has_value() )
@@ -1032,7 +1112,7 @@ main( int    argc,
                 if( was.has_value() && now.has_value() )
                 {
                     const double moved = pixel::distance( *was, *now );
-                    flip = moved >= colour_match ? "changed" : "unchanged";
+                    flip               = moved >= colour_match ? "changed" : "unchanged";
                 }
             }
             if( flip != "changed" )
@@ -1043,16 +1123,16 @@ main( int    argc,
                       << "\", pixels " << flip << '\n';
         }
 
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::CursorPosition,
-                                            .subject_ = presses_subject,
-                                            .value_ = all_presses_inside
-                                                          ? "inside"
-                                                          : "outside" } );
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::PixelColour,
-                                            .subject_ = buttons_subject,
-                                            .value_   = all_pixels_flipped
-                                                            ? "changed"
-                                                            : "unchanged" } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::CursorPosition,
+            .subject_ = presses_subject,
+            .value_   = all_presses_inside ? "inside" : "outside"
+        } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::PixelColour,
+            .subject_ = buttons_subject,
+            .value_   = all_pixels_flipped ? "changed" : "unchanged"
+        } );
 
         // The journey on the device channel: the X server must have seen
         // wheel events in BOTH directions.
@@ -1064,7 +1144,8 @@ main( int    argc,
             while( auto btn_event = button_subscription->try_pop() )
             {
                 const auto* mb = std::get_if<grab::MouseButton>( &btn_event->payload );
-                if( mb == nullptr ||
+                if( mb ==
+                    nullptr ||
                     btn_event->kind != grab::EventKind::MouseButtonDown )
                 {
                     continue;
@@ -1089,9 +1170,11 @@ main( int    argc,
             std::cout << "  events    " << downs << " wheel-down, " << ups
                       << " wheel-up notch(es)\n";
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::ButtonClick,
-                                            .subject_ = wheel_subject,
-                                            .value_   = wheel_seen } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::ButtonClick,
+            .subject_ = wheel_subject,
+            .value_   = wheel_seen
+        } );
 
         // ── 5. SCORE ────────────────────────────────────────────────────────
         const stage::Scorecard card = stage::evaluate( scene, seen );

@@ -29,8 +29,8 @@
 #include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
-#include "support/overlay_align.hpp"
 #include "support/motion/trajectory.hpp"
+#include "support/overlay_align.hpp"
 #include "support/pixel.hpp"
 #include "support/stage/assert.hpp"
 #include "support/stage/scene.hpp"
@@ -75,39 +75,39 @@ namespace
     // Absolutely positioned, explicit width and height, box-sizing:border-box,
     // so every number below is exact regardless of installed fonts.
 
-    constexpr int           icon_x = 120;
-    constexpr int           icon_y = 260;
-    constexpr int           icon_w = 140;
-    constexpr int           icon_h = 140;
+    constexpr int                  icon_x          = 120;
+    constexpr int                  icon_y          = 260;
+    constexpr int                  icon_w          = 140;
+    constexpr int                  icon_h          = 140;
 
-    constexpr int           zone_x = 620;
-    constexpr int           zone_y = 200;
-    constexpr int           zone_w = 260;
-    constexpr int           zone_h = 260;
+    constexpr int                  zone_x          = 620;
+    constexpr int                  zone_y          = 200;
+    constexpr int                  zone_w          = 260;
+    constexpr int                  zone_h          = 260;
 
-    constexpr const char*   icon_idle_label = "APP";
-    constexpr const char*   icon_done_label = "INSTALLED";
-    constexpr const char*   zone_idle_label = "EMPTY";
-    constexpr const char*   zone_done_label = "OCCUPIED";
+    constexpr const char*          icon_idle_label = "APP";
+    constexpr const char*          icon_done_label = "INSTALLED";
+    constexpr const char*          zone_idle_label = "EMPTY";
+    constexpr const char*          zone_done_label = "OCCUPIED";
 
     // Far apart in RGB and clear of the overlay palette, so "it changed" is
     // never a judgement call about a shade.
-    constexpr const char*   icon_idle_fill = "#1d4e89";
-    constexpr const char*   icon_done_fill = "#2a9d3a";
-    constexpr const char*   zone_idle_fill = "#e8e8e8";
-    constexpr const char*   zone_done_fill = "#bff0c4";
+    constexpr const char*          icon_idle_fill  = "#1d4e89";
+    constexpr const char*          icon_done_fill  = "#2a9d3a";
+    constexpr const char*          zone_idle_fill  = "#e8e8e8";
+    constexpr const char*          zone_done_fill  = "#bff0c4";
 
-    constexpr const char*   title_marker = "Stage Drag";
+    constexpr const char*          title_marker    = "Stage Drag";
 
-    constexpr std::uint32_t primary_button = 1U;    // X11 primary pointer button
+    constexpr std::uint32_t        primary_button  = 1U;    // X11 primary pointer button
 
-    constexpr int           viewport_w = 1'000;
-    constexpr int           viewport_h = 700;
+    constexpr int                  viewport_w      = 1'000;
+    constexpr int                  viewport_h      = 700;
 
-    constexpr const char*   icon_subject    = "app_icon";
-    constexpr const char*   zone_subject    = "drop_zone";
-    constexpr const char*   drag_subject    = "drag";
-    constexpr const char*   landing_subject = "landing";
+    constexpr const char*          icon_subject    = "app_icon";
+    constexpr const char*          zone_subject    = "drop_zone";
+    constexpr const char*          drag_subject    = "drag";
+    constexpr const char*          landing_subject = "landing";
 
     constexpr grab::overlay::Color cyan{ .r = 0U, .g = 217U, .b = 255U, .a = 242U };
     constexpr grab::overlay::Color green{ .r = 51U, .g = 255U, .b = 89U, .a = 242U };
@@ -119,8 +119,8 @@ namespace
     // crosses the page — as fractions of the window's live frame, because on
     // a real desktop the window manager decides where the window is and an
     // absolute park can sit over another application entirely.
-    constexpr double               park_fx     = 0.08;
-    constexpr double               park_fy     = 0.88;
+    constexpr double               park_fx = 0.08;
+    constexpr double               park_fy = 0.88;
     // The trail yields to the motion, never the reverse — see stage_button.
     constexpr auto                 trail_slack = std::chrono::milliseconds{ 8 };
 
@@ -129,13 +129,13 @@ namespace
     // so its CENTRE can sit up to half an icon away from the cursor. A cursor
     // released inside this subrect keeps the icon's centre inside the zone
     // for every grab point the icon admits.
-    constexpr double        drop_margin = 90.0;
+    constexpr double               drop_margin = 90.0;
 
-    constexpr std::uint64_t seed        = 0X5'D1'DE'00'08ULL;
-    constexpr int           settle_ms   = 700;
-    constexpr int           announce_ms = 900;
-    constexpr int           react_ms    = 900;
-    constexpr int           poll_ms     = 200;
+    constexpr std::uint64_t        seed        = 0X5'D1'DE'00'08ULL;
+    constexpr int                  settle_ms   = 700;
+    constexpr int                  announce_ms = 900;
+    constexpr int                  react_ms    = 900;
+    constexpr int                  poll_ms     = 200;
     constexpr int    poll_tries   = 150;    // 30 s: Firefox builds its a11y tree lazily
     constexpr double colour_match = 40.0;
 
@@ -158,22 +158,42 @@ namespace
                             "<style>\n"
                             "  html,body{margin:0;padding:0;background:#f4f4f4;}\n"
                             "  #app_icon{position:absolute;box-sizing:border-box;" } +
-               "left:" + px( icon_x ) + ";top:" + px( icon_y ) +
-               ";width:" + px( icon_w ) + ";height:" + px( icon_h ) +
-               ";background:" + icon_idle_fill +
+               "left:" +
+               px( icon_x ) +
+               ";top:" +
+               px( icon_y ) +
+               ";width:" +
+               px( icon_w ) +
+               ";height:" +
+               px( icon_h ) +
+               ";background:" +
+               icon_idle_fill +
                ";color:#fff;border:0;font:600 24px sans-serif;cursor:grab;}\n"
                "  #drop_zone{position:absolute;box-sizing:border-box;"
-               "left:" + px( zone_x ) + ";top:" + px( zone_y ) +
-               ";width:" + px( zone_w ) + ";height:" + px( zone_h ) +
-               ";background:" + zone_idle_fill +
+               "left:" +
+               px( zone_x ) +
+               ";top:" +
+               px( zone_y ) +
+               ";width:" +
+               px( zone_w ) +
+               ";height:" +
+               px( zone_h ) +
+               ";background:" +
+               zone_idle_fill +
                ";border:6px dashed #8a8a8a;color:#555;font:600 22px sans-serif;}\n"
                "</style></head><body>\n" +
                ladder::view::fid::patches_html() +
                ""
-               "<button id=\"drop_zone\" aria-label=\"" + zone_idle_label + "\">" +
-               zone_idle_label + "</button>\n"
-               "<button id=\"app_icon\" aria-label=\"" + icon_idle_label + "\">" +
-               icon_idle_label + "</button>\n"
+               "<button id=\"drop_zone\" aria-label=\"" +
+               zone_idle_label +
+               "\">" +
+               zone_idle_label +
+               "</button>\n"
+               "<button id=\"app_icon\" aria-label=\"" +
+               icon_idle_label +
+               "\">" +
+               icon_idle_label +
+               "</button>\n"
                "<script>\n"
                "  var icon=document.getElementById('app_icon');\n"
                "  var zone=document.getElementById('drop_zone');\n"
@@ -197,16 +217,34 @@ namespace
                "    if(cx>=zr.left&&cx<=zr.right&&cy>=zr.top&&cy<=zr.bottom){\n"
                "      icon.style.left=(zr.left+(zr.width-ir.width)/2)+'px';\n"
                "      icon.style.top=(zr.top+(zr.height-ir.height)/2)+'px';\n"
-               "      icon.style.background='" + std::string{ icon_done_fill } + "';\n"
-               "      icon.setAttribute('aria-label','" + icon_done_label + "');\n"
-               "      icon.textContent='" + icon_done_label + "';\n"
-               "      zone.style.background='" + zone_done_fill + "';\n"
-               "      zone.style.borderColor='" + icon_done_fill + "';\n"
-               "      zone.setAttribute('aria-label','" + zone_done_label + "');\n"
-               "      zone.textContent='" + zone_done_label + "';\n"
+               "      icon.style.background='" +
+               std::string{ icon_done_fill } +
+               "';\n"
+               "      icon.setAttribute('aria-label','" +
+               icon_done_label +
+               "');\n"
+               "      icon.textContent='" +
+               icon_done_label +
+               "';\n"
+               "      zone.style.background='" +
+               zone_done_fill +
+               "';\n"
+               "      zone.style.borderColor='" +
+               icon_done_fill +
+               "';\n"
+               "      zone.setAttribute('aria-label','" +
+               zone_done_label +
+               "');\n"
+               "      zone.textContent='" +
+               zone_done_label +
+               "';\n"
                "    } else {\n"
-               "      icon.style.left='" + px( icon_x ) + "';\n"
-               "      icon.style.top='" + px( icon_y ) + "';\n"
+               "      icon.style.left='" +
+               px( icon_x ) +
+               "';\n"
+               "      icon.style.top='" +
+               px( icon_y ) +
+               "';\n"
                "    }\n"
                "  });\n"
                "</script></body></html>\n";
@@ -218,13 +256,17 @@ namespace
     {
         stage::Scene scene;
         scene.id_ = "drag";
-        scene.pages_.push_back( stage::ScenePage{ .name_   = "drag",
-                                                  .html_   = page_html(),
-                                                  .marker_ = title_marker } );
-        scene.viewport_ = stage::ViewportSpec{ .viewport_w_ = viewport_w,
-                                               .viewport_h_ = viewport_h,
-                                               .document_h_ = viewport_h };
-        scene.frames_   = { "01-baseline", "02-carry", "03-after" };
+        scene.pages_.push_back( stage::ScenePage{
+            .name_   = "drag",
+            .html_   = page_html(),
+            .marker_ = title_marker
+        } );
+        scene.viewport_ = stage::ViewportSpec{
+            .viewport_w_ = viewport_w,
+            .viewport_h_ = viewport_h,
+            .document_h_ = viewport_h
+        };
+        scene.frames_ = { "01-baseline", "02-carry", "03-after" };
 
         // DECLARED BEFORE THE ACT.
         const auto expect = [&]( std::string    name,
@@ -232,14 +274,16 @@ namespace
                                  std::string    subject,
                                  std::string    value )
         {
-            scene.expect_.push_back( stage::Expectation{ .name_    = std::move( name ),
-                                                         .observe_ = observe,
-                                                         .subject_ = std::move( subject ),
-                                                         .value_   = std::move( value ),
-                                                         .tolerance_ = 0.0,
-                                                         .low_       = 0.0,
-                                                         .high_      = 0.0,
-                                                         .ranged_    = false } );
+            scene.expect_.push_back( stage::Expectation{
+                .name_      = std::move( name ),
+                .observe_   = observe,
+                .subject_   = std::move( subject ),
+                .value_     = std::move( value ),
+                .tolerance_ = 0.0,
+                .low_       = 0.0,
+                .high_      = 0.0,
+                .ranged_    = false
+            } );
         };
         expect( "overlay_is_live", stage::Observe::Capability, "overlay", "live" );
         expect( "icon_size_as_authored",
@@ -332,11 +376,12 @@ namespace
                 {
                     return Live{
                         .name_  = info.name,
-                        .rect_  = ladder::view::fid::current().rect(
-                            view::ViewRect{ .x_ = info.bounds.x,
-                                            .y_ = info.bounds.y,
-                                            .w_ = info.bounds.w,
-                                            .h_ = info.bounds.h } ),
+                        .rect_  = ladder::view::fid::current().rect( view::ViewRect{
+                            .x_ = info.bounds.x,
+                            .y_ = info.bounds.y,
+                            .w_ = info.bounds.w,
+                            .h_ = info.bounds.h
+                        } ),
                         .space_ = info.bounds.space,
                     };
                 }
@@ -358,10 +403,12 @@ namespace
             {
             }
 
-            HeldButton( const HeldButton& )            = delete;
-            HeldButton& operator=( const HeldButton& ) = delete;
-            HeldButton( HeldButton&& )                 = delete;
-            HeldButton& operator=( HeldButton&& )      = delete;
+            HeldButton( const HeldButton& ) = delete;
+            HeldButton&
+            operator=( const HeldButton& ) = delete;
+            HeldButton( HeldButton&& )     = delete;
+            HeldButton&
+            operator=( HeldButton&& ) = delete;
 
             void
             press()
@@ -556,13 +603,14 @@ main( int    argc,
 
     // ── 2. HOST ─────────────────────────────────────────────────────────────
     std::cout << "\nHOST\n";
-    ladder::host::Host host{ options.display,
-                             options.out,
-                             std::to_string( viewport_w ) + "x" +
-                                 std::to_string( viewport_h ),
-                             options.host_display,
-                             options.attach,
-                             title_marker };
+    ladder::host::Host host{
+        options.display,
+        options.out,
+        std::to_string( viewport_w ) + "x" + std::to_string( viewport_h ),
+        options.host_display,
+        options.attach,
+        title_marker
+    };
     if( !host.start( "file://" + std::filesystem::absolute( page ).string() ) )
     {
         std::cerr << "host did not come up\n";
@@ -606,9 +654,11 @@ main( int    argc,
         std::optional<grab::Subscription> button_subscription;
         {
             grab::SubscriptionScope button_scope;
-            button_scope.kinds = { grab::EventKind::MouseButtonDown,
-                                   grab::EventKind::MouseButtonUp };
-            auto btn_sub       = ( *session )->watch( button_scope );
+            button_scope.kinds = {
+                grab::EventKind::MouseButtonDown,
+                grab::EventKind::MouseButtonUp
+            };
+            auto btn_sub = ( *session )->watch( button_scope );
             if( btn_sub.has_value() )
             {
                 button_subscription = std::move( *btn_sub );
@@ -636,9 +686,11 @@ main( int    argc,
         {
             std::cerr << "overlay: " << why( handle.error() ) << '\n';
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::Capability,
-                                            .subject_ = "overlay",
-                                            .value_   = overlay_state } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::Capability,
+            .subject_ = "overlay",
+            .value_   = overlay_state
+        } );
         std::cout << "  overlay   " << overlay_state << '\n';
 
         // ── 3. RESOLVE ──────────────────────────────────────────────────────
@@ -674,15 +726,20 @@ main( int    argc,
         seen.push_back( stage::Observation{
             .observe_ = stage::Observe::A11yBounds,
             .subject_ = icon_subject,
-            .value_   = std::to_string( static_cast<int>( icon->rect_.w_ ) ) + "x" +
-                      std::to_string( static_cast<int>( icon->rect_.h_ ) ) } );
+            .value_   = std::to_string( static_cast<int>( icon->rect_.w_ ) ) +
+                        "x" +
+                        std::to_string( static_cast<int>( icon->rect_.h_ ) )
+        } );
 
         // ── 4. DRAW ─────────────────────────────────────────────────────────
         // Where do overlay shapes ACTUALLY land? Measured, at the icon.
-        const auto omap = ladder::view::align::measure(
-            overlay, *screen, space, icon->rect_.x_, icon->rect_.y_ );
-        const auto goal = [&]( const view::ViewRect&       rect,
-                               const grab::overlay::Color& colour )
+        const auto omap = ladder::view::align::measure( overlay,
+                                                        *screen,
+                                                        space,
+                                                        icon->rect_.x_,
+                                                        icon->rect_.y_ );
+        const auto goal =
+            [&]( const view::ViewRect& rect, const grab::overlay::Color& colour )
         {
             if( overlay == nullptr )
             {
@@ -690,14 +747,19 @@ main( int    argc,
             }
             const view::ViewRect box = omap.rect( rect );
             ( void )overlay->add( grab::overlay::Shape{
-                .geometry = grab::overlay::Rect{ .bounds =
-                                                     grab::SpaceRect{ .x = box.x_,
-                                                                      .y = box.y_,
-                                                                      .w = box.w_,
-                                                                      .h = box.h_,
-                                                                      .space = space } },
-                .stroke   = grab::overlay::StrokeStyle{ .color    = colour,
-                                                        .width_px = stroke_px },
+                .geometry =
+                    grab::overlay::Rect{
+                                        .bounds =
+                            grab::SpaceRect{
+                                .x     = box.x_,
+                                .y     = box.y_,
+                                .w     = box.w_,
+                                .h     = box.h_,
+                                .space = space
+                            }
+                    },
+                .stroke =
+                    grab::overlay::StrokeStyle{ .color = colour, .width_px = stroke_px },
                 .fill     = std::nullopt,
                 .lifetime = grab::overlay::Persistent{},
                 .band     = grab::overlay::Band::Annotation,
@@ -721,8 +783,8 @@ main( int    argc,
         // Park relative to the window's live frame, wherever the window
         // manager put it. Falls back to the icon's own rect if the window
         // list momentarily fails — a short approach beats no park.
-        auto park_x = static_cast<std::int16_t>( icon->rect_.x_ );
-        auto park_y = static_cast<std::int16_t>( icon->rect_.y_ );
+        auto        park_x = static_cast<std::int16_t>( icon->rect_.x_ );
+        auto        park_y = static_cast<std::int16_t>( icon->rect_.y_ );
         if( const auto summary = host.browser_window(); summary.has_value() )
         {
             park_x = static_cast<std::int16_t>(
@@ -741,8 +803,7 @@ main( int    argc,
         // retired after the release so the observers read the page.
         std::vector<motion::Vec2>           pending;
         std::vector<grab::overlay::ShapeId> trail_ids;
-        const auto                          stroke =
-            [&]( const grab::overlay::Color& colour )
+        const auto stroke = [&]( const grab::overlay::Color& colour )
         {
             if( overlay == nullptr || pending.size() < 2U )
             {
@@ -751,20 +812,29 @@ main( int    argc,
             std::vector<grab::overlay::PathCommand> commands;
             commands.reserve( pending.size() );
             commands.emplace_back( grab::overlay::MoveTo{
-                .point = grab::SpacePoint{ .x     = omap.x( pending.front().x_ ),
-                                           .y     = omap.y( pending.front().y_ ),
-                                           .space = space } } );
+                .point = grab::SpacePoint{
+                                          .x     = omap.x( pending.front().x_ ),
+                                          .y     = omap.y( pending.front().y_ ),
+                                          .space = space
+                }
+            } );
             for( std::size_t step = 1U; step < pending.size(); ++step )
             {
                 commands.emplace_back( grab::overlay::LineTo{
-                    .point = grab::SpacePoint{ .x     = omap.x( pending[step].x_ ),
-                                               .y     = omap.y( pending[step].y_ ),
-                                               .space = space } } );
+                    .point = grab::SpacePoint{
+                                              .x     = omap.x( pending[step].x_ ),
+                                              .y     = omap.y( pending[step].y_ ),
+                                              .space = space
+                    }
+                } );
             }
             auto added = overlay->add( grab::overlay::Shape{
                 .geometry = grab::overlay::Path{ .commands = std::move( commands ) },
-                .stroke   = grab::overlay::StrokeStyle{ .color    = colour,
-                                                        .width_px = trail_stroke_px },
+                .stroke =
+                    grab::overlay::StrokeStyle{
+                                                .color    = colour,
+                                                .width_px = trail_stroke_px
+                    },
                 .fill     = std::nullopt,
                 .lifetime = grab::overlay::Persistent{},
                 .band     = grab::overlay::Band::Trail,
@@ -801,8 +871,10 @@ main( int    argc,
                 std::this_thread::sleep_until( deadline_of( sample ) );
                 ( void )( *input ).move( static_cast<std::int16_t>( sample.x_ ),
                                          static_cast<std::int16_t>( sample.y_ ) );
-                last = motion::Vec2{ .x_ = static_cast<double>( sample.x_ ),
-                                     .y_ = static_cast<double>( sample.y_ ) };
+                last = motion::Vec2{
+                    .x_ = static_cast<double>( sample.x_ ),
+                    .y_ = static_cast<double>( sample.y_ )
+                };
                 if( !options.trail )
                 {
                     continue;
@@ -821,27 +893,29 @@ main( int    argc,
 
         // Leg 1 — approach the icon.
         const auto   start = ( *input ).position();
-        motion::Vec2 cursor{ start.has_value() ? static_cast<double>( start->x )
-                                               : static_cast<double>( park_x ),
-                             start.has_value() ? static_cast<double>( start->y )
-                                               : static_cast<double>( park_y ) };
-        const motion::Rect icon_aim{ icon->rect_.x_,
-                                     icon->rect_.y_,
-                                     icon->rect_.w_,
-                                     icon->rect_.h_ };
-        cursor = walk( motion::plan_move( rng, cursor, icon_aim, motion::MotionConfig{} ),
-                       amber );
+        motion::Vec2 cursor{
+            start.has_value() ? static_cast<double>( start->x )
+                              : static_cast<double>( park_x ),
+            start.has_value() ? static_cast<double>( start->y )
+                              : static_cast<double>( park_y )
+        };
+        const motion::Rect
+            icon_aim{ icon->rect_.x_, icon->rect_.y_, icon->rect_.w_, icon->rect_.h_ };
+        cursor =
+            walk( motion::plan_move( rng, cursor, icon_aim, motion::MotionConfig{} ),
+                  amber );
 
         // Where the press ACTUALLY happens, read from the X server.
-        const auto at_press     = ( *input ).position();
-        const bool press_inside = at_press.has_value() &&
-                                  icon->rect_.contains(
-                                      static_cast<double>( at_press->x ),
-                                      static_cast<double>( at_press->y ) );
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::CursorPosition,
-                                            .subject_ = icon_subject,
-                                            .value_ = press_inside ? "inside"
-                                                                   : "outside" } );
+        const auto at_press = ( *input ).position();
+        const bool press_inside =
+            at_press.has_value() &&
+            icon->rect_.contains( static_cast<double>( at_press->x ),
+                                  static_cast<double>( at_press->y ) );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::CursorPosition,
+            .subject_ = icon_subject,
+            .value_   = press_inside ? "inside" : "outside"
+        } );
         if( at_press.has_value() )
         {
             std::cout << "  press     (" << at_press->x << "," << at_press->y << ") "
@@ -856,12 +930,15 @@ main( int    argc,
         std::this_thread::sleep_for( std::chrono::duration<double>( grip_s ) );
 
         // Leg 2 — carry to the zone's centre subrect (see drop_margin).
-        const motion::Rect drop_aim{ zone->rect_.x_ + drop_margin,
-                                     zone->rect_.y_ + drop_margin,
-                                     zone->rect_.w_ - ( 2.0 * drop_margin ),
-                                     zone->rect_.h_ - ( 2.0 * drop_margin ) };
-        cursor = walk( motion::plan_move( rng, cursor, drop_aim, motion::MotionConfig{} ),
-                       cyan );
+        const motion::Rect drop_aim{
+            zone->rect_.x_ + drop_margin,
+            zone->rect_.y_ + drop_margin,
+            zone->rect_.w_ - ( 2.0 * drop_margin ),
+            zone->rect_.h_ - ( 2.0 * drop_margin )
+        };
+        cursor =
+            walk( motion::plan_move( rng, cursor, drop_aim, motion::MotionConfig{} ),
+                  cyan );
         std::cout << "  carry     ended (" << static_cast<int>( cursor.x_ ) << ","
                   << static_cast<int>( cursor.y_ ) << ") with the button held\n";
 
@@ -907,27 +984,32 @@ main( int    argc,
                 {
                     continue;
                 }
-                if( btn_event->kind == grab::EventKind::MouseButtonDown &&
+                if( btn_event->kind ==
+                    grab::EventKind::MouseButtonDown &&
                     mb->position.has_value() )
                 {
                     down_pos = mb->position;
                 }
-                else if( btn_event->kind == grab::EventKind::MouseButtonUp &&
+                else if( btn_event->kind ==
+                         grab::EventKind::MouseButtonUp &&
                          mb->position.has_value() )
                 {
                     up_pos = mb->position;
                 }
             }
-            if( down_pos.has_value() && up_pos.has_value() &&
+            if( down_pos.has_value() &&
+                up_pos.has_value() &&
                 icon->rect_.contains( down_pos->x, down_pos->y ) &&
                 zone->rect_.contains( up_pos->x, up_pos->y ) )
             {
                 drag_observed = "dragged";
             }
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::ButtonClick,
-                                            .subject_ = drag_subject,
-                                            .value_   = drag_observed } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::ButtonClick,
+            .subject_ = drag_subject,
+            .value_   = drag_observed
+        } );
         if( at_release.has_value() )
         {
             std::cout << "  release   (" << at_release->x << "," << at_release->y
@@ -940,24 +1022,26 @@ main( int    argc,
         std::optional<Live> icon_after;
         for( int attempt = 0; attempt < poll_tries; ++attempt )
         {
-            icon_after = resolve_named( **session,
-                                        { icon_done_label, icon_idle_label } );
+            icon_after =
+                resolve_named( **session, { icon_done_label, icon_idle_label } );
             if( icon_after.has_value() && icon_after->name_ == icon_done_label )
             {
                 break;
             }
             std::this_thread::sleep_for( std::chrono::milliseconds{ poll_ms } );
         }
-        const auto zone_after = resolve_named( **session,
-                                               { zone_done_label, zone_idle_label } );
+        const auto zone_after =
+            resolve_named( **session, { zone_done_label, zone_idle_label } );
         seen.push_back( stage::Observation{
             .observe_ = stage::Observe::A11yName,
             .subject_ = icon_subject,
-            .value_ = icon_after.has_value() ? icon_after->name_ : "(unresolved)" } );
+            .value_   = icon_after.has_value() ? icon_after->name_ : "(unresolved)"
+        } );
         seen.push_back( stage::Observation{
             .observe_ = stage::Observe::A11yName,
             .subject_ = zone_subject,
-            .value_ = zone_after.has_value() ? zone_after->name_ : "(unresolved)" } );
+            .value_   = zone_after.has_value() ? zone_after->name_ : "(unresolved)"
+        } );
         std::cout << "  a11y      icon=\""
                   << ( icon_after.has_value() ? icon_after->name_ : "(unresolved)" )
                   << "\" zone=\""
@@ -978,9 +1062,11 @@ main( int    argc,
                       << static_cast<int>( icon_after->rect_.center_y() ) << ") "
                       << landed << " the zone\n";
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yBounds,
-                                            .subject_ = landing_subject,
-                                            .value_   = landed } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::A11yBounds,
+            .subject_ = landing_subject,
+            .value_   = landed
+        } );
 
         std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
         auto        after   = ( *screen ).display();
@@ -994,14 +1080,16 @@ main( int    argc,
                 const double moved = pixel::distance( *was, *now );
                 flipped            = moved >= colour_match ? "changed" : "unchanged";
                 std::cout << "  pixel     zone mean colour moved "
-                          << static_cast<int>( moved ) << " (>= "
-                          << static_cast<int>( colour_match )
+                          << static_cast<int>( moved )
+                          << " (>= " << static_cast<int>( colour_match )
                           << " counts as changed)\n";
             }
         }
-        seen.push_back( stage::Observation{ .observe_ = stage::Observe::PixelColour,
-                                            .subject_ = zone_subject,
-                                            .value_   = flipped } );
+        seen.push_back( stage::Observation{
+            .observe_ = stage::Observe::PixelColour,
+            .subject_ = zone_subject,
+            .value_   = flipped
+        } );
         if( after.has_value() )
         {
             pixel::write_ppm( *after, options.out / "03-after.ppm" );

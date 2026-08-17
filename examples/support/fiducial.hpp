@@ -56,14 +56,18 @@ namespace ladder::view::fid
     inline std::string
     patches_html()
     {
-        const auto patch = []( const char* name, const char* css,
-                               const char* corner )
+        const auto patch = []( const char* name, const char* css, const char* corner )
         {
-            return std::string{ "<button aria-label=\"" } + name +
-                   "\" tabindex=\"-1\" style=\"position:fixed;" + corner +
-                   "width:" + std::to_string( patch_px ) +
-                   "px;height:" + std::to_string( patch_px ) +
-                   "px;background:" + css +
+            return std::string{ "<button aria-label=\"" } +
+                   name +
+                   "\" tabindex=\"-1\" style=\"position:fixed;" +
+                   corner +
+                   "width:" +
+                   std::to_string( patch_px ) +
+                   "px;height:" +
+                   std::to_string( patch_px ) +
+                   "px;background:" +
+                   css +
                    ";border:0;padding:0;pointer-events:none;\"></button>\n";
         };
         return patch( "FIDA", fida_css, "left:2px;top:2px;" ) +
@@ -83,18 +87,24 @@ namespace ladder::view::fid
             view::ViewRect
             rect( const view::ViewRect& a11y ) const noexcept
             {
-                return view::ViewRect{ .x_ = ( sx_ * a11y.x_ ) + dx_,
-                                       .y_ = ( sy_ * a11y.y_ ) + dy_,
-                                       .w_ = sx_ * a11y.w_,
-                                       .h_ = sy_ * a11y.h_ };
+                return view::ViewRect{
+                    .x_ = ( sx_ * a11y.x_ ) + dx_,
+                    .y_ = ( sy_ * a11y.y_ ) + dy_,
+                    .w_ = sx_ * a11y.w_,
+                    .h_ = sy_ * a11y.h_
+                };
             }
 
             [[nodiscard]]
             bool
             identity() const noexcept
             {
-                return std::abs( sx_ - 1.0 ) < 0.005 &&
-                       std::abs( sy_ - 1.0 ) < 0.005 && std::abs( dx_ ) < 1.5 &&
+                return std::abs( sx_ - 1.0 ) <
+                       0.005 &&
+                       std::abs( sy_ - 1.0 ) <
+                       0.005 &&
+                       std::abs( dx_ ) <
+                       1.5 &&
                        std::abs( dy_ ) < 1.5;
             }
     };
@@ -127,19 +137,19 @@ namespace ladder::view::fid
                 std::uint8_t       want_g,
                 std::uint8_t       want_b )
         {
-            constexpr std::uint8_t tol = 36U;
-            const std::uint32_t    bpp = grab::bytes_per_pixel( frame.format );
-            const bool             bgr = frame.format == grab::PixelFormat::Bgra ||
-                             frame.format == grab::PixelFormat::Bgr;
-            double        min_x = 1E9;
-            double        min_y = 1E9;
-            double        max_x = -1.0;
-            double        max_y = -1.0;
-            std::uint64_t hits  = 0U;
+            constexpr std::uint8_t tol   = 36U;
+            const std::uint32_t    bpp   = grab::bytes_per_pixel( frame.format );
+            const bool             bgr   = frame.format ==
+                                           grab::PixelFormat::Bgra ||
+                                           frame.format == grab::PixelFormat::Bgr;
+            double                 min_x = 1E9;
+            double                 min_y = 1E9;
+            double                 max_x = -1.0;
+            double                 max_y = -1.0;
+            std::uint64_t          hits  = 0U;
             for( std::uint32_t row = 0U; row < frame.height; ++row )
             {
-                const std::size_t base = static_cast<std::size_t>( row ) *
-                                         frame.stride;
+                const std::size_t base = static_cast<std::size_t>( row ) * frame.stride;
                 for( std::uint32_t col = 0U; col < frame.width; ++col )
                 {
                     const std::size_t at =
@@ -148,20 +158,20 @@ namespace ladder::view::fid
                     {
                         continue;
                     }
-                    const auto b0 = static_cast<std::uint8_t>( frame.pixels[at] );
-                    const auto b1 =
-                        static_cast<std::uint8_t>( frame.pixels[at + 1U] );
-                    const auto b2 =
-                        static_cast<std::uint8_t>( frame.pixels[at + 2U] );
-                    const auto red   = bgr ? b2 : b0;
+                    const auto b0  = static_cast<std::uint8_t>( frame.pixels[at] );
+                    const auto b1  = static_cast<std::uint8_t>( frame.pixels[at + 1U] );
+                    const auto b2  = static_cast<std::uint8_t>( frame.pixels[at + 2U] );
+                    const auto red = bgr ? b2 : b0;
                     const auto green = b1;
                     const auto blue  = bgr ? b0 : b2;
                     const auto close = [&]( std::uint8_t have, std::uint8_t want )
                     {
-                        return have >= ( want > tol ? want - tol : 0 ) &&
+                        return have >=
+                               ( want > tol ? want - tol : 0 ) &&
                                have <= ( want < 255 - tol ? want + tol : 255 );
                     };
-                    if( close( red, want_r ) && close( green, want_g ) &&
+                    if( close( red, want_r ) &&
+                        close( green, want_g ) &&
                         close( blue, want_b ) )
                     {
                         min_x = std::min( min_x, static_cast<double>( col ) );
@@ -172,20 +182,37 @@ namespace ladder::view::fid
                     }
                 }
             }
-            const double w = max_x - min_x + 1.0;
-            const double h = max_y - min_y + 1.0;
+            const double w    = max_x - min_x + 1.0;
+            const double h    = max_y - min_y + 1.0;
             const double size = static_cast<double>( patch_px );
-            const bool   sane = hits > 0U && w >= size * 0.5 && w <= size * 4.0 &&
-                              h >= size * 0.5 && h <= size * 4.0 &&
-                              static_cast<double>( hits ) >= 0.5 * w * h;
+            const bool   sane = hits >
+                                0U &&
+                                w >=
+                                size *
+                                0.5 &&
+                                w <=
+                                size *
+                                4.0 &&
+                                h >=
+                                size *
+                                0.5 &&
+                                h <=
+                                size *
+                                4.0 &&
+                                static_cast<double>( hits ) >=
+                                0.5 *
+                                w *
+                                h;
             if( !sane )
             {
                 return std::nullopt;
             }
-            return Found{ .cx_ = ( min_x + max_x ) / 2.0,
-                          .cy_ = ( min_y + max_y ) / 2.0,
-                          .w_  = w,
-                          .h_  = h };
+            return Found{
+                .cx_ = ( min_x + max_x ) / 2.0,
+                .cy_ = ( min_y + max_y ) / 2.0,
+                .w_  = w,
+                .h_  = h
+            };
         }
 
         [[nodiscard]]
@@ -208,10 +235,12 @@ namespace ladder::view::fid
                 const auto& info = *described;
                 if( info.name == name && info.bounds.w > 0.0 && info.bounds.h > 0.0 )
                 {
-                    return view::ViewRect{ .x_ = info.bounds.x,
-                                           .y_ = info.bounds.y,
-                                           .w_ = info.bounds.w,
-                                           .h_ = info.bounds.h };
+                    return view::ViewRect{
+                        .x_ = info.bounds.x,
+                        .y_ = info.bounds.y,
+                        .w_ = info.bounds.w,
+                        .h_ = info.bounds.h
+                    };
                 }
             }
             return std::nullopt;
@@ -273,12 +302,12 @@ namespace ladder::view::fid
             return;
         }
 
-        const double a11y_ax  = fida->center_x();
-        const double a11y_ay  = fida->center_y();
-        const double a11y_bx  = fidb->center_x();
-        const double a11y_by  = fidb->center_y();
-        const double span_x   = a11y_bx - a11y_ax;
-        const double span_y   = a11y_by - a11y_ay;
+        const double     a11y_ax  = fida->center_x();
+        const double     a11y_ay  = fida->center_y();
+        const double     a11y_bx  = fidb->center_x();
+        const double     a11y_by  = fidb->center_y();
+        const double     span_x   = a11y_bx - a11y_ax;
+        const double     span_y   = a11y_by - a11y_ay;
         constexpr double min_span = 100.0;
         if( std::abs( span_x ) < min_span || std::abs( span_y ) < min_span )
         {
@@ -312,7 +341,7 @@ namespace ladder::view::fid
         map.measured_ = true;
         if( map.identity() )
         {
-            map = SpaceMap{};
+            map           = SpaceMap{};
             map.measured_ = true;
             std::cout << "  space     a11y == pixels (identity, measured from "
                          "fiducials)\n";
@@ -320,8 +349,8 @@ namespace ladder::view::fid
         else
         {
             std::cout << "  space     a11y -> pixels scale (" << map.sx_ << ","
-                      << map.sy_ << ") offset (" << static_cast<int>( map.dx_ )
-                      << "," << static_cast<int>( map.dy_ )
+                      << map.sy_ << ") offset (" << static_cast<int>( map.dx_ ) << ","
+                      << static_cast<int>( map.dy_ )
                       << ") — every rect corrected onto the rendered page\n";
         }
     }

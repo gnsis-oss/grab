@@ -78,6 +78,14 @@ namespace grab::screen
                          std::uint32_t     root_visual,
                          std::uint8_t      image_byte_order ) noexcept;
 
+            // Re-reads the root's LIVE geometry before a display or region
+            // capture. The open-time size goes stale the moment RandR
+            // resizes the screen, and a capture clipped to a stale extent
+            // reads as a mysteriously cropped frame. A failed query keeps
+            // the previous values — a stale size beats no capture at all.
+            void
+                                       refresh_screen_size() noexcept;
+
             xcb_connection_t*          connection_       = nullptr;
             std::uint32_t              root_             = 0U;
             std::uint16_t              screen_width_     = 0U;
