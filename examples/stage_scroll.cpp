@@ -167,6 +167,16 @@ namespace
                ";background:" + idle_fill +
                ";color:#fff;border:0;font:600 40px sans-serif;}\n"
                "</style></head><body>\n"
+               // The viewport anchors — see stage_scroll_tour: fixed strips
+               // whose a11y rects are the content area's true edges, live.
+               "<button aria-label=\"VIEWTOP\" tabindex=\"-1\" "
+               "style=\"position:fixed;left:0;top:0;width:120px;height:3px;"
+               "opacity:0.05;border:0;padding:0;pointer-events:none;"
+               "background:#000;\"></button>\n"
+               "<button aria-label=\"VIEWBOTTOM\" tabindex=\"-1\" "
+               "style=\"position:fixed;left:0;bottom:0;width:120px;height:3px;"
+               "opacity:0.05;border:0;padding:0;pointer-events:none;"
+               "background:#000;\"></button>\n"
                "<div id=\"hint\">SCROLL DOWN &#8595;</div>\n" +
                sections +
                "<button id=\"btn_bottom\" aria-label=\"" + idle_label + "\">" +
@@ -313,23 +323,24 @@ namespace
         return std::nullopt;
     }
 
-    // Visible means inside the browser WINDOW'S live frame (and inside the
-    // physical screen), never inside the authored viewport: the authored
-    // numbers are page-sized and say nothing about where the window manager
-    // put the window. The first version compared against the authored
-    // viewport and was correct only on an owned display whose window happens
-    // to sit at the origin — on a real desktop it declared a perfectly
-    // visible button hidden forever.
+    // Visible means inside the CONTENT AREA — its edges read live from the
+    // page's own fixed anchors — and inside the physical screen. Neither the
+    // authored viewport (says nothing about window placement) nor the window
+    // FRAME (under mutter it includes the CSD shadow, admitting a target
+    // whose bottom is clipped by the real content edge — and clicking a
+    // clipped control scrolls it into view mid-click, so the click never
+    // fires) can stand in for the measured content bounds.
     [[nodiscard]]
     bool
     fully_inside( const view::ViewRect& rect,
                   const view::ViewRect& window,
+                  double                content_top,
+                  double                content_bottom,
                   double                screen_w,
                   double                screen_h )
     {
-        return rect.y_ >= window.y_ + visible_margin &&
-               ( rect.y_ + rect.h_ ) <=
-                   window.y_ + window.h_ - visible_margin &&
+        return rect.y_ >= content_top + visible_margin &&
+               ( rect.y_ + rect.h_ ) <= content_bottom - visible_margin &&
                rect.x_ >= window.x_ &&
                ( rect.x_ + rect.w_ ) <= window.x_ + window.w_ &&
                rect.y_ >= 0.0 && ( rect.y_ + rect.h_ ) <= screen_h &&
@@ -607,7 +618,23 @@ main( int    argc,
                   << " " << summary->bounds.width << "x" << summary->bounds.height
                   << ")\n";
 
-        const bool below = live->rect_.y_ >= window_rect.y_ + window_rect.h_;
+        // The content area's edges, from the page's own fixed anchors.
+        const auto view_top    = resolve_named( **session, { "VIEWTOP" } );
+        const auto view_bottom = resolve_named( **session, { "VIEWBOTTOM" } );
+        if( !view_top.has_value() || !view_bottom.has_value() )
+        {
+            std::cerr << "the viewport anchors never resolved — REFUSING to "
+                         "scroll blind on this display\n";
+            host.stop();
+            return 1;
+        }
+        const double content_top    = view_top->rect_.y_ + view_top->rect_.h_;
+        const double content_bottom = view_bottom->rect_.y_;
+        std::cout << "  content   y " << static_cast<int>( content_top ) << " .. "
+                  << static_cast<int>( content_bottom )
+                  << " (from the page's fixed anchors)\n";
+
+        const bool below = live->rect_.y_ >= content_bottom;
         seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yBounds,
                                             .subject_ = start_subject,
                                             .value_ = below ? "below" : "on screen" } );
@@ -645,7 +672,8 @@ main( int    argc,
 
         int rounds = 0;
         while( rounds < max_scroll_rounds &&
-               !fully_inside( live->rect_, window_rect, screen_w, screen_h ) )
+               !fully_inside( live->rect_, window_rect, content_top,
+                              content_bottom, screen_w, screen_h ) )
         {
             ( void )( *input ).scroll( 0, notches_per_round );
             ++rounds;
@@ -658,8 +686,8 @@ main( int    argc,
                 live = again;
             }
         }
-        const bool visible = fully_inside( live->rect_, window_rect,
-                                           screen_w, screen_h );
+        const bool visible = fully_inside( live->rect_, window_rect, content_top,
+                                           content_bottom, screen_w, screen_h );
         seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yBounds,
                                             .subject_ = view_subject,
                                             .value_   = visible ? "visible"

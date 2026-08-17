@@ -92,6 +92,9 @@ namespace
     constexpr view::ViewRect date_rect{ .x_ = 20, .y_ = 360, .w_ = 220, .h_ = 40 };
     constexpr view::ViewRect pass_rect{ .x_ = 20, .y_ = 420, .w_ = 220, .h_ = 40 };
     constexpr view::ViewRect apply_rect{ .x_ = 860, .y_ = 340, .w_ = 120, .h_ = 56 };
+    // The receipt doubles as the calibration's SECOND anchor — keep in sync
+    // with the literal geometry page_html() writes for #receipt.
+    constexpr view::ViewRect receipt_rect{ .x_ = 540, .y_ = 420, .w_ = 440, .h_ = 50 };
 
     // Where on the range track to click, as a fraction of its width. The
     // slider jumps to the pointer, so the landed value is this fraction of
@@ -719,24 +722,89 @@ main( int    argc,
             .w_ = static_cast<double>( summary_window->bounds.width ),
             .h_ = static_cast<double>( summary_window->bounds.height ),
         };
-        const double chrome_x = apply->rect_.x_ - window_rect.x_ - apply_rect.x_;
-        const double chrome_y = apply->rect_.y_ - window_rect.y_ - apply_rect.y_;
         std::cout << "  window    (" << summary_window->bounds.x << ","
                   << summary_window->bounds.y << " " << summary_window->bounds.width
-                  << "x" << summary_window->bounds.height << ")\n  chrome    ("
-                  << static_cast<int>( chrome_x ) << ","
-                  << static_cast<int>( chrome_y ) << ") px (measured from APPLY)\n";
+                  << "x" << summary_window->bounds.height << ")\n";
 
-        // Page coordinates -> screen coordinates, through the measured
-        // offsets. Content never scrolls on this page, so the calibration
-        // holds for the whole run.
+        // ── Calibration, ENTIRELY in a11y space ─────────────────────────────
+        //
+        // The first version measured a chrome offset by mixing the a11y rect
+        // with the WM-reported window frame, assuming the two differ by a
+        // pure translation. On a real GNOME desktop they do not — CSD
+        // shadows and scaling put the frame in a space of its own — and the
+        // run walked the pointer over the operator's live desktop on a
+        // garbage transform. The rungs that aim by raw a11y rects work on
+        // that same desktop, so a11y space is the one INPUT provably lands
+        // in; the window frame is never mixed into aiming again.
+        //
+        // APPLY's resolved rect gives the whole affine map: its live size
+        // against the authored 120x56 is the scale, its live position minus
+        // the scaled authored position is the origin.
+        const double scale_x  = apply->rect_.w_ / apply_rect.w_;
+        const double scale_y  = apply->rect_.h_ / apply_rect.h_;
+        const double origin_x = apply->rect_.x_ - ( scale_x * apply_rect.x_ );
+        const double origin_y = apply->rect_.y_ - ( scale_y * apply_rect.y_ );
+        std::cout << "  calibrate scale (" << scale_x << "," << scale_y
+                  << ")  origin (" << static_cast<int>( origin_x ) << ","
+                  << static_cast<int>( origin_y ) << ")  from APPLY\n";
+
         const auto to_screen = [&]( const view::ViewRect& rect ) -> view::ViewRect
         {
-            return view::ViewRect{ .x_ = window_rect.x_ + chrome_x + rect.x_,
-                                   .y_ = window_rect.y_ + chrome_y + rect.y_,
-                                   .w_ = rect.w_,
-                                   .h_ = rect.h_ };
+            return view::ViewRect{ .x_ = origin_x + ( scale_x * rect.x_ ),
+                                   .y_ = origin_y + ( scale_y * rect.y_ ),
+                                   .w_ = scale_x * rect.w_,
+                                   .h_ = scale_y * rect.h_ };
         };
+
+        // The gate: a calibration is BELIEVED only after it predicts a
+        // SECOND anchor. The receipt button is authored at the other end of
+        // the page; resolve it, predict its centre through the map, and
+        // refuse to synthesize a single click if the prediction misses.
+        // Clicking a live desktop on an unverified transform is what this
+        // example did once, and never does again.
+        constexpr double sane_scale_low   = 0.5;
+        constexpr double sane_scale_high  = 3.0;
+        constexpr double anchor_slack_px  = 25.0;
+        bool             calibration_sane = scale_x >= sane_scale_low &&
+                                scale_x <= sane_scale_high &&
+                                scale_y >= sane_scale_low &&
+                                scale_y <= sane_scale_high;
+        if( calibration_sane )
+        {
+            const auto receipt_anchor =
+                resolve_prefix( **session, grab::role::button, "SUMMARY" );
+            if( !receipt_anchor.has_value() )
+            {
+                calibration_sane = false;
+                std::cerr << "calibration: the second anchor (receipt) never "
+                             "resolved\n";
+            }
+            else
+            {
+                const view::ViewRect predicted = to_screen( receipt_rect );
+                const double miss_x =
+                    predicted.center_x() - receipt_anchor->rect_.center_x();
+                const double miss_y =
+                    predicted.center_y() - receipt_anchor->rect_.center_y();
+                const double miss =
+                    std::sqrt( ( miss_x * miss_x ) + ( miss_y * miss_y ) );
+                std::cout << "  verify    second anchor off by "
+                          << static_cast<int>( miss ) << " px (<= "
+                          << static_cast<int>( anchor_slack_px )
+                          << " arms the run)\n";
+                calibration_sane = miss <= anchor_slack_px;
+            }
+        }
+        if( !calibration_sane )
+        {
+            std::cerr << "calibration is not trustworthy — REFUSING to click "
+                         "anything on this display.\n"
+                         "scale ("
+                      << scale_x << "," << scale_y
+                      << ") from APPLY; see the numbers above.\n";
+            host.stop();
+            return 1;
+        }
 
         auto empty_frame = ( *screen ).display();
         if( empty_frame.has_value() )

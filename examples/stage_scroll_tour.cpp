@@ -231,6 +231,20 @@ namespace
                "  #hint{position:absolute;left:300px;top:200px;"
                "font:600 44px sans-serif;color:#33415c;}\n"
                "</style></head><body>\n"
+               // The viewport anchors: position:fixed strips at the content
+               // area's exact top and bottom edges, invisible to the eye but
+               // present in the a11y tree. Their rects ARE the content
+               // bounds, live at any scroll — no window-frame arithmetic,
+               // no chrome guess, no CSD-shadow surprise. pointer-events
+               // none so they can never swallow a click.
+               "<button aria-label=\"VIEWTOP\" tabindex=\"-1\" "
+               "style=\"position:fixed;left:0;top:0;width:120px;height:3px;"
+               "opacity:0.05;border:0;padding:0;pointer-events:none;"
+               "background:#000;\"></button>\n"
+               "<button aria-label=\"VIEWBOTTOM\" tabindex=\"-1\" "
+               "style=\"position:fixed;left:0;bottom:0;width:120px;height:3px;"
+               "opacity:0.05;border:0;padding:0;pointer-events:none;"
+               "background:#000;\"></button>\n"
                "<div id=\"hint\">THE TOUR &#8595; &#8593; &#8595;</div>\n" +
                sections + buttons + script + "</body></html>\n";
     }
@@ -379,17 +393,23 @@ namespace
     // position, so a window-frame check admits it as "fully inside" while
     // its centre — the click target — sits in the URL bar. An up-leg parks
     // its target at the top edge, which is exactly where that bites.
+    // `content_bottom` matters as much as `content_top`: the window FRAME's
+    // bottom edge is the wrong bound (under mutter it includes the CSD
+    // shadow), and a target parked with its bottom clipped by the real
+    // content edge is a trap — mousedown focuses it, the browser scrolls it
+    // into view mid-click, and the release lands on a moved page: no click
+    // ever fires. Both edges come from the page's own fixed anchors.
     [[nodiscard]]
     bool
     fully_inside( const view::ViewRect& rect,
                   const view::ViewRect& window,
                   double                content_top,
+                  double                content_bottom,
                   double                screen_w,
                   double                screen_h )
     {
         return rect.y_ >= content_top + visible_margin &&
-               ( rect.y_ + rect.h_ ) <=
-                   window.y_ + window.h_ - visible_margin &&
+               ( rect.y_ + rect.h_ ) <= content_bottom - visible_margin &&
                rect.x_ >= window.x_ &&
                ( rect.x_ + rect.w_ ) <= window.x_ + window.w_ &&
                rect.y_ >= 0.0 && ( rect.y_ + rect.h_ ) <= screen_h &&
@@ -679,29 +699,28 @@ main( int    argc,
             screen_h = static_cast<double>( top_frame->height );
         }
 
-        // The chrome height, MEASURED rather than guessed: the page loads
-        // unscrolled, and FIRST is authored at page y first_y, so its screen
-        // y right now is window top + chrome + first_y. Guessing here is what
-        // clicked a URL bar once: a11y rects do not clip at the chrome, so
-        // without this line an up-leg can park its target half-under the URL
-        // bar and still read as "fully inside the window".
-        constexpr double fallback_chrome_px = 160.0;
-        double           chrome_px          = fallback_chrome_px;
-        const double     measured_chrome =
-            probe->rect_.y_ - window_rect.y_ - static_cast<double>( first_y );
-        if( measured_chrome >= 0.0 && measured_chrome <= window_rect.h_ / 2.0 )
+        // The content area's edges, from the page's own fixed anchors: two
+        // invisible position:fixed strips authored at top:0 and bottom:0,
+        // whose a11y rects ARE the content bounds, live at any scroll. This
+        // replaced two generations of guesswork — a chrome height inferred
+        // at scroll 0 (which fixed the URL-bar click) and the window FRAME's
+        // bottom edge (which, under mutter, includes the CSD shadow and
+        // admitted a bottom-clipped target whose mid-click focus scroll
+        // swallowed the click).
+        const auto view_top = resolve_named( **session, { "VIEWTOP" } );
+        const auto view_bottom = resolve_named( **session, { "VIEWBOTTOM" } );
+        if( !view_top.has_value() || !view_bottom.has_value() )
         {
-            chrome_px = measured_chrome;
-            std::cout << "  chrome    " << static_cast<int>( chrome_px )
-                      << " px (measured at scroll 0)\n";
+            std::cerr << "the viewport anchors never resolved — REFUSING to "
+                         "scroll blind on this display\n";
+            host.stop();
+            return 1;
         }
-        else
-        {
-            std::cout << "  chrome    measurement implausible ("
-                      << static_cast<int>( measured_chrome ) << " px) — using "
-                      << static_cast<int>( fallback_chrome_px ) << " px\n";
-        }
-        const double content_top = window_rect.y_ + chrome_px;
+        const double content_top    = view_top->rect_.y_ + view_top->rect_.h_;
+        const double content_bottom = view_bottom->rect_.y_;
+        std::cout << "  content   y " << static_cast<int>( content_top ) << " .. "
+                  << static_cast<int>( content_bottom )
+                  << " (from the page's fixed anchors)\n";
 
         // ── 4. THE TOUR ─────────────────────────────────────────────────────
         const auto park_x = static_cast<std::int16_t>(
@@ -780,7 +799,7 @@ main( int    argc,
             while( target.has_value() && rounds < max_leg_rounds )
             {
                 if( fully_inside( target->rect_, window_rect, content_top,
-                                  screen_w, screen_h ) )
+                                  content_bottom, screen_w, screen_h ) )
                 {
                     // The predicate held once — but the browser may still be
                     // settling the last burst. The rect the CLICK will aim at
@@ -793,7 +812,7 @@ main( int    argc,
                     target = resolve_named( **session, { label } );
                     if( target.has_value() &&
                         fully_inside( target->rect_, window_rect, content_top,
-                                      screen_w, screen_h ) )
+                                      content_bottom, screen_w, screen_h ) )
                     {
                         break;
                     }
@@ -803,7 +822,7 @@ main( int    argc,
                 ++beat;
                 const bool needs_down =
                     ( target->rect_.y_ + target->rect_.h_ ) >
-                    window_rect.y_ + window_rect.h_ - visible_margin;
+                    content_bottom - visible_margin;
                 ( void )( *input ).scroll( 0, needs_down ? notches : -notches );
                 ++rounds;
                 std::this_thread::sleep_for(
@@ -930,12 +949,12 @@ main( int    argc,
             if( auto before_leg = resolve_named( **session, { stop.idle_label_ } );
                 before_leg.has_value() )
             {
-                if( before_leg->rect_.y_ >= window_rect.y_ + window_rect.h_ )
+                if( before_leg->rect_.y_ >= content_bottom )
                 {
                     direction = "below";
                 }
                 else if( before_leg->rect_.y_ + before_leg->rect_.h_ <=
-                         window_rect.y_ )
+                         content_top )
                 {
                     direction = "above";
                 }
@@ -952,7 +971,7 @@ main( int    argc,
                                                  leg_paces[leg] );
             if( !target.has_value() ||
                 !fully_inside( target->rect_, window_rect, content_top,
-                               screen_w, screen_h ) )
+                               content_bottom, screen_w, screen_h ) )
             {
                 std::cerr << "leg " << leg + 1U << " never brought "
                           << stop.idle_label_ << " on screen\n";
