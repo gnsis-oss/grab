@@ -9,7 +9,8 @@
 // │    radio     click option B of a group                                   │
 // │    combo     click to open the popup, then click the wanted option in   │
 // │              it — BY MOUSE, resolving the option's live popup rect       │
-// │    range     click the track at 80% — the slider jumps to the pointer    │
+// │    range     DRAG the thumb from its 50% start to the 80% mark —         │
+// │              press on the thumb, carry while held, release               │
 // │    number    click, type "42"                                            │
 // │    date      click, type the digits of a date into its segments          │
 // │    password  click, type a secret                                        │
@@ -99,11 +100,10 @@ namespace
     // with the literal geometry page_html() writes for #receipt.
     constexpr view::ViewRect receipt_rect{ .x_ = 540, .y_ = 420, .w_ = 440, .h_ = 50 };
 
-    // Where on the range track to click, as a fraction of its width. The
-    // slider jumps to the pointer, so the landed value is this fraction of
-    // the scale give or take the track's end padding — asserted as a RANGE,
-    // never as an exact number.
-    constexpr double         range_click_fraction = 0.80;
+    // Where the thumb is dragged to, as a fraction of the track's width.
+    // The landed value is this fraction of the scale give or take the
+    // track's end padding — asserted as a RANGE, never an exact number.
+    constexpr double         range_drag_fraction = 0.80;
     constexpr double         range_low            = 70.0;
     constexpr double         range_high           = 90.0;
 
@@ -963,9 +963,13 @@ main( int    argc,
 
         bool       all_presses_inside = true;
 
-        // Approach `aim` (a small spot within `target`) and click. The
-        // press-inside verdict is against the CONTROL's whole rect.
-        const auto click_at =
+        // Approach `aim` (a small spot within `target`) on a human
+        // trajectory, drawing the goal box and the trail. The pointer ends
+        // ON the aim; the press-inside verdict is bookkept against the
+        // CONTROL's whole rect. Pressing is the CALLER's business — a click
+        // and a drag share this approach and differ only in what the button
+        // does at each end.
+        const auto move_to =
             [&]( const view::ViewRect& target, const view::ViewRect& aim )
         {
             if( overlay != nullptr )
@@ -1053,6 +1057,11 @@ main( int    argc,
             {
                 all_presses_inside = false;
             }
+        };
+        const auto click_at =
+            [&]( const view::ViewRect& target, const view::ViewRect& aim )
+        {
+            move_to( target, aim );
             const double hold_s = std::exp( rng.normal( std::log( 0.080 ), 0.35 ) );
             ( void )( *input ).press();
             std::this_thread::sleep_for( std::chrono::duration<double>( hold_s ) );
@@ -1202,17 +1211,37 @@ main( int    argc,
             std::this_thread::sleep_for( std::chrono::milliseconds{ react_ms } );
         }
 
-        std::cout << "  range     click the track at "
-                  << static_cast<int>( range_click_fraction * 100.0 ) << "%\n";
+        // The slider, DRAGGED — not clicked. The authored value is 50, so
+        // the thumb sits at the track's centre: press ON it (pressing the
+        // thumb itself means no value jump on mousedown), settle the grip
+        // like a human would, carry it while held to the 80% mark on a
+        // second human trajectory, and release. From press to release the
+        // code is straight-line — a button left down survives the process.
+        std::cout << "  range     drag the thumb from 50% to "
+                  << static_cast<int>( range_drag_fraction * 100.0 ) << "%\n";
         {
             const view::ViewRect target = to_screen( range_rect );
-            const view::ViewRect aim{
-                .x_ = target.x_ + ( target.w_ * range_click_fraction ) - 3.0,
+            const view::ViewRect thumb_aim{
+                .x_ = target.center_x() - 3.0,
                 .y_ = target.center_y() - 4.0,
                 .w_ = 6.0,
-                .h_ = 8.0
+                .h_ = 8.0,
             };
-            click_at( target, aim );
+            move_to( target, thumb_aim );
+            const double grip_s = std::exp( rng.normal( std::log( 0.120 ), 0.30 ) );
+            ( void )( *input ).press();
+            std::this_thread::sleep_for( std::chrono::duration<double>( grip_s ) );
+            const view::ViewRect end_aim{
+                .x_ = target.x_ + ( target.w_ * range_drag_fraction ) - 3.0,
+                .y_ = target.center_y() - 4.0,
+                .w_ = 6.0,
+                .h_ = 8.0,
+            };
+            move_to( target, end_aim );
+            std::this_thread::sleep_for( std::chrono::milliseconds{ 80 } );
+            ( void )( *input ).release();
+            retire_trail();
+            std::this_thread::sleep_for( std::chrono::milliseconds{ react_ms } );
         }
 
         std::cout << "  number    click, type \"" << typed_number << "\"\n";
