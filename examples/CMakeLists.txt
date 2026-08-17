@@ -106,3 +106,22 @@ target_link_libraries(stage_scroll_tour PRIVATE
     grab_codec)
 target_include_directories(stage_scroll_tour PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(stage_scroll_tour PRIVATE cxx_std_23)
+
+# Rung 6: the keyboard — focus a labelled entry with a real click, type a
+# paragraph letter by letter at a human rhythm (word breaths, comma and
+# full-stop beats, occasional thinks), then press SEND. Verified on a11y
+# (value equals the paragraph exactly, receipt carries what the page's
+# script received), pixel and device (key-downs counted) channels.
+add_executable(stage_type stage_type.cpp)
+target_link_libraries(stage_type PRIVATE
+    grab_core
+    grab_kernel
+    grab_session
+    grab_platform_x11
+    grab_input
+    grab_input_x11
+    grab_screen
+    grab_image
+    grab_codec)
+target_include_directories(stage_type PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_features(stage_type PRIVATE cxx_std_23)
