@@ -645,6 +645,7 @@ user_pref("browser.uitour.enabled", false);
 user_pref("layout.css.devPixelsPerPx", "1.0");
 user_pref("browser.link.open_newwindow", 1);
 user_pref("general.smoothScroll", false);
+user_pref("signon.rememberSignons", false);
 )";
         }
 

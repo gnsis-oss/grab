@@ -125,3 +125,22 @@ target_link_libraries(stage_type PRIVATE
     grab_codec)
 target_include_directories(stage_type PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(stage_type PRIVATE cxx_std_23)
+
+# Rung 7: the controls — a form carrying every HTML input type (all 22)
+# plus a combo box; text, checkbox, radio, combo (by keyboard), range
+# (click-the-track), number, date, password and a real type=submit are
+# driven; values verified through page-side mirrors read over a11y, the
+# APPLY summary, and a JS-enumerated catalog of the DOM's input types.
+add_executable(stage_form stage_form.cpp)
+target_link_libraries(stage_form PRIVATE
+    grab_core
+    grab_kernel
+    grab_session
+    grab_platform_x11
+    grab_input
+    grab_input_x11
+    grab_screen
+    grab_image
+    grab_codec)
+target_include_directories(stage_form PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_features(stage_form PRIVATE cxx_std_23)
