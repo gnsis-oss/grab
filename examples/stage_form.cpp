@@ -34,6 +34,7 @@
 // │    stage_form --keep          leave the session up afterwards           │
 // └──────────────────────────────────────────────────────────────────────────┘
 
+#include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
 #include "support/overlay_align.hpp"
@@ -214,7 +215,9 @@ namespace
                             "  html,body{margin:0;padding:0;background:#f4f4f4;"
                             "font:400 16px sans-serif;}\n"
                             "  input,select{box-sizing:border-box;}\n"
-                            "</style></head><body>\n"
+                            "</style></head><body>\n" +
+               ladder::view::fid::patches_html() +
+               ""
                             "<form id=\"f\">\n" } +
                "<input type=\"text\" id=\"f_text\" aria-label=\"TEXT\" "
                "style=\"position:absolute;" + px_rect( text_rect ) + "\">\n"
@@ -448,10 +451,11 @@ namespace
             {
                 return Live{
                     .name_  = info.name,
-                    .rect_  = view::ViewRect{ .x_ = info.bounds.x,
-                                              .y_ = info.bounds.y,
-                                              .w_ = info.bounds.w,
-                                              .h_ = info.bounds.h },
+                    .rect_  = ladder::view::fid::current().rect(
+                        view::ViewRect{ .x_ = info.bounds.x,
+                                        .y_ = info.bounds.y,
+                                        .w_ = info.bounds.w,
+                                        .h_ = info.bounds.h } ),
                     .space_ = info.bounds.space,
                 };
             }
@@ -650,6 +654,11 @@ main( int    argc,
         {
             std::cerr << "reactor: " << why( observing.error() ) << '\n';
         }
+
+        // Anchor every rect that follows to the RENDERED PIXELS: measure the
+        // a11y -> device map from the page's own corner fiducials. The
+        // window manager is never part of the geometry path.
+        ladder::view::fid::measure( **session, *screen );
 
         std::optional<grab::Subscription> event_subscription;
         {
@@ -1048,11 +1057,11 @@ main( int    argc,
                         {
                             option = Live{
                                 .name_ = info.name,
-                                .rect_ =
+                                .rect_ = ladder::view::fid::current().rect(
                                     view::ViewRect{ .x_ = info.bounds.x,
                                                     .y_ = info.bounds.y,
                                                     .w_ = info.bounds.w,
-                                                    .h_ = info.bounds.h },
+                                                    .h_ = info.bounds.h } ),
                                 .space_ = info.bounds.space,
                             };
                             break;

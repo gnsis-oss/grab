@@ -26,6 +26,7 @@
 // │    stage_scroll_tour --keep          leave the session up afterwards     │
 // └──────────────────────────────────────────────────────────────────────────┘
 
+#include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
 #include "support/overlay_align.hpp"
@@ -231,7 +232,9 @@ namespace
                "font:500 18px sans-serif;color:#66788f;}\n"
                "  #hint{position:absolute;left:300px;top:200px;"
                "font:600 44px sans-serif;color:#33415c;}\n"
-               "</style></head><body>\n"
+               "</style></head><body>\n" +
+               ladder::view::fid::patches_html() +
+               ""
                // The viewport anchors: position:fixed strips at the content
                // area's exact top and bottom edges, invisible to the eye but
                // present in the a11y tree. Their rects ARE the content
@@ -375,10 +378,11 @@ namespace
                 {
                     return Live{
                         .name_  = info.name,
-                        .rect_  = view::ViewRect{ .x_ = info.bounds.x,
-                                                  .y_ = info.bounds.y,
-                                                  .w_ = info.bounds.w,
-                                                  .h_ = info.bounds.h },
+                        .rect_  = ladder::view::fid::current().rect(
+                            view::ViewRect{ .x_ = info.bounds.x,
+                                            .y_ = info.bounds.y,
+                                            .w_ = info.bounds.w,
+                                            .h_ = info.bounds.h } ),
                         .space_ = info.bounds.space,
                     };
                 }
@@ -617,6 +621,11 @@ main( int    argc,
         {
             std::cerr << "reactor: " << why( observing.error() ) << '\n';
         }
+
+        // Anchor every rect that follows to the RENDERED PIXELS: measure the
+        // a11y -> device map from the page's own corner fiducials. The
+        // window manager is never part of the geometry path.
+        ladder::view::fid::measure( **session, *screen );
 
         std::optional<grab::Subscription> button_subscription;
         {

@@ -36,6 +36,7 @@
 // │  ever synthesized onto the session you are sitting in front of.           │
 // └──────────────────────────────────────────────────────────────────────────┘
 
+#include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
 #include "support/overlay_align.hpp"
@@ -160,7 +161,9 @@ namespace
                "background:" +
                idle_fill +
                ";color:#fff;border:0;font:600 40px sans-serif;}\n"
-               "</style></head><body>\n"
+               "</style></head><body>\n" +
+               ladder::view::fid::patches_html() +
+               ""
                "<button id=\"btn_main\" aria-label=\"" +
                idle_label +
                "\">" +
@@ -324,15 +327,20 @@ namespace
             {
                 continue;
             }
+            // By NAME, not "first button in the tree": the page now carries
+            // the corner fiducials, which are buttons too, and the first run
+            // without this filter resolved FIDA and clicked an 18x18 patch.
+            if( info.name != idle_label && info.name != clicked_label )
+            {
+                continue;
+            }
             return Live{
                 .name_ = info.name,
-                .rect_ =
-                    view::ViewRect{
-                                   .x_ = info.bounds.x,
-                                   .y_ = info.bounds.y,
-                                   .w_ = info.bounds.w,
-                                   .h_ = info.bounds.h
-                    },
+                .rect_ = ladder::view::fid::current().rect( view::ViewRect{
+                    .x_ = info.bounds.x,
+                    .y_ = info.bounds.y,
+                    .w_ = info.bounds.w,
+                    .h_ = info.bounds.h } ),
                 .space_ = info.bounds.space
             };
         }
@@ -556,6 +564,11 @@ main( int    argc,
         {
             std::cerr << "reactor: " << why( observing.error() ) << '\n';
         }
+
+        // Anchor every rect that follows to the RENDERED PIXELS: measure the
+        // a11y -> device map from the page's own corner fiducials. The
+        // window manager is never part of the geometry path.
+        ladder::view::fid::measure( **session, *screen );
 
         // Subscribe to mouse button events (DOWN and UP pairs)
         std::optional<grab::Subscription> button_subscription;

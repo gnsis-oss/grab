@@ -25,6 +25,7 @@
 // │    stage_scroll --keep          leave the session up afterwards          │
 // └──────────────────────────────────────────────────────────────────────────┘
 
+#include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
 #include "support/overlay_align.hpp"
@@ -167,7 +168,9 @@ namespace
                ";height:" + px( button_h ) +
                ";background:" + idle_fill +
                ";color:#fff;border:0;font:600 40px sans-serif;}\n"
-               "</style></head><body>\n"
+               "</style></head><body>\n" +
+               ladder::view::fid::patches_html() +
+               ""
                // The viewport anchors — see stage_scroll_tour: fixed strips
                // whose a11y rects are the content area's true edges, live.
                "<button aria-label=\"VIEWTOP\" tabindex=\"-1\" "
@@ -312,10 +315,11 @@ namespace
                 {
                     return Live{
                         .name_  = info.name,
-                        .rect_  = view::ViewRect{ .x_ = info.bounds.x,
-                                                  .y_ = info.bounds.y,
-                                                  .w_ = info.bounds.w,
-                                                  .h_ = info.bounds.h },
+                        .rect_  = ladder::view::fid::current().rect(
+                            view::ViewRect{ .x_ = info.bounds.x,
+                                            .y_ = info.bounds.y,
+                                            .w_ = info.bounds.w,
+                                            .h_ = info.bounds.h } ),
                         .space_ = info.bounds.space,
                     };
                 }
@@ -542,6 +546,11 @@ main( int    argc,
         {
             std::cerr << "reactor: " << why( observing.error() ) << '\n';
         }
+
+        // Anchor every rect that follows to the RENDERED PIXELS: measure the
+        // a11y -> device map from the page's own corner fiducials. The
+        // window manager is never part of the geometry path.
+        ladder::view::fid::measure( **session, *screen );
 
         // The X server's own record: wheel notches are button 4/5 presses, so
         // one subscription witnesses both the scrolling and the click.

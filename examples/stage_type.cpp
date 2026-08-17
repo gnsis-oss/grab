@@ -27,6 +27,7 @@
 // │    stage_type --keep          leave the session up afterwards            │
 // └──────────────────────────────────────────────────────────────────────────┘
 
+#include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
 #include "support/overlay_align.hpp"
@@ -168,7 +169,9 @@ namespace
                ";top:" + px( send_y ) + ";width:" +
                px( viewport_w - ( send_x + send_w + 80 ) ) +
                ";font:400 16px sans-serif;color:#33415c;}\n"
-               "</style></head><body>\n"
+               "</style></head><body>\n" +
+               ladder::view::fid::patches_html() +
+               ""
                "<textarea id=\"msg\" aria-label=\"" + field_label +
                "\"></textarea>\n"
                "<button id=\"send\" aria-label=\"" + send_idle + "\">" + send_idle +
@@ -322,10 +325,11 @@ namespace
                     return Live{
                         .name_  = info.name,
                         .text_  = info.text,
-                        .rect_  = view::ViewRect{ .x_ = info.bounds.x,
-                                                  .y_ = info.bounds.y,
-                                                  .w_ = info.bounds.w,
-                                                  .h_ = info.bounds.h },
+                        .rect_  = ladder::view::fid::current().rect(
+                            view::ViewRect{ .x_ = info.bounds.x,
+                                            .y_ = info.bounds.y,
+                                            .w_ = info.bounds.w,
+                                            .h_ = info.bounds.h } ),
                         .space_ = info.bounds.space,
                     };
                 }
@@ -528,6 +532,11 @@ main( int    argc,
         {
             std::cerr << "reactor: " << why( observing.error() ) << '\n';
         }
+
+        // Anchor every rect that follows to the RENDERED PIXELS: measure the
+        // a11y -> device map from the page's own corner fiducials. The
+        // window manager is never part of the geometry path.
+        ladder::view::fid::measure( **session, *screen );
 
         // The X server's own record: every keystroke and both clicks.
         std::optional<grab::Subscription> event_subscription;

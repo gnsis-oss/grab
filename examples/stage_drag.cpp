@@ -26,6 +26,7 @@
 // │    stage_drag --keep          leave the session up afterwards            │
 // └──────────────────────────────────────────────────────────────────────────┘
 
+#include "support/fiducial.hpp"
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
 #include "support/overlay_align.hpp"
@@ -166,7 +167,9 @@ namespace
                ";width:" + px( zone_w ) + ";height:" + px( zone_h ) +
                ";background:" + zone_idle_fill +
                ";border:6px dashed #8a8a8a;color:#555;font:600 22px sans-serif;}\n"
-               "</style></head><body>\n"
+               "</style></head><body>\n" +
+               ladder::view::fid::patches_html() +
+               ""
                "<button id=\"drop_zone\" aria-label=\"" + zone_idle_label + "\">" +
                zone_idle_label + "</button>\n"
                "<button id=\"app_icon\" aria-label=\"" + icon_idle_label + "\">" +
@@ -329,10 +332,11 @@ namespace
                 {
                     return Live{
                         .name_  = info.name,
-                        .rect_  = view::ViewRect{ .x_ = info.bounds.x,
-                                                  .y_ = info.bounds.y,
-                                                  .w_ = info.bounds.w,
-                                                  .h_ = info.bounds.h },
+                        .rect_  = ladder::view::fid::current().rect(
+                            view::ViewRect{ .x_ = info.bounds.x,
+                                            .y_ = info.bounds.y,
+                                            .w_ = info.bounds.w,
+                                            .h_ = info.bounds.h } ),
                         .space_ = info.bounds.space,
                     };
                 }
@@ -592,6 +596,11 @@ main( int    argc,
         {
             std::cerr << "reactor: " << why( observing.error() ) << '\n';
         }
+
+        // Anchor every rect that follows to the RENDERED PIXELS: measure the
+        // a11y -> device map from the page's own corner fiducials. The
+        // window manager is never part of the geometry path.
+        ladder::view::fid::measure( **session, *screen );
 
         // The X server's own record of the presses this run makes.
         std::optional<grab::Subscription> button_subscription;
