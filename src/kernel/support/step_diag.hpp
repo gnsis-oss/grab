@@ -81,8 +81,8 @@ namespace grab::diag
         public:
 
             void
-            record( std::string_view          name,
-                    std::chrono::nanoseconds  elapsed ) noexcept
+            record( std::string_view         name,
+                    std::chrono::nanoseconds elapsed ) noexcept
             {
                 Tally* const slot = find_or_add( name );
                 if( slot == nullptr )
@@ -91,9 +91,9 @@ namespace grab::diag
                     return;
                 }
                 ++slot->calls;
-                slot->total += elapsed;
-                slot->shortest = std::min( slot->shortest, elapsed );
-                slot->longest  = std::max( slot->longest, elapsed );
+                slot->total    += elapsed;
+                slot->shortest  = std::min( slot->shortest, elapsed );
+                slot->longest   = std::max( slot->longest, elapsed );
             }
 
             [[nodiscard]]
@@ -148,7 +148,8 @@ namespace grab::diag
                 {
                     // Pointer-equal first: names are constexpr string_views, so
                     // this hits on almost every call and skips the compare.
-                    if( slots_[index].name.data() == name.data() ||
+                    if( slots_[index].name.data() ==
+                        name.data() ||
                         slots_[index].name == name )
                     {
                         return &slots_[index];
@@ -198,8 +199,7 @@ namespace grab::diag
             {
                 if constexpr( enabled )
                 {
-                    into_->record( name_,
-                                   std::chrono::steady_clock::now() - started_ );
+                    into_->record( name_, std::chrono::steady_clock::now() - started_ );
                 }
             }
 
@@ -234,16 +234,15 @@ namespace grab::diag
             // compiled-out object 24 bytes wide and put two stores on a path
             // that is supposed to vanish -- and the waypoint loop constructs
             // one of these per waypoint.
-            using Started = std::conditional_t<enabled,
-                                               std::chrono::steady_clock::time_point,
-                                               IdleClock>;
-            using Sink    = std::conditional_t<enabled, Instrument*, IdleSink>;
-            using Name    = std::conditional_t<enabled, std::string_view, IdleName>;
+            using Started = std::
+                conditional_t<enabled, std::chrono::steady_clock::time_point, IdleClock>;
+            using Sink = std::conditional_t<enabled, Instrument*, IdleSink>;
+            using Name = std::conditional_t<enabled, std::string_view, IdleName>;
 
             [[no_unique_address]]
-            Sink    into_{};
+            Sink into_{};
             [[no_unique_address]]
-            Name    name_{};
+            Name name_{};
             [[no_unique_address]]
             Started started_{};
     };
