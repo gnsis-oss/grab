@@ -165,8 +165,11 @@ namespace
                               .pattern_   = ramp_pattern,
                               .settle_ms_ = 180 };
 
-    constexpr int           max_leg_rounds = 80;
-    constexpr double        visible_margin = 8.0;
+    constexpr int           max_leg_rounds   = 80;
+    constexpr double        visible_margin   = 8.0;
+    // A leg only ends when its target reads fully inside across TWO reads
+    // this far apart — the settled rect is the one the click will aim at.
+    constexpr int           stable_settle_ms = 300;
 
     constexpr std::uint64_t seed        = 0X5'D1'DE'00'0AULL;
     constexpr int           settle_ms   = 700;
@@ -369,14 +372,22 @@ namespace
         return std::nullopt;
     }
 
+    // `content_top` is the ABSOLUTE screen y where the page's content area
+    // begins — the window's top edge plus the measured chrome (tab strip,
+    // URL bar). It matters because a11y rects do NOT clip at the chrome: a
+    // button half-scrolled under the URL bar still reports its layout
+    // position, so a window-frame check admits it as "fully inside" while
+    // its centre — the click target — sits in the URL bar. An up-leg parks
+    // its target at the top edge, which is exactly where that bites.
     [[nodiscard]]
     bool
     fully_inside( const view::ViewRect& rect,
                   const view::ViewRect& window,
+                  double                content_top,
                   double                screen_w,
                   double                screen_h )
     {
-        return rect.y_ >= window.y_ + visible_margin &&
+        return rect.y_ >= content_top + visible_margin &&
                ( rect.y_ + rect.h_ ) <=
                    window.y_ + window.h_ - visible_margin &&
                rect.x_ >= window.x_ &&
@@ -668,6 +679,30 @@ main( int    argc,
             screen_h = static_cast<double>( top_frame->height );
         }
 
+        // The chrome height, MEASURED rather than guessed: the page loads
+        // unscrolled, and FIRST is authored at page y first_y, so its screen
+        // y right now is window top + chrome + first_y. Guessing here is what
+        // clicked a URL bar once: a11y rects do not clip at the chrome, so
+        // without this line an up-leg can park its target half-under the URL
+        // bar and still read as "fully inside the window".
+        constexpr double fallback_chrome_px = 160.0;
+        double           chrome_px          = fallback_chrome_px;
+        const double     measured_chrome =
+            probe->rect_.y_ - window_rect.y_ - static_cast<double>( first_y );
+        if( measured_chrome >= 0.0 && measured_chrome <= window_rect.h_ / 2.0 )
+        {
+            chrome_px = measured_chrome;
+            std::cout << "  chrome    " << static_cast<int>( chrome_px )
+                      << " px (measured at scroll 0)\n";
+        }
+        else
+        {
+            std::cout << "  chrome    measurement implausible ("
+                      << static_cast<int>( measured_chrome ) << " px) — using "
+                      << static_cast<int>( fallback_chrome_px ) << " px\n";
+        }
+        const double content_top = window_rect.y_ + chrome_px;
+
         // ── 4. THE TOUR ─────────────────────────────────────────────────────
         const auto park_x = static_cast<std::int16_t>(
             window_rect.x_ + ( window_rect.w_ * park_fraction_x )
@@ -742,9 +777,28 @@ main( int    argc,
             std::optional<Live> target = resolve_named( **session, { label } );
             int                 rounds = 0;
             std::size_t         beat   = 0U;
-            while( target.has_value() && rounds < max_leg_rounds &&
-                   !fully_inside( target->rect_, window_rect, screen_w, screen_h ) )
+            while( target.has_value() && rounds < max_leg_rounds )
             {
+                if( fully_inside( target->rect_, window_rect, content_top,
+                                  screen_w, screen_h ) )
+                {
+                    // The predicate held once — but the browser may still be
+                    // settling the last burst. The rect the CLICK will aim at
+                    // must be the settled one, so confirm it holds across a
+                    // settle before believing it; a drifted target re-enters
+                    // the loop and keeps scrolling.
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds{ stable_settle_ms }
+                    );
+                    target = resolve_named( **session, { label } );
+                    if( target.has_value() &&
+                        fully_inside( target->rect_, window_rect, content_top,
+                                      screen_w, screen_h ) )
+                    {
+                        break;
+                    }
+                    continue;
+                }
                 const int notches = pace.pattern_[beat % pace.pattern_.size()];
                 ++beat;
                 const bool needs_down =
@@ -897,7 +951,8 @@ main( int    argc,
             const auto target = bring_into_view( stop.idle_label_,
                                                  leg_paces[leg] );
             if( !target.has_value() ||
-                !fully_inside( target->rect_, window_rect, screen_w, screen_h ) )
+                !fully_inside( target->rect_, window_rect, content_top,
+                               screen_w, screen_h ) )
             {
                 std::cerr << "leg " << leg + 1U << " never brought "
                           << stop.idle_label_ << " on screen\n";
