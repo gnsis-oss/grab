@@ -70,3 +70,20 @@ target_link_libraries(stage_drag PRIVATE
     grab_codec)
 target_include_directories(stage_drag PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(stage_drag PRIVATE cxx_std_23)
+
+# Rung 9: wheel then click — a four-screenful page whose button starts below
+# the fold, is wheeled into view in measured bursts (pixels-per-notch is a
+# browser setting nothing asserts), then approached and clicked.
+add_executable(stage_scroll stage_scroll.cpp)
+target_link_libraries(stage_scroll PRIVATE
+    grab_core
+    grab_kernel
+    grab_session
+    grab_platform_x11
+    grab_input
+    grab_input_x11
+    grab_screen
+    grab_image
+    grab_codec)
+target_include_directories(stage_scroll PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_features(stage_scroll PRIVATE cxx_std_23)
