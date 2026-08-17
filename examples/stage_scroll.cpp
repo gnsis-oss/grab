@@ -27,6 +27,7 @@
 
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
+#include "support/overlay_align.hpp"
 #include "support/motion/trajectory.hpp"
 #include "support/pixel.hpp"
 #include "support/stage/assert.hpp"
@@ -655,6 +656,12 @@ main( int    argc,
             screen_h = static_cast<double>( top_frame->height );
         }
 
+        // Where do overlay shapes ACTUALLY land? Measured over the page,
+        // just under the content top — the button itself is below the fold.
+        const auto omap = ladder::view::align::measure(
+            overlay, *screen, space,
+            window_rect.x_ + ( window_rect.w_ * 0.55 ), content_top + 60.0 );
+
         // ── 4. SCROLL — measured, never assumed ─────────────────────────────
         // The wheel goes to the window under the pointer, so park over the
         // page first — INSIDE the live window frame, below its chrome. Each
@@ -713,10 +720,10 @@ main( int    argc,
                 .geometry =
                     grab::overlay::Rect{
                                         .bounds =
-                            grab::SpaceRect{ .x     = live->rect_.x_,
-                                             .y     = live->rect_.y_,
-                                             .w     = live->rect_.w_,
-                                             .h     = live->rect_.h_,
+                            grab::SpaceRect{ .x     = omap.x( live->rect_.x_ ),
+                                             .y     = omap.y( live->rect_.y_ ),
+                                             .w     = live->rect_.w_ / omap.sx_,
+                                             .h     = live->rect_.h_ / omap.sy_,
                                              .space = space } },
                 .stroke   = grab::overlay::StrokeStyle{ .color    = colour,
                                                         .width_px = stroke_px },
@@ -749,14 +756,14 @@ main( int    argc,
             std::vector<grab::overlay::PathCommand> commands;
             commands.reserve( pending.size() );
             commands.emplace_back( grab::overlay::MoveTo{
-                .point = grab::SpacePoint{ .x     = pending.front().x_,
-                                           .y     = pending.front().y_,
+                .point = grab::SpacePoint{ .x     = omap.x( pending.front().x_ ),
+                                           .y     = omap.y( pending.front().y_ ),
                                            .space = space } } );
             for( std::size_t step = 1U; step < pending.size(); ++step )
             {
                 commands.emplace_back( grab::overlay::LineTo{
-                    .point = grab::SpacePoint{ .x     = pending[step].x_,
-                                               .y     = pending[step].y_,
+                    .point = grab::SpacePoint{ .x     = omap.x( pending[step].x_ ),
+                                               .y     = omap.y( pending[step].y_ ),
                                                .space = space } } );
             }
             auto added = overlay->add( grab::overlay::Shape{

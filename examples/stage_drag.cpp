@@ -28,6 +28,7 @@
 
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
+#include "support/overlay_align.hpp"
 #include "support/motion/trajectory.hpp"
 #include "support/pixel.hpp"
 #include "support/stage/assert.hpp"
@@ -668,6 +669,9 @@ main( int    argc,
                       std::to_string( static_cast<int>( icon->rect_.h_ ) ) } );
 
         // ── 4. DRAW ─────────────────────────────────────────────────────────
+        // Where do overlay shapes ACTUALLY land? Measured, at the icon.
+        const auto omap = ladder::view::align::measure(
+            overlay, *screen, space, icon->rect_.x_, icon->rect_.y_ );
         const auto goal = [&]( const view::ViewRect&       rect,
                                const grab::overlay::Color& colour )
         {
@@ -675,12 +679,13 @@ main( int    argc,
             {
                 return;
             }
+            const view::ViewRect box = omap.rect( rect );
             ( void )overlay->add( grab::overlay::Shape{
                 .geometry = grab::overlay::Rect{ .bounds =
-                                                     grab::SpaceRect{ .x = rect.x_,
-                                                                      .y = rect.y_,
-                                                                      .w = rect.w_,
-                                                                      .h = rect.h_,
+                                                     grab::SpaceRect{ .x = box.x_,
+                                                                      .y = box.y_,
+                                                                      .w = box.w_,
+                                                                      .h = box.h_,
                                                                       .space = space } },
                 .stroke   = grab::overlay::StrokeStyle{ .color    = colour,
                                                         .width_px = stroke_px },
@@ -737,14 +742,14 @@ main( int    argc,
             std::vector<grab::overlay::PathCommand> commands;
             commands.reserve( pending.size() );
             commands.emplace_back( grab::overlay::MoveTo{
-                .point = grab::SpacePoint{ .x     = pending.front().x_,
-                                           .y     = pending.front().y_,
+                .point = grab::SpacePoint{ .x     = omap.x( pending.front().x_ ),
+                                           .y     = omap.y( pending.front().y_ ),
                                            .space = space } } );
             for( std::size_t step = 1U; step < pending.size(); ++step )
             {
                 commands.emplace_back( grab::overlay::LineTo{
-                    .point = grab::SpacePoint{ .x     = pending[step].x_,
-                                               .y     = pending[step].y_,
+                    .point = grab::SpacePoint{ .x     = omap.x( pending[step].x_ ),
+                                               .y     = omap.y( pending[step].y_ ),
                                                .space = space } } );
             }
             auto added = overlay->add( grab::overlay::Shape{

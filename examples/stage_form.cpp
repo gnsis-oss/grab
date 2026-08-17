@@ -7,8 +7,8 @@
 // │    text      click, type "grab"                                          │
 // │    checkbox  click it on                                                 │
 // │    radio     click option B of a group                                   │
-// │    combo     click to focus, Escape to close the popup, Down to select   │
-// │              the next option — BY KEYBOARD, deliberately (ladder §5.3)   │
+// │    combo     click to open the popup, then click the wanted option in   │
+// │              it — BY MOUSE, resolving the option's live popup rect       │
 // │    range     click the track at 80% — the slider jumps to the pointer    │
 // │    number    click, type "42"                                            │
 // │    date      click, type the digits of a date into its segments          │
@@ -36,6 +36,7 @@
 
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
+#include "support/overlay_align.hpp"
 #include "support/motion/trajectory.hpp"
 #include "support/pixel.hpp"
 #include "support/stage/assert.hpp"
@@ -58,6 +59,7 @@
 #include <grab/screen.hpp>
 #include <grab/session.hpp>
 #include <grab/watch.hpp>
+#include <initializer_list>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -812,6 +814,10 @@ main( int    argc,
             pixel::write_ppm( *empty_frame, options.out / "01-empty.ppm" );
         }
 
+        // Where do overlay shapes ACTUALLY land? Measured, at APPLY.
+        const auto omap = ladder::view::align::measure(
+            overlay, *screen, space, apply->rect_.x_, apply->rect_.y_ );
+
         // ── 4. THE ACT ──────────────────────────────────────────────────────
         motion::Rng                         rng{ seed };
         std::vector<motion::Vec2>           pending;
@@ -825,14 +831,14 @@ main( int    argc,
             std::vector<grab::overlay::PathCommand> commands;
             commands.reserve( pending.size() );
             commands.emplace_back( grab::overlay::MoveTo{
-                .point = grab::SpacePoint{ .x     = pending.front().x_,
-                                           .y     = pending.front().y_,
+                .point = grab::SpacePoint{ .x     = omap.x( pending.front().x_ ),
+                                           .y     = omap.y( pending.front().y_ ),
                                            .space = space } } );
             for( std::size_t step = 1U; step < pending.size(); ++step )
             {
                 commands.emplace_back( grab::overlay::LineTo{
-                    .point = grab::SpacePoint{ .x     = pending[step].x_,
-                                               .y     = pending[step].y_,
+                    .point = grab::SpacePoint{ .x     = omap.x( pending[step].x_ ),
+                                               .y     = omap.y( pending[step].y_ ),
                                                .space = space } } );
             }
             auto added = overlay->add( grab::overlay::Shape{
@@ -878,10 +884,10 @@ main( int    argc,
             {
                 ( void )overlay->add( grab::overlay::Shape{
                     .geometry = grab::overlay::Rect{
-                        .bounds = grab::SpaceRect{ .x     = target.x_,
-                                                   .y     = target.y_,
-                                                   .w     = target.w_,
-                                                   .h     = target.h_,
+                        .bounds = grab::SpaceRect{ .x     = omap.x( target.x_ ),
+                                                   .y     = omap.y( target.y_ ),
+                                                   .w     = target.w_ / omap.sx_,
+                                                   .h     = target.h_ / omap.sy_,
                                                    .space = space } },
                     .stroke   = grab::overlay::StrokeStyle{ .color    = cyan,
                                                             .width_px = stroke_px },
@@ -1001,15 +1007,91 @@ main( int    argc,
         std::cout << "  radio     click option B\n";
         click_center( radio_b_rect );
 
-        // The combo, by keyboard (ladder §5.3): the click takes focus and
-        // opens the popup, Escape closes it without choosing, and Down —
-        // against a CLOSED popup — moves the selection to the next option.
-        std::cout << "  combo     click, Escape, Down -> second option\n";
+        // The combo, BY MOUSE: click the select — the popup opens — then
+        // resolve the wanted option's LIVE rect through the tree and click
+        // the option itself. The popup is a transient surface, so the
+        // option is searched without the document scope and across the
+        // roles a dropdown option can surface as. Only if the popup never
+        // exposes a clickable rect does the keyboard fallback run, loudly.
+        std::cout << "  combo     click to open, then click \"beta\" in the "
+                     "popup\n";
         click_center( combo_rect );
-        ( void )( *input ).press_key( "Escape" );
         std::this_thread::sleep_for( std::chrono::milliseconds{ react_ms } );
-        ( void )( *input ).press_key( "Down" );
-        std::this_thread::sleep_for( std::chrono::milliseconds{ react_ms } );
+        std::optional<Live> option;
+        for( int attempt = 0; attempt < 10 && !option.has_value(); ++attempt )
+        {
+            if( auto synced = ( *session )->resync(); synced.has_value() )
+            {
+                for( const grab::RoleId role_id :
+                     { grab::role::control, grab::role::menu_item,
+                       grab::role::list, grab::role::text } )
+                {
+                    auto matches = ( *session )->resolve_all(
+                        grab::sel::role( role_id ) );
+                    if( !matches.has_value() )
+                    {
+                        continue;
+                    }
+                    for( const grab::Match& match : *matches )
+                    {
+                        auto described = ( *session )->describe( match );
+                        if( !described.has_value() )
+                        {
+                            continue;
+                        }
+                        const auto& info = *described;
+                        // A popup row: named like the option, option-sized,
+                        // and NOT the collapsed select itself.
+                        if( info.name == "beta" && info.bounds.h >= 10.0 &&
+                            info.bounds.h <= 60.0 && info.bounds.w >= 40.0 &&
+                            info.bounds.w <= 500.0 )
+                        {
+                            option = Live{
+                                .name_ = info.name,
+                                .rect_ =
+                                    view::ViewRect{ .x_ = info.bounds.x,
+                                                    .y_ = info.bounds.y,
+                                                    .w_ = info.bounds.w,
+                                                    .h_ = info.bounds.h },
+                                .space_ = info.bounds.space,
+                            };
+                            break;
+                        }
+                    }
+                    if( option.has_value() )
+                    {
+                        break;
+                    }
+                }
+            }
+            if( !option.has_value() )
+            {
+                std::this_thread::sleep_for( std::chrono::milliseconds{ poll_ms } );
+            }
+        }
+        if( option.has_value() )
+        {
+            std::cout << "  combo     option \"beta\" at ("
+                      << static_cast<int>( option->rect_.x_ ) << ","
+                      << static_cast<int>( option->rect_.y_ ) << " "
+                      << static_cast<int>( option->rect_.w_ ) << "x"
+                      << static_cast<int>( option->rect_.h_ )
+                      << ") — clicking it\n";
+            const view::ViewRect aim{ .x_ = option->rect_.center_x() - 4.0,
+                                      .y_ = option->rect_.center_y() - 4.0,
+                                      .w_ = 8.0,
+                                      .h_ = 8.0 };
+            click_at( option->rect_, aim );
+        }
+        else
+        {
+            std::cout << "  combo     popup exposed no clickable option rect — "
+                         "FALLING BACK to keyboard (Escape, Down)\n";
+            ( void )( *input ).press_key( "Escape" );
+            std::this_thread::sleep_for( std::chrono::milliseconds{ react_ms } );
+            ( void )( *input ).press_key( "Down" );
+            std::this_thread::sleep_for( std::chrono::milliseconds{ react_ms } );
+        }
 
         std::cout << "  range     click the track at "
                   << static_cast<int>( range_click_fraction * 100.0 ) << "%\n";
@@ -1232,7 +1314,8 @@ main( int    argc,
             {
                 keys_seen = "typed";
             }
-            // 9 driven clicks: text, checkbox, radio, combo, range, number,
+            // At least 9 driven clicks: text, checkbox, radio, combo (two
+            // when the popup option is clicked by mouse), range, number,
             // date, password, apply.
             constexpr std::size_t driven_clicks = 9U;
             if( click_pairs >= driven_clicks )

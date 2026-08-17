@@ -38,6 +38,7 @@
 
 #include "support/host.hpp"
 #include "support/motion/noise.hpp"
+#include "support/overlay_align.hpp"
 #include "support/pixel.hpp"
 #include "support/motion/trajectory.hpp"
 #include "support/stage/assert.hpp"
@@ -662,21 +663,25 @@ main( int    argc,
                   << '\n';
 
         // ── 4. DRAW ─────────────────────────────────────────────────────────
+        // Where do overlay shapes ACTUALLY land? Measured, at the button.
+        const auto omap = ladder::view::align::measure(
+            overlay, *screen, space, live->rect_.x_, live->rect_.y_ );
         const auto goal = [&]( const grab::overlay::Color& colour )
         {
             if( overlay == nullptr )
             {
                 return;
             }
+            const view::ViewRect box_rect = omap.rect( live->rect_ );
             grab::overlay::Shape box{
                 .geometry =
                     grab::overlay::Rect{
                                         .bounds =
                             grab::SpaceRect{
-                                .x     = live->rect_.x_,
-                                .y     = live->rect_.y_,
-                                .w     = live->rect_.w_,
-                                .h     = live->rect_.h_,
+                                .x     = box_rect.x_,
+                                .y     = box_rect.y_,
+                                .w     = box_rect.w_,
+                                .h     = box_rect.h_,
                                 .space = space
                             }
                     },
@@ -765,8 +770,8 @@ main( int    argc,
             commands.reserve( pending.size() );
             commands.emplace_back( grab::overlay::MoveTo{
                 .point = grab::SpacePoint{
-                                          .x     = pending.front().x_,
-                                          .y     = pending.front().y_,
+                                          .x     = omap.x( pending.front().x_ ),
+                                          .y     = omap.y( pending.front().y_ ),
                                           .space = space
                 }
             } );
@@ -774,8 +779,8 @@ main( int    argc,
             {
                 commands.emplace_back( grab::overlay::LineTo{
                     .point = grab::SpacePoint{
-                                              .x     = pending[step].x_,
-                                              .y     = pending[step].y_,
+                                              .x     = omap.x( pending[step].x_ ),
+                                              .y     = omap.y( pending[step].y_ ),
                                               .space = space
                     }
                 } );
