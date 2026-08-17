@@ -100,10 +100,15 @@ namespace
     constexpr double               trail_stroke_px = 2.0;
     constexpr auto                 trail_slack = std::chrono::milliseconds{ 8 };
 
-    // Where the pointer parks to scroll: over the page, clear of the column
-    // the button will rise through, so the approach still has a visible sweep.
-    constexpr std::int16_t  scroll_park_x = 850;
-    constexpr std::int16_t  scroll_park_y = 400;
+    // Where the pointer parks to scroll, as FRACTIONS of the browser window's
+    // frame. Absolute screen coordinates were the first version, and they are
+    // wrong the moment a real window manager places the window anywhere but
+    // the origin: the wheel goes to the window under the pointer, and an
+    // absolute park point can sit over the chrome, another application, or
+    // the desktop. Right of centre and two thirds down: over the page, below
+    // the chrome, clear of the column the button rises through.
+    constexpr double        park_fraction_x = 0.72;
+    constexpr double        park_fraction_y = 0.66;
 
     // Wheel bursts: a few notches, then re-read the live rect. The distance
     // one notch travels is a browser setting (ladder §5.4), so the loop is
@@ -308,15 +313,27 @@ namespace
         return std::nullopt;
     }
 
+    // Visible means inside the browser WINDOW'S live frame (and inside the
+    // physical screen), never inside the authored viewport: the authored
+    // numbers are page-sized and say nothing about where the window manager
+    // put the window. The first version compared against the authored
+    // viewport and was correct only on an owned display whose window happens
+    // to sit at the origin — on a real desktop it declared a perfectly
+    // visible button hidden forever.
     [[nodiscard]]
     bool
-    fully_on_screen( const view::ViewRect& rect )
+    fully_inside( const view::ViewRect& rect,
+                  const view::ViewRect& window,
+                  double                screen_w,
+                  double                screen_h )
     {
-        return rect.y_ >= visible_margin &&
+        return rect.y_ >= window.y_ + visible_margin &&
                ( rect.y_ + rect.h_ ) <=
-                   static_cast<double>( viewport_h ) - visible_margin &&
-               rect.x_ >= 0.0 &&
-               ( rect.x_ + rect.w_ ) <= static_cast<double>( viewport_w );
+                   window.y_ + window.h_ - visible_margin &&
+               rect.x_ >= window.x_ &&
+               ( rect.x_ + rect.w_ ) <= window.x_ + window.w_ &&
+               rect.y_ >= 0.0 && ( rect.y_ + rect.h_ ) <= screen_h &&
+               rect.x_ >= 0.0 && ( rect.x_ + rect.w_ ) <= screen_w;
     }
 
     struct Options
@@ -570,7 +587,27 @@ main( int    argc,
             host.stop();
             return 1;
         }
-        const bool below = live->rect_.y_ >= static_cast<double>( viewport_h );
+        // The browser window's LIVE frame — the anchor for every geometric
+        // judgement below. The authored viewport cannot stand in for it: on a
+        // real desktop the window manager decides where the window sits.
+        const auto summary = host.browser_window();
+        if( !summary.has_value() )
+        {
+            std::cerr << "the browser window disappeared from the window list\n";
+            host.stop();
+            return 1;
+        }
+        const view::ViewRect window_rect{
+            .x_ = static_cast<double>( summary->bounds.x ),
+            .y_ = static_cast<double>( summary->bounds.y ),
+            .w_ = static_cast<double>( summary->bounds.width ),
+            .h_ = static_cast<double>( summary->bounds.height ),
+        };
+        std::cout << "  window    (" << summary->bounds.x << "," << summary->bounds.y
+                  << " " << summary->bounds.width << "x" << summary->bounds.height
+                  << ")\n";
+
+        const bool below = live->rect_.y_ >= window_rect.y_ + window_rect.h_;
         seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yBounds,
                                             .subject_ = start_subject,
                                             .value_ = below ? "below" : "on screen" } );
@@ -581,22 +618,34 @@ main( int    argc,
                   << "\" — " << ( below ? "below the fold" : "ALREADY ON SCREEN" )
                   << '\n';
 
-        auto top_frame = ( *screen ).display();
+        auto   top_frame = ( *screen ).display();
+        double screen_w  = window_rect.x_ + window_rect.w_;
+        double screen_h  = window_rect.y_ + window_rect.h_;
         if( top_frame.has_value() )
         {
             pixel::write_ppm( *top_frame, options.out / "01-top.ppm" );
+            screen_w = static_cast<double>( top_frame->width );
+            screen_h = static_cast<double>( top_frame->height );
         }
 
         // ── 4. SCROLL — measured, never assumed ─────────────────────────────
         // The wheel goes to the window under the pointer, so park over the
-        // page first. Each round turns a few notches, waits for the browser
-        // to settle, and re-reads the LIVE rect; pixels-per-notch is a
-        // browser setting nothing here relies on.
-        ( void )( *input ).move( scroll_park_x, scroll_park_y );
+        // page first — INSIDE the live window frame, below its chrome. Each
+        // round turns a few notches, waits for the browser to settle, and
+        // re-reads the LIVE rect; pixels-per-notch is a browser setting
+        // nothing here relies on.
+        const auto park_x = static_cast<std::int16_t>(
+            window_rect.x_ + ( window_rect.w_ * park_fraction_x )
+        );
+        const auto park_y = static_cast<std::int16_t>(
+            window_rect.y_ + ( window_rect.h_ * park_fraction_y )
+        );
+        ( void )( *input ).move( park_x, park_y );
         std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
 
         int rounds = 0;
-        while( rounds < max_scroll_rounds && !fully_on_screen( live->rect_ ) )
+        while( rounds < max_scroll_rounds &&
+               !fully_inside( live->rect_, window_rect, screen_w, screen_h ) )
         {
             ( void )( *input ).scroll( 0, notches_per_round );
             ++rounds;
@@ -609,7 +658,8 @@ main( int    argc,
                 live = again;
             }
         }
-        const bool visible = fully_on_screen( live->rect_ );
+        const bool visible = fully_inside( live->rect_, window_rect,
+                                           screen_w, screen_h );
         seen.push_back( stage::Observation{ .observe_ = stage::Observe::A11yBounds,
                                             .subject_ = view_subject,
                                             .value_   = visible ? "visible"
@@ -701,9 +751,9 @@ main( int    argc,
 
         const auto   start = ( *input ).position();
         motion::Vec2 cursor{ start.has_value() ? static_cast<double>( start->x )
-                                               : static_cast<double>( scroll_park_x ),
+                                               : static_cast<double>( park_x ),
                              start.has_value() ? static_cast<double>( start->y )
-                                               : static_cast<double>( scroll_park_y ) };
+                                               : static_cast<double>( park_y ) };
         const motion::Rect aim{ live->rect_.x_,
                                 live->rect_.y_,
                                 live->rect_.w_,

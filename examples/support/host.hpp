@@ -54,6 +54,9 @@ namespace ladder::host
     constexpr int         display_wait_tries = 100;
     constexpr int         service_settle_ms  = 800;
     constexpr int         browser_wait_ms    = 500;
+    // How long to give the window manager after an activation request before
+    // trusting that input aimed at the browser reaches the browser.
+    constexpr int         raise_settle_ms    = 400;
     constexpr int         browser_wait_tries = 60;
     constexpr int         teardown_grace_ms  = 300;
     constexpr const char* default_display    = ":77";
@@ -285,6 +288,38 @@ namespace ladder::host
                 xcompmgr_.stop();
                 openbox_.stop();
                 xvfb_.stop();
+            }
+
+            // The browser's top-level window, looked up FRESH by the title
+            // marker. Fresh because a WindowSummary goes stale the moment the
+            // window moves — and on a live desktop (--session) the operator
+            // can move it. Everything an example computes from screen
+            // geometry — parks, fold checks, wheel positions — must come from
+            // here, never from the authored viewport: the authored numbers
+            // are page-sized and say nothing about WHERE the window manager
+            // put the window.
+            [[nodiscard]]
+            std::optional<grab::WindowSummary>
+            browser_window() const
+            {
+                auto screen = grab::Screen::open( display_.c_str() );
+                if( !screen.has_value() )
+                {
+                    return std::nullopt;
+                }
+                auto listed = screen->windows();
+                if( !listed.has_value() )
+                {
+                    return std::nullopt;
+                }
+                for( const auto& window : *listed )
+                {
+                    if( window.title.contains( marker_ ) )
+                    {
+                        return window;
+                    }
+                }
+                return std::nullopt;
             }
 
         private:
@@ -673,6 +708,27 @@ user_pref("general.smoothScroll", false);
                         {
                             std::cout << "  firefox    " << window.title << " (pid "
                                       << firefox_.pid() << ")\n";
+                            // Raise it THE MOMENT it maps. On an owned display
+                            // this is a formality; on a live desktop
+                            // (--session) a new window can open behind, and
+                            // then every wheel notch and every click lands on
+                            // whatever is in front of it. Activation is a
+                            // REQUEST to the window manager — asynchronous and
+                            // legitimately refusable — so this asks, waits a
+                            // beat, and reports, rather than assuming.
+                            if( auto raised = screen->activate_window( window.id );
+                                raised.has_value() )
+                            {
+                                std::this_thread::sleep_for(
+                                    std::chrono::milliseconds{ raise_settle_ms }
+                                );
+                                std::cout << "  raise      browser raised\n";
+                            }
+                            else
+                            {
+                                std::cout << "  raise      REFUSED — input may "
+                                             "land on whatever is in front\n";
+                            }
                             return true;
                         }
                     }

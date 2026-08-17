@@ -113,9 +113,12 @@ namespace
 
     constexpr double               stroke_px       = 3.0;
     constexpr double               trail_stroke_px = 2.0;
-    // Park bottom-left, clear of both rects, so the approach crosses the page.
-    constexpr std::int16_t         park_x      = 80;
-    constexpr std::int16_t         park_y      = 620;
+    // Park bottom-left of the WINDOW, clear of both rects, so the approach
+    // crosses the page — as fractions of the window's live frame, because on
+    // a real desktop the window manager decides where the window is and an
+    // absolute park can sit over another application entirely.
+    constexpr double               park_fx     = 0.08;
+    constexpr double               park_fy     = 0.88;
     // The trail yields to the motion, never the reverse — see stage_button.
     constexpr auto                 trail_slack = std::chrono::milliseconds{ 8 };
 
@@ -701,6 +704,22 @@ main( int    argc,
 
         // ── 5. APPROACH · GRAB · CARRY · DROP ───────────────────────────────
         motion::Rng rng{ seed };
+        // Park relative to the window's live frame, wherever the window
+        // manager put it. Falls back to the icon's own rect if the window
+        // list momentarily fails — a short approach beats no park.
+        auto park_x = static_cast<std::int16_t>( icon->rect_.x_ );
+        auto park_y = static_cast<std::int16_t>( icon->rect_.y_ );
+        if( const auto summary = host.browser_window(); summary.has_value() )
+        {
+            park_x = static_cast<std::int16_t>(
+                static_cast<double>( summary->bounds.x ) +
+                ( static_cast<double>( summary->bounds.width ) * park_fx )
+            );
+            park_y = static_cast<std::int16_t>(
+                static_cast<double>( summary->bounds.y ) +
+                ( static_cast<double>( summary->bounds.height ) * park_fy )
+            );
+        }
         ( void )( *input ).move( park_x, park_y );
         std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
 

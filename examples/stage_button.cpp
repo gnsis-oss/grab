@@ -109,13 +109,17 @@ namespace
 
     constexpr double               stroke_px       = 3.0;
     constexpr double               trail_stroke_px = 2.0;
-    // Where --trail parks the cursor before the approach. The pointer's
-    // resting place on a fresh display is the screen centre, about 100 px from
-    // the button, and a trail over 100 px of travel is a squiggle that shows
-    // nothing -- measured, on the first run of this code. Bottom-left, clear
-    // of the button rect, so the sweep crosses the page diagonally.
-    constexpr std::int16_t         trail_origin_x = 80;
-    constexpr std::int16_t         trail_origin_y = 620;
+    // Where --trail parks the cursor before the approach, as FRACTIONS of the
+    // browser window's live frame. The pointer's resting place on a fresh
+    // display is about 100 px from the button, and a trail over 100 px of
+    // travel is a squiggle that shows nothing -- measured, on the first run
+    // of this code. Bottom-left of the WINDOW, clear of the button rect, so
+    // the sweep crosses the page diagonally. Fractions rather than absolute
+    // screen coordinates, because on a real desktop the window manager
+    // decides where the window is — an absolute park can sit over another
+    // application entirely.
+    constexpr double               trail_origin_fx = 0.08;
+    constexpr double               trail_origin_fy = 0.88;
     // Do not start an overlay round trip when the next cursor sample is nearly
     // due. Overlay::add measures ~645 us mean but ~5.1 ms worst on this
     // machine; the trajectory is the thing under test and the trail is
@@ -698,7 +702,23 @@ main( int    argc,
         // every earlier one rather than quietly moving under a new flag.
         if( options.trail )
         {
-            ( void )( *input ).move( trail_origin_x, trail_origin_y );
+            // Park relative to the window's live frame, wherever the window
+            // manager put it. Falls back to the button's own rect if the
+            // window list momentarily fails — a short trail beats no park.
+            auto trail_park_x = static_cast<std::int16_t>( live->rect_.x_ );
+            auto trail_park_y = static_cast<std::int16_t>( live->rect_.y_ );
+            if( const auto summary = host.browser_window(); summary.has_value() )
+            {
+                trail_park_x = static_cast<std::int16_t>(
+                    static_cast<double>( summary->bounds.x ) +
+                    ( static_cast<double>( summary->bounds.width ) * trail_origin_fx )
+                );
+                trail_park_y = static_cast<std::int16_t>(
+                    static_cast<double>( summary->bounds.y ) +
+                    ( static_cast<double>( summary->bounds.height ) * trail_origin_fy )
+                );
+            }
+            ( void )( *input ).move( trail_park_x, trail_park_y );
             std::this_thread::sleep_for( std::chrono::milliseconds{ settle_ms } );
         }
         const auto   start = ( *input ).position();
