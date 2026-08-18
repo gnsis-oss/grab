@@ -220,7 +220,10 @@ target_compile_features(grab_notify PUBLIC cxx_std_23)
 target_link_libraries(grab_screen PUBLIC grab_image grab_notify)
 
 add_library(grab_session STATIC
+    src/session/display_probe.cpp
     src/session/manager.cpp
+    src/session/poll_wait.cpp
+    src/session/provisioning.cpp
     src/session/record.cpp
     src/session/registry.cpp
     src/session/selection.cpp

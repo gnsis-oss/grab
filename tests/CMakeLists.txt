@@ -322,6 +322,8 @@ endif()
 add_executable(grab_session_tests
     session/fake_session_provider_test.cpp
     session/manager_test.cpp
+    session/poll_wait_test.cpp
+    session/provisioning_test.cpp
     session/registry_test.cpp
     session/record_test.cpp
     session/selection_test.cpp

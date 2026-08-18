@@ -32,3 +32,11 @@ target_link_libraries(event_logger PRIVATE
     grab_driver_webextension
     grab_storage)
 target_compile_features(event_logger PRIVATE cxx_std_23)
+
+# The consumer side of display provisioning, whole: one call for a display
+# grab can honestly drive, and a report of which preconditions are live.
+add_executable(provision_display provision_display.cpp)
+target_link_libraries(provision_display PRIVATE
+    grab_core
+    grab_session)
+target_compile_features(provision_display PRIVATE cxx_std_23)
