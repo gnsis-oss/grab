@@ -67,6 +67,18 @@ namespace grab::kernel::presentation
                 animator_.consume( item );
             }
 
+            // Push everything the animator has produced so far onto the overlay.
+            // The delta sink defers Upserts into pending_shapes_ (so a burst of
+            // motion is one add_many, not N adds); this is what actually lands
+            // them. It MUST be called at the end of every drain cycle — without
+            // it, new trail segments sit un-flushed until a fade delta happens to
+            // trigger a flush, which is a visible lag between cursor and trail.
+            void
+            flush()
+            {
+                flush_pending();
+            }
+
             [[nodiscard]]
             std::optional<Error>
             error() const
@@ -198,11 +210,35 @@ namespace grab::kernel::presentation
             void
             drain()
             {
-                while( auto item = subscription_.try_pop_item() )
+                // Mirrors the CLI's TrailDrainState::drain: pop the batch, then
+                // flush the accumulated segments to the overlay THIS cycle (not
+                // whenever the next fade delta lands) — that flush is what keeps
+                // the trail glued to the cursor. The re-check after clearing
+                // scheduled_ closes the lost-wakeup race where an event arrives
+                // between the drain emptying the queue and releasing the slot.
+                while( true )
                 {
-                    bridge_.consume( *item );
+                    while( auto item = subscription_.try_pop_item() )
+                    {
+                        bridge_.consume( *item );
+                    }
+                    scheduled_.store( false );
+                    auto raced = subscription_.try_pop_item();
+                    if( !raced.has_value() )
+                    {
+                        bridge_.flush();
+                        return;
+                    }
+                    bool expected = false;
+                    if( scheduled_.compare_exchange_strong( expected, true ) )
+                    {
+                        bridge_.consume( *raced );
+                        continue;
+                    }
+                    bridge_.consume( *raced );
+                    bridge_.flush();
+                    return;
                 }
-                scheduled_.store( false );
             }
 
             void
