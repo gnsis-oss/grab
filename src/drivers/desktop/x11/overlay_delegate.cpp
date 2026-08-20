@@ -679,6 +679,70 @@ namespace grab::drivers::desktop::x11
         }
 
         [[nodiscard]]
+        Result<xcb_atom_t>
+        intern_atom( xcb_connection_t* connection,
+                     std::string_view  name )
+        {
+            xcb_generic_error_t* raw_error{};
+            const auto           reply = take_xcb_owned( xcb_intern_atom_reply(
+                connection,
+                xcb_intern_atom( connection,
+                                 0U,
+                                 static_cast<std::uint16_t>( name.size() ),
+                                 name.data() ),
+                &raw_error
+            ) );
+            const auto           error = take_xcb_owned( raw_error );
+            if( error != nullptr || reply == nullptr )
+            {
+                return std::unexpected(
+                    make_error( ErrorCode::ProtocolError,
+                                "X11 overlay atom lookup failed" )
+                );
+            }
+            return reply->atom;
+        }
+
+        // EWMH _NET_WM_BYPASS_COMPOSITOR hint value that asks the compositor to
+        // never unredirect this window. Mutter's "unredirect fullscreen windows"
+        // optimization otherwise pulls a screen-sized override-redirect ARGB
+        // overlay out of the compositor, so its drawn shapes never blend onto the
+        // screen even though attach and stacking succeed.
+        constexpr std::uint32_t bypassCompositorNever = 2U;
+
+        // CARDINAL property format width, in bits, for a single 32-bit value.
+        constexpr std::uint8_t  cardinalPropertyFormat = 32U;
+
+        // Set _NET_WM_BYPASS_COMPOSITOR = 2 so a compositor that honours the hint
+        // (mutter) always composites the overlay. Best-effort: a compositor that
+        // ignores the property is unaffected, and the interning/property requests
+        // are checked so a genuine protocol failure still surfaces.
+        [[nodiscard]]
+        Result<void>
+        apply_never_bypass_compositor( xcb_connection_t* connection,
+                                       xcb_window_t      window )
+        {
+            auto atom =
+                intern_atom( connection, "_NET_WM_BYPASS_COMPOSITOR" );
+            if( !atom.has_value() )
+            {
+                return std::unexpected( std::move( atom.error() ) );
+            }
+            return check_request(
+                connection,
+                xcb_change_property_checked( connection,
+                                             XCB_PROP_MODE_REPLACE,
+                                             window,
+                                             *atom,
+                                             XCB_ATOM_CARDINAL,
+                                             cardinalPropertyFormat,
+                                             1U,
+                                             &bypassCompositorNever ),
+                "set X11 overlay _NET_WM_BYPASS_COMPOSITOR"
+            );
+        }
+
+        [[nodiscard]]
         Result<xcb_window_t>
         selection_owner( xcb_connection_t* connection,
                          xcb_atom_t        selection )
@@ -1934,6 +1998,13 @@ namespace grab::drivers::desktop::x11
                 if( !window_created.has_value() )
                 {
                     return window_created;
+                }
+
+                auto bypass = apply_never_bypass_compositor( connection_.get(),
+                                                             window_ );
+                if( !bypass.has_value() )
+                {
+                    return bypass;
                 }
 
                 auto passthrough = apply_input_region( {} );
