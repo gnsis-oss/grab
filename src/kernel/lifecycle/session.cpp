@@ -609,6 +609,13 @@ namespace grab
             is_open() const noexcept;
 
             [[nodiscard]]
+            const std::optional<std::string>&
+            display() const noexcept
+            {
+                return options_.display;
+            }
+
+            [[nodiscard]]
             grab::core::Reactor&
             reactor() noexcept;
 
@@ -1395,6 +1402,12 @@ namespace grab
     Session::is_open() const noexcept
     {
         return impl_->is_open();
+    }
+
+    const std::optional<std::string>&
+    Session::display() const noexcept
+    {
+        return impl_->display();
     }
 
     grab::core::Reactor&

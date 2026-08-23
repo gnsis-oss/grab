@@ -129,6 +129,16 @@ namespace grab
             bool
             is_open() const noexcept;
 
+            // The display option this session was opened with. nullopt means
+            // the environment's default (DISPLAY) — and is all a session
+            // composed by open_owning_runtime() can answer, since no display
+            // was ever named. This is what lets a consumer holding a Session
+            // aim display-bound facades (input injection, capture) at the
+            // same display the session is on.
+            [[nodiscard]]
+            const std::optional<std::string>&
+            display() const noexcept;
+
             [[nodiscard]]
             grab::core::Reactor&
             reactor() noexcept;

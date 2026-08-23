@@ -35,6 +35,7 @@ relation.hpp
 result.hpp
 role.hpp
 screen.hpp
+sequence.hpp
 sequence_types.hpp
 session.hpp
 space.hpp
