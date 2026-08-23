@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string_view>
 #include <xcb/shape.h>
@@ -249,6 +250,79 @@ TEST( X11OverlayDelegate,
     EXPECT_NE( x11_detail::X11OverlayDelegateTestAccess::window( **delegate ),
                XCB_WINDOW_NONE );
     ( *delegate )->close();
+    ( *delegate )->close();
+}
+
+TEST( X11OverlayDelegate,
+      SurfaceAdvertisesNeverBypassCompositor )
+{
+    if( !display_is_available() )
+    {
+        GTEST_SKIP() << "requires Xvfb (DISPLAY is not set)";
+    }
+
+    // Regression: on GNOME/mutter the screen-sized override-redirect ARGB
+    // overlay was unredirected by "unredirect fullscreen windows", so its
+    // shapes never composited. The surface must carry
+    // _NET_WM_BYPASS_COMPOSITOR = 2 (never bypass) to keep mutter compositing.
+    auto delegate = X11OverlayDelegate::create();
+    ASSERT_TRUE( delegate.has_value() ) << delegate.error().message;
+
+    ASSERT_TRUE( x11_detail::X11OverlayDelegateTestAccess::open_unmapped(
+                     **delegate,
+                     grab::CoordinateSpaceId{ 1U }
+    )
+                     .has_value() );
+    const auto window = x11_detail::X11OverlayDelegateTestAccess::window( **delegate );
+    ASSERT_NE( window, XCB_WINDOW_NONE );
+
+    auto connection = grab::platform::x11::XcbConnection::open( "" );
+    ASSERT_TRUE( connection.has_value() );
+    auto* const                raw = connection->get();
+
+    xcb_generic_error_t*       raw_intern_error{};
+    constexpr std::string_view hintName = "_NET_WM_BYPASS_COMPOSITOR";
+    std::unique_ptr<xcb_intern_atom_reply_t, decltype( &std::free )> atom{
+        xcb_intern_atom_reply(
+            raw,
+            xcb_intern_atom( raw,
+                             0U,
+                             static_cast<std::uint16_t>( hintName.size() ),
+                             hintName.data() ),
+            &raw_intern_error
+        ),
+        &std::free,
+    };
+    std::unique_ptr<xcb_generic_error_t, decltype( &std::free )> intern_error{
+        raw_intern_error,
+        &std::free,
+    };
+    ASSERT_EQ( intern_error, nullptr );
+    ASSERT_NE( atom, nullptr );
+
+    xcb_generic_error_t*                                              raw_prop_error{};
+    std::unique_ptr<xcb_get_property_reply_t, decltype( &std::free )> reply{
+        xcb_get_property_reply(
+            raw,
+            xcb_get_property( raw, 0U, window, atom->atom, XCB_ATOM_CARDINAL, 0U, 1U ),
+            &raw_prop_error
+        ),
+        &std::free,
+    };
+    std::unique_ptr<xcb_generic_error_t, decltype( &std::free )> prop_error{
+        raw_prop_error,
+        &std::free,
+    };
+    ASSERT_EQ( prop_error, nullptr );
+    ASSERT_NE( reply, nullptr );
+    ASSERT_EQ( reply->type, XCB_ATOM_CARDINAL );
+    ASSERT_EQ( reply->format, 32 );
+    ASSERT_EQ( xcb_get_property_value_length( reply.get() ),
+               static_cast<int>( sizeof( std::uint32_t ) ) );
+    std::uint32_t value{};
+    std::memcpy( &value, xcb_get_property_value( reply.get() ), sizeof( value ) );
+    EXPECT_EQ( value, 2U );
+
     ( *delegate )->close();
 }
 

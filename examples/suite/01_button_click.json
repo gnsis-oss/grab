@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "sequence": "01-button-click",
+  "pacing": { "mode": "grace", "grace_ms": 20 },
+  "steps": [
+
+    { "id": "frame", "op": "overlay.add", "handle": "frame",
+      "shape": { "rect": { "x": 40, "y": 40, "w": 1520, "h": 820 },
+                 "stroke": { "color": "#3a4a6088", "width": 2 }, "z": 0 } },
+    { "id": "park", "op": "input.warp", "to": [180, 180] },
+
+    { "id": "button-show", "op": "overlay.add", "handle": "button",
+      "shape": { "rect": { "x": 1070, "y": 575, "w": 220, "h": 90 },
+                 "stroke": { "color": "#8fd0ff", "width": 3 },
+                 "fill": { "color": "#2b3a55e0" }, "z": 10 } },
+    { "id": "button-dot", "op": "overlay.add", "handle": "dot",
+      "shape": { "ellipse": { "center": [1180, 620], "radius": 7 },
+                 "fill": { "color": "#8fd0ff" }, "z": 11 } },
+    { "id": "settle", "op": "time.wait", "ms": 300 },
+
+    { "id": "route-show", "op": "overlay.add", "handle": "route",
+      "shape": { "path": [ { "move": [180, 180] },
+                           { "bezier": [[520, 180], [900, 420], [1180, 620]] } ],
+                 "stroke": { "color": "#ffbe4882", "width": 1 }, "z": 5 } },
+    { "id": "approach", "op": "input.follow",
+      "curve": [[180, 180], [520, 180], [900, 420], [1180, 620]],
+      "options": { "steps": 56, "step_dwell_ms": 5, "path": "cubic" } },
+    { "id": "hover", "op": "time.wait", "ms": 150 },
+
+    { "id": "press-look", "op": "overlay.update", "handle": "button",
+      "shape": { "rect": { "x": 1070, "y": 575, "w": 220, "h": 90 },
+                 "stroke": { "color": "#ffffff", "width": 3 },
+                 "fill": { "color": "#8fd0ff55" }, "z": 10 } },
+    { "id": "click", "op": "input.click", "button": "left" },
+    { "id": "flash", "op": "overlay.add",
+      "shape": { "ellipse": { "center": [1180, 620], "radius": 70 },
+                 "stroke": { "color": "#ffffff", "width": 4 }, "z": 30,
+                 "lifetime": { "ttl_ms": 240 },
+                 "animation": { "scale": { "easing": "out_cubic", "duration_ms": 240,
+                                           "from": 0.7, "to": 1.5 },
+                                "opacity": { "easing": "out_quad", "duration_ms": 240,
+                                             "from": 1.0, "to": 0.0 } } } },
+    { "id": "clicked-look", "op": "overlay.update", "handle": "button",
+      "shape": { "rect": { "x": 1070, "y": 575, "w": 220, "h": 90 },
+                 "stroke": { "color": "#8cffaa", "width": 3 },
+                 "fill": { "color": "#8cffaa30" }, "z": 10 } },
+    { "id": "route-hide", "op": "overlay.remove", "handle": "route" },
+    { "id": "end-wait", "op": "time.wait", "ms": 350 },
+
+    { "id": "shot", "op": "screen.capture", "out": "01-button-click.png" },
+    { "id": "clear", "op": "overlay.clear" }
+  ]
+}

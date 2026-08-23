@@ -50,6 +50,27 @@ namespace grab
             grab::Result<Image>
             active_window();
 
+            // The window the window manager currently reports as active
+            // (_NET_ACTIVE_WINDOW), by native id. Fails with WindowNotFound when
+            // no window is active. Read-only: it issues no window-manager request
+            // and does not raise, focus or restack anything, so — unlike
+            // activate_window — it cannot affect input focus or scroll state.
+            // This is the identity behind active_window(), which reads the same
+            // property and then discards the id in favour of a captured Image.
+            [[nodiscard]]
+            grab::Result<std::uint32_t>
+            active_window_id();
+
+            // The active window's full summary (id, wm_class, title, type, pid,
+            // bounds), under the same read-only contract as active_window_id.
+            // Resolves the active id against the client list windows() reports, so
+            // it fails with WindowNotFound both when no window is active and when
+            // the active window is not a managed client (e.g. an override-redirect
+            // window that never appears in _NET_CLIENT_LIST).
+            [[nodiscard]]
+            grab::Result<WindowSummary>
+            active_window_summary();
+
             // Snapshot of every mapped top-level window, in the window manager's
             // client-list order. Succeeds with an empty vector on a bare display
             // that has no managed clients.

@@ -39,6 +39,12 @@ namespace grab
     {
             // Search PATH for argv[0].
             bool search_path{ true };
+            // Point the child's stdin, stdout and stderr at /dev/null before
+            // exec. A spawned service — a window manager, a bus, a compositor
+            // — is chatty, and its chatter is not its caller's report; without
+            // this it lands in the caller's own streams and cannot be
+            // separated from them afterwards.
+            bool discard_output{ false };
     };
 
     // The only public process handle that can signal. It owns a pidfd and

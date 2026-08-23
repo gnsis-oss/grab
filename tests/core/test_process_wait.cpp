@@ -5,7 +5,12 @@
 #include <gtest/gtest.h>
 #include <array>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <climits>
+#include <string>
 #include <string_view>
+#include <unistd.h>
 // clang-format on
 
 namespace
@@ -70,4 +75,73 @@ TEST( ProcessWait,
 
     const auto second_wait = process->wait( waitTimeout );
     EXPECT_FALSE( second_wait.has_value() );
+}
+
+namespace
+{
+
+    // Where the child's stdout actually pointed, read back from the child
+    // itself: nothing else can observe a redirect that happens between clone
+    // and exec.
+    [[nodiscard]]
+    std::string
+    child_stdout_target( bool discard_output )
+    {
+        const auto report =
+            std::filesystem::temp_directory_path() /
+            ( discard_output ? "grab-spawn-discarded" : "grab-spawn-inherited" );
+        std::filesystem::remove( report );
+
+        // The shell's own fd 1 is what is under test, so it is read before
+        // the descriptor that carries the answer back is opened: a redirect
+        // written into the script would answer about the redirect.
+        const std::string script = "target=$(readlink /proc/$$/fd/1); exec 9>" +
+                                   report.string() +
+                                   "; printf '%s' \"$target\" >&9";
+        const std::array<std::string_view, 3U> argv{ "/bin/sh", "-c", script };
+
+        auto process = grab::OwnedProcess::spawn( argv,
+                                                  {},
+                                                  grab::ProcessSpawnOptions{
+                                                      .search_path    = false,
+                                                      .discard_output = discard_output,
+                                                  } );
+        if( !process.has_value() )
+        {
+            return process.error().message;
+        }
+        const auto status = process->wait( waitTimeout );
+        if( !status.has_value() )
+        {
+            return status.error().message;
+        }
+
+        std::ifstream input{ report };
+        std::string   target;
+        std::getline( input, target );
+        std::filesystem::remove( report );
+        return target;
+    }
+
+}    // namespace
+
+// A spawned service — a window manager, a bus, a compositor — is chatty, and
+// its chatter is not its caller's report.
+TEST( ProcessSpawn,
+      DiscardOutputPointsTheChildAtDevNull )
+{
+    EXPECT_EQ( child_stdout_target( true ), "/dev/null" );
+}
+
+TEST( ProcessSpawn,
+      OutputIsInheritedByDefault )
+{
+    // Whatever this process's stdout is — a terminal, a pipe under ctest, a
+    // file — the child gets that same one and nothing is redirected.
+    std::array<char, PATH_MAX> own{};
+    const auto length = ::readlink( "/proc/self/fd/1", own.data(), own.size() - 1U );
+    ASSERT_GT( length, 0 );
+
+    EXPECT_EQ( child_stdout_target( false ),
+               std::string( own.data(), static_cast<std::size_t>( length ) ) );
 }

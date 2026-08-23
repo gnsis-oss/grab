@@ -1,5 +1,7 @@
 #include "grab/process_ref.hpp"
 #include "grab/result.hpp"
+#include "session/display_probe.hpp"
+#include "session/poll_wait.hpp"
 #include "session/virtual_display.hpp"
 
 #include <array>
@@ -9,7 +11,6 @@
 #include <cstdint>
 #include <expected>
 #include <fcntl.h>
-#include <memory>
 #include <optional>
 #include <spawn.h>
 #include <string>
@@ -17,10 +18,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <system_error>
-#include <thread>
 #include <unistd.h>
 #include <utility>
-#include <xcb/xcb.h>
 
 namespace grab::screen
 {
@@ -28,33 +27,20 @@ namespace grab::screen
     {
 
         // NOLINTNEXTLINE(misc-include-cleaner): provided by POSIX <sys/types.h>.
-        constexpr pid_t       invalidPid         = static_cast<pid_t>( -1 );
-        constexpr int         xcbOk              = 0;
-        constexpr int         spawnSuccess       = 0;
-        constexpr int         pathExistsMode     = F_OK;
-        constexpr int         firstDisplayNumber = 100;
-        constexpr int         lastDisplayNumber  = 199;
-        constexpr mode_t      noFileMode         = 0;
-        constexpr std::size_t xvfbArgumentCount  = 7U;
-        constexpr const char* devNullPath        = "/dev/null";
-        constexpr const char* xvfbExecutable     = "Xvfb";
-        constexpr const char* screenOption       = "-screen";
+        constexpr pid_t       invalidPid        = static_cast<pid_t>( -1 );
+        constexpr int         spawnSuccess      = 0;
+        constexpr mode_t      noFileMode        = 0;
+        constexpr std::size_t xvfbArgumentCount = 7U;
+        constexpr const char* devNullPath       = "/dev/null";
+        constexpr const char* xvfbExecutable    = "Xvfb";
+        constexpr const char* screenOption      = "-screen";
         // The readiness probe connects and disconnects; without -noreset that
         // last-client disconnect resets the server and races later connects.
         constexpr const char* noResetOption       = "-noreset";
         constexpr const char* defaultScreenNumber = "0";
-        constexpr const char* displayLockPrefix   = "/tmp/.X";
-        constexpr const char* displayLockSuffix   = "-lock";
-        constexpr const char* displaySocketPrefix = "/tmp/.X11-unix/X";
-        constexpr char        displayPrefix       = ':';
         constexpr char        geometrySeparator   = 'x';
         constexpr auto        readyTimeout        = std::chrono::seconds{ 5 };
         constexpr auto        stopTimeout         = std::chrono::seconds{ 2 };
-        constexpr auto        pollInterval        = std::chrono::milliseconds{ 50 };
-        constexpr auto        initialExitGrace    = std::chrono::milliseconds{ 100 };
-
-        using XcbConnection =
-            std::unique_ptr<xcb_connection_t, decltype( &xcb_disconnect )>;
 
         class SpawnFileActions
         {
@@ -121,74 +107,6 @@ namespace grab::screen
                 return grab::ErrorCode::DeviceInaccessible;
             }
             return grab::ErrorCode::InternalFault;
-        }
-
-        [[nodiscard]]
-        bool
-        display_connectable( const std::string& display )
-        {
-            int                 screen_index = 0;
-            const XcbConnection connection{
-                xcb_connect( display.c_str(), &screen_index ),
-                &xcb_disconnect
-            };
-            return connection !=
-                   nullptr &&
-                   xcb_connection_has_error( connection.get() ) == xcbOk;
-        }
-
-        [[nodiscard]]
-        bool
-        path_exists( const std::string& path ) noexcept
-        {
-            if( access( path.c_str(), pathExistsMode ) == spawnSuccess )
-            {
-                return true;
-            }
-
-            return errno != ENOENT && errno != ENOTDIR;
-        }
-
-        [[nodiscard]]
-        bool
-        display_has_existing_artifact( int display_number )
-        {
-            const std::string number = std::to_string( display_number );
-            return path_exists(
-                       std::string{ displayLockPrefix } + number + displayLockSuffix
-                   ) ||
-                   path_exists( std::string{ displaySocketPrefix } + number );
-        }
-
-        [[nodiscard]]
-        std::string
-        display_name_for( int display_number )
-        {
-            return std::string( 1U, displayPrefix ) + std::to_string( display_number );
-        }
-
-        [[nodiscard]]
-        grab::Result<std::string>
-        find_free_display()
-        {
-            for( int display_number = firstDisplayNumber;
-                 display_number <= lastDisplayNumber;
-                 ++display_number )
-            {
-                if( display_has_existing_artifact( display_number ) )
-                {
-                    continue;
-                }
-
-                std::string display = display_name_for( display_number );
-                if( !display_connectable( display ) )
-                {
-                    return display;
-                }
-            }
-
-            return grab::fail( grab::ErrorCode::DeviceInaccessible,
-                               "No free X display found in :100..:199" );
         }
 
         [[nodiscard]]
@@ -357,41 +275,36 @@ namespace grab::screen
             }
         }
 
+        // Readiness is the display accepting a connection, with an exit check
+        // in the same loop so a server that dies on startup is reported as
+        // what happened to it rather than as a timeout.
         [[nodiscard]]
         grab::Result<void>
         wait_until_ready( pid_t              child_pid,
                           const std::string& display )
         {
-            const auto start_time       = std::chrono::steady_clock::now();
-            const auto first_exit_check = start_time + initialExitGrace;
-            const auto deadline         = start_time + readyTimeout;
-            auto       now              = start_time;
-            while( now < deadline )
-            {
-                if( display_connectable( display ) )
+            grab::Result<void> exit_reason;
+            const auto         outcome = grab::session::poll_until(
+                [child_pid, &display, &exit_reason]() -> grab::session::Probe
                 {
-                    return {};
-                }
-
-                if( now >= first_exit_check )
-                {
-                    auto child_running = fail_if_child_exited( child_pid );
-                    if( !child_running.has_value() )
+                    if( grab::session::display_connectable( display ) )
                     {
-                        return std::unexpected( std::move( child_running.error() ) );
+                        return grab::session::Probe::Ready;
                     }
-                }
-
-                std::this_thread::sleep_for( pollInterval );
-                now = std::chrono::steady_clock::now();
-            }
-
-            auto child_running = fail_if_child_exited( child_pid );
-            if( !child_running.has_value() )
+                    exit_reason = fail_if_child_exited( child_pid );
+                    return exit_reason.has_value() ? grab::session::Probe::Retry
+                                                   : grab::session::Probe::Abandoned;
+                },
+                std::chrono::duration_cast<std::chrono::milliseconds>( readyTimeout )
+            );
+            if( outcome == grab::session::Probe::Ready )
             {
-                return std::unexpected( std::move( child_running.error() ) );
+                return {};
             }
-
+            if( !exit_reason.has_value() )
+            {
+                return exit_reason;
+            }
             return grab::fail( grab::ErrorCode::DeviceInaccessible,
                                "Xvfb display did not become connectable" );
         }
@@ -440,7 +353,7 @@ namespace grab::screen
                                "Virtual display dimensions and depth must be non-zero" );
         }
 
-        auto display = find_free_display();
+        auto display = grab::session::find_free_display();
         if( !display.has_value() )
         {
             return std::unexpected( std::move( display.error() ) );

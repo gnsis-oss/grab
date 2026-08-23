@@ -789,6 +789,45 @@ namespace grab
         return image_of( impl_->route.capture_window( *active_window_id ) );
     }
 
+    grab::Result<std::uint32_t>
+    Screen::active_window_id()
+    {
+        if( impl_ == nullptr )
+        {
+            return grab::fail( grab::ErrorCode::InternalFault, "Screen is not open" );
+        }
+        auto active = read_active_window_id( impl_->display_name() );
+        if( !active.has_value() )
+        {
+            return std::unexpected( std::move( active.error() ) );
+        }
+        return static_cast<std::uint32_t>( *active );
+    }
+
+    grab::Result<WindowSummary>
+    Screen::active_window_summary()
+    {
+        auto active = active_window_id();
+        if( !active.has_value() )
+        {
+            return std::unexpected( std::move( active.error() ) );
+        }
+
+        auto listed = windows();
+        if( !listed.has_value() )
+        {
+            return std::unexpected( std::move( listed.error() ) );
+        }
+
+        const auto match = std::ranges::find( *listed, *active, &WindowSummary::id );
+        if( match == listed->end() )
+        {
+            return grab::fail( grab::ErrorCode::WindowNotFound,
+                               "active window is not a managed client" );
+        }
+        return std::move( *match );
+    }
+
     grab::Result<std::vector<WindowSummary>>
     Screen::windows()
     {

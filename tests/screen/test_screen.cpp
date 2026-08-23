@@ -63,6 +63,7 @@ namespace
     constexpr std::string_view otherClass           = "GrabScreenOtherClass";
     constexpr std::string_view missingClass         = "class-that-does-not-exist";
     constexpr std::string_view netClientListAtom    = "_NET_CLIENT_LIST";
+    constexpr std::string_view netActiveWindowAtom  = "_NET_ACTIVE_WINDOW";
     constexpr std::string_view netWmWindowTypeAtom  = "_NET_WM_WINDOW_TYPE";
     constexpr std::string_view splashTypeAtom       = "_NET_WM_WINDOW_TYPE_SPLASH";
     constexpr std::string_view normalTypeAtom       = "_NET_WM_WINDOW_TYPE_NORMAL";
@@ -242,6 +243,41 @@ namespace
                                          format32Bits,
                                          static_cast<std::uint32_t>( windows.size() ),
                                          windows.data() )
+        ) );
+    }
+
+    void
+    set_active_window( xcb_connection_t* connection,
+                       xcb_window_t      root,
+                       xcb_window_t      window )
+    {
+        xcb_atom_t net_active_window = XCB_ATOM_NONE;
+        ASSERT_TRUE( intern_atom( connection, netActiveWindowAtom, net_active_window ) );
+        const std::array<xcb_window_t, singleWindowCount> windows{ window };
+        EXPECT_TRUE( request_succeeded(
+            connection,
+            xcb_change_property_checked( connection,
+                                         propertyReplaceMode,
+                                         root,
+                                         net_active_window,
+                                         XCB_ATOM_WINDOW,
+                                         format32Bits,
+                                         static_cast<std::uint32_t>( windows.size() ),
+                                         windows.data() )
+        ) );
+    }
+
+    // Removes any _NET_ACTIVE_WINDOW a previous test left on the shared display's
+    // root, so "no window is active" is a state this suite can actually reach.
+    void
+    clear_active_window( xcb_connection_t* connection,
+                         xcb_window_t      root )
+    {
+        xcb_atom_t net_active_window = XCB_ATOM_NONE;
+        ASSERT_TRUE( intern_atom( connection, netActiveWindowAtom, net_active_window ) );
+        EXPECT_TRUE( request_succeeded(
+            connection,
+            xcb_delete_property_checked( connection, root, net_active_window )
         ) );
     }
 
@@ -688,6 +724,110 @@ TEST( Screen,
                                            &grab::WindowSummary::id );
     ASSERT_NE( listed, windows->end() );
     EXPECT_EQ( listed->type, normalTypeName );
+}
+
+TEST( Screen,
+      ActiveWindowIdReportsTheActiveWindow )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    const xcb_window_t window = create_solid_window( connection.get(),
+                                                     *screen_info,
+                                                     knownColor,
+                                                     knownInstance,
+                                                     knownClass );
+    set_active_window( connection.get(), screen_info->root, window );
+    ASSERT_TRUE( flush_succeeded( connection.get() ) );
+
+    auto screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    auto active = screen->active_window_id();
+
+    ASSERT_TRUE( active.has_value() ) << active.error().message;
+    EXPECT_EQ( *active, static_cast<std::uint32_t>( window ) );
+}
+
+TEST( Screen,
+      ActiveWindowIdReportsAMissWhenUnset )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    clear_active_window( connection.get(), screen_info->root );
+    ASSERT_TRUE( flush_succeeded( connection.get() ) );
+
+    auto screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    auto active = screen->active_window_id();
+
+    ASSERT_FALSE( active.has_value() );
+    EXPECT_EQ( active.error().code, grab::ErrorCode::WindowNotFound );
+}
+
+TEST( Screen,
+      ActiveWindowSummaryDescribesTheActiveWindow )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    const xcb_window_t window = create_solid_window( connection.get(),
+                                                     *screen_info,
+                                                     knownColor,
+                                                     knownInstance,
+                                                     knownClass );
+    set_active_window( connection.get(), screen_info->root, window );
+    ASSERT_TRUE( flush_succeeded( connection.get() ) );
+
+    auto screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    auto summary = screen->active_window_summary();
+
+    ASSERT_TRUE( summary.has_value() ) << summary.error().message;
+    EXPECT_EQ( summary->id, static_cast<std::uint32_t>( window ) );
+    EXPECT_EQ( summary->wm_class, knownClass );
+    EXPECT_EQ( summary->bounds.x, windowX );
+    EXPECT_EQ( summary->bounds.y, windowY );
+    EXPECT_EQ( summary->bounds.width, windowWidth );
+    EXPECT_EQ( summary->bounds.height, windowHeight );
+}
+
+// The active window points somewhere outside the client list — the case an
+// override-redirect window (which never joins _NET_CLIENT_LIST) produces.
+TEST( Screen,
+      ActiveWindowSummaryFailsWhenActiveIsNotAManagedClient )
+{
+    const TestConnection connection{ xvfbDisplay };
+    ASSERT_NE( connection.get(), nullptr );
+    ASSERT_EQ( xcb_connection_has_error( connection.get() ), xcbOk );
+    const xcb_screen_t* screen_info =
+        default_screen( connection.get(), connection.screen_index() );
+    ASSERT_NE( screen_info, nullptr );
+    static_cast<void>( create_solid_window( connection.get(),
+                                            *screen_info,
+                                            knownColor,
+                                            knownInstance,
+                                            knownClass ) );
+    set_active_window( connection.get(),
+                       screen_info->root,
+                       static_cast<xcb_window_t>( anyWindowId ) );
+    ASSERT_TRUE( flush_succeeded( connection.get() ) );
+
+    auto screen = grab::Screen::open( xvfbDisplay );
+    ASSERT_TRUE( screen.has_value() ) << screen.error().message;
+    auto summary = screen->active_window_summary();
+
+    ASSERT_FALSE( summary.has_value() );
+    EXPECT_EQ( summary.error().code, grab::ErrorCode::WindowNotFound );
 }
 
 TEST( Screen,

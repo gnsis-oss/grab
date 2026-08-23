@@ -130,6 +130,7 @@ add_library(grab_kernel STATIC
     src/kernel/sequence/interpreter.cpp
     src/kernel/sequence/execute.cpp
     src/kernel/sequence/player.cpp
+    src/kernel/sequence/drive.cpp
     src/kernel/capture/tile_differ.cpp
     src/kernel/graph/tree_store.cpp
     src/kernel/graph/target_registry.cpp
@@ -152,6 +153,18 @@ add_library(grab_kernel STATIC
 target_link_libraries(grab_kernel PUBLIC grab_core)
 target_include_directories(grab_kernel PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_kernel PUBLIC cxx_std_23)
+
+# The public sequence facade (include/grab/sequence.hpp): load a document,
+# play it against a Session. Its seat needs the display-bound facades
+# (grab::Input, grab::Screen, PNG encoding), which is exactly why it is not
+# part of grab_kernel — the kernel stays display-free and testable without X.
+add_library(grab_sequence STATIC
+    src/sequence/api.cpp
+)
+target_link_libraries(grab_sequence PUBLIC grab_core grab_kernel
+    PRIVATE grab_input grab_screen grab_codec)
+target_include_directories(grab_sequence PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src)
+target_compile_features(grab_sequence PUBLIC cxx_std_23)
 
 add_library(grab_codec STATIC
     src/codec/png.cpp
@@ -220,7 +233,10 @@ target_compile_features(grab_notify PUBLIC cxx_std_23)
 target_link_libraries(grab_screen PUBLIC grab_image grab_notify)
 
 add_library(grab_session STATIC
+    src/session/display_probe.cpp
     src/session/manager.cpp
+    src/session/poll_wait.cpp
+    src/session/provisioning.cpp
     src/session/record.cpp
     src/session/registry.cpp
     src/session/selection.cpp
@@ -357,7 +373,7 @@ add_executable(grab_cli
     src/frontends/cli/windows_command.cpp
 )
 set_target_properties(grab_cli PROPERTIES OUTPUT_NAME grab)
-target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_service
+target_link_libraries(grab_cli PRIVATE grab_core grab_codec grab_screen grab_image grab_notify grab_input grab_sequence grab_service
     grab_client grab_driver_x11 grab_input_x11 grab_kernel grab_platform_x11 grab_session)
 target_include_directories(grab_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_features(grab_cli PRIVATE cxx_std_23)

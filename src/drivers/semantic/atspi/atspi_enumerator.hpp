@@ -17,7 +17,7 @@ namespace grab::drivers::semantic::atspi
     // Default ceiling on nodes returned by one walk. A large document tree is a
     // few thousand nodes; this leaves generous headroom while still bounding a
     // pathological or adversarial page.
-    inline constexpr std::size_t defaultMaxNodes = 20'000U;
+    inline constexpr std::size_t defaultMaxNodes = 400'000U;
 
     struct EnumeratorOptions
     {

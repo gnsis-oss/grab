@@ -1,3 +1,5 @@
 # format: <repo-relative path>=<max allowed sleep occurrences>
 # shrink-only: Phase-1 WP1.4/WP1.8 drive these to 0 and delete the lines.
-src/session/virtual_display.cpp=1
+# The one sleeping loop left: every bounded wait for a display or a service
+# to come up goes through session::poll_until.
+src/session/poll_wait.cpp=1

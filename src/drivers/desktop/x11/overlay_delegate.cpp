@@ -1,4 +1,5 @@
 #include "drivers/desktop/x11/overlay_delegate.hpp"
+#include "drivers/desktop/x11/present_policy.hpp"
 #include "grab/capability.hpp"
 #include "grab/geometry/rectangle.hpp"
 #include "grab/geometry/size.hpp"
@@ -254,6 +255,9 @@ namespace grab::drivers::desktop::x11
                 ExtensionSpec extensions;
                 xcb_atom_t    compositor_selection{};
                 xcb_window_t  compositor_owner{};
+                // Present the whole surface on damaged frames — see
+                // present_policy.hpp for why a PRIME-sink display needs it.
+                bool          full_present{};
         };
 
         struct ConnectedDisplay
@@ -679,6 +683,65 @@ namespace grab::drivers::desktop::x11
         }
 
         [[nodiscard]]
+        Result<xcb_atom_t>
+        intern_atom( xcb_connection_t* connection,
+                     std::string_view  name )
+        {
+            xcb_generic_error_t* raw_error{};
+            const auto           reply = take_xcb_owned( xcb_intern_atom_reply(
+                connection,
+                xcb_intern_atom( connection,
+                                 0U,
+                                 static_cast<std::uint16_t>( name.size() ),
+                                 name.data() ),
+                &raw_error
+            ) );
+            const auto           error = take_xcb_owned( raw_error );
+            if( error != nullptr || reply == nullptr )
+            {
+                return std::unexpected( make_error( ErrorCode::ProtocolError,
+                                                    "X11 overlay atom lookup failed" ) );
+            }
+            return reply->atom;
+        }
+
+        // EWMH _NET_WM_BYPASS_COMPOSITOR hint value that asks the compositor to
+        // never unredirect this window. Mutter's "unredirect fullscreen windows"
+        // optimization otherwise pulls a screen-sized override-redirect ARGB
+        // overlay out of the compositor, so its drawn shapes never blend onto the
+        // screen even though attach and stacking succeed.
+        constexpr std::uint32_t bypassCompositorNever = 2U;
+
+        // CARDINAL property format width, in bits, for a single 32-bit value.
+        constexpr std::uint8_t  cardinalPropertyFormat = 32U;
+
+        // Set _NET_WM_BYPASS_COMPOSITOR = 2 so a compositor that honours the hint
+        // (mutter) always composites the overlay. Best-effort: a compositor that
+        // ignores the property is unaffected, and the interning/property requests
+        // are checked so a genuine protocol failure still surfaces.
+        [[nodiscard]]
+        Result<void>
+        apply_never_bypass_compositor( xcb_connection_t* connection,
+                                       xcb_window_t      window )
+        {
+            auto atom = intern_atom( connection, "_NET_WM_BYPASS_COMPOSITOR" );
+            if( !atom.has_value() )
+            {
+                return std::unexpected( std::move( atom.error() ) );
+            }
+            return check_request( connection,
+                                  xcb_change_property_checked( connection,
+                                                               XCB_PROP_MODE_REPLACE,
+                                                               window,
+                                                               *atom,
+                                                               XCB_ATOM_CARDINAL,
+                                                               cardinalPropertyFormat,
+                                                               1U,
+                                                               &bypassCompositorNever ),
+                                  "set X11 overlay _NET_WM_BYPASS_COMPOSITOR" );
+        }
+
+        [[nodiscard]]
         Result<xcb_window_t>
         selection_owner( xcb_connection_t* connection,
                          xcb_atom_t        selection )
@@ -698,6 +761,77 @@ namespace grab::drivers::desktop::x11
                 );
             }
             return reply->owner;
+        }
+
+        // A reverse-PRIME topology: one provider renders (SourceOutput),
+        // another scans out a COPY (SinkOutput). The copy is refreshed by
+        // dirty-region tracking, which is what makes incremental presents
+        // unreliable on the glass — see present_policy.hpp. Any failure to
+        // answer reads as "no sink": an old server without RandR 1.4 cannot
+        // have one.
+        [[nodiscard]]
+        bool
+        prime_sink_present( xcb_connection_t* connection,
+                            xcb_window_t      root,
+                            bool              randr_available )
+        {
+            if( !randr_available )
+            {
+                return false;
+            }
+            xcb_generic_error_t* raw_error{};
+            const auto           reply = take_xcb_owned( xcb_randr_get_providers_reply(
+                connection,
+                xcb_randr_get_providers( connection, root ),
+                &raw_error
+            ) );
+            const auto           error = take_xcb_owned( raw_error );
+            if( error != nullptr || reply == nullptr )
+            {
+                return false;
+            }
+            const auto providers = std::span{
+                xcb_randr_get_providers_providers( reply.get() ),
+                static_cast<std::size_t>(
+                    std::max( 0,
+                              xcb_randr_get_providers_providers_length( reply.get() ) )
+                )
+            };
+            bool source_seen = false;
+            bool sink_seen   = false;
+            for( const xcb_randr_provider_t provider : providers )
+            {
+                xcb_generic_error_t* raw_info_error{};
+                const auto info = take_xcb_owned( xcb_randr_get_provider_info_reply(
+                    connection,
+                    xcb_randr_get_provider_info( connection,
+                                                 provider,
+                                                 reply->timestamp ),
+                    &raw_info_error
+                ) );
+                const auto info_error = take_xcb_owned( raw_info_error );
+                if( info_error != nullptr || info == nullptr )
+                {
+                    continue;
+                }
+                source_seen = source_seen ||
+                              ( info->capabilities &
+                                XCB_RANDR_PROVIDER_CAPABILITY_SOURCE_OUTPUT ) != 0U;
+                sink_seen   = sink_seen ||
+                              ( info->capabilities &
+                                XCB_RANDR_PROVIDER_CAPABILITY_SINK_OUTPUT ) != 0U;
+            }
+            return providers.size() >= 2U && source_seen && sink_seen;
+        }
+
+        [[nodiscard]]
+        PresentPolicy
+        present_policy_from_env()
+        {
+            // NOLINTNEXTLINE(concurrency-mt-unsafe)
+            const char* const value = std::getenv( "GRAB_OVERLAY_PRESENT" );
+            return parse_present_policy( value == nullptr ? std::string_view{}
+                                                          : std::string_view{ value } );
         }
 
         [[nodiscard]]
@@ -737,12 +871,25 @@ namespace grab::drivers::desktop::x11
                     capability_error( compositorUnavailableReason )
                 );
             }
+            const bool sink = prime_sink_present( connection,
+                                                  screen->root,
+                                                  extensions->randr_available );
+            const bool full = full_present_selected( present_policy_from_env(), sink );
+            log::nominal(
+                [&]( auto& event )
+                {
+                    event.tag( log::tags::present )
+                        .value( "policy", full ? "full" : "incremental" )
+                        .value( "prime_sink", sink );
+                }
+            );
             return ProbeData{
                 .screen               = *screen,
                 .layout               = *layout,
                 .extensions           = *extensions,
                 .compositor_selection = *atom,
                 .compositor_owner     = *owner,
+                .full_present         = full,
             };
         }
 
@@ -1936,6 +2083,13 @@ namespace grab::drivers::desktop::x11
                     return window_created;
                 }
 
+                auto bypass =
+                    apply_never_bypass_compositor( connection_.get(), window_ );
+                if( !bypass.has_value() )
+                {
+                    return bypass;
+                }
+
                 auto passthrough = apply_input_region( {} );
                 if( !passthrough.has_value() )
                 {
@@ -2525,9 +2679,29 @@ namespace grab::drivers::desktop::x11
                         return converted;
                     }
 
+                    // With full_present, the damage still drives the raster
+                    // and the conversion (the native/SHM mirror is a
+                    // persistent full-surface copy), but the PUT covers the
+                    // whole surface: on a PRIME-sink display, the server-side
+                    // dirty region is then the full screen and every sink
+                    // copy self-heals whatever stale overlay content the
+                    // glass was holding. Idle frames still present nothing.
+                    const std::array<geometry::Rectangle, 1U> whole_surface{
+                        geometry::Rectangle{
+                                            .x      = 0,
+                                            .y      = 0,
+                                            .width  = probe_.screen.width,
+                                            .height = probe_.screen.height,
+                                            },
+                    };
+                    const std::span<const geometry::Rectangle> to_present =
+                        probe_.full_present
+                            ? std::span<const geometry::Rectangle>{ whole_surface }
+                            : std::span<const geometry::Rectangle>{ frame->damage };
+
                     const diag::Scope<log::Level::Nominal> present_scope;
-                    auto presented = shm_.attached ? present_shm( frame->damage )
-                                                   : present_put_image( frame->damage );
+                    auto presented = shm_.attached ? present_shm( to_present )
+                                                   : present_put_image( to_present );
                     sample.present = present_scope.elapsed();
                     if( !presented.has_value() )
                     {
@@ -2541,6 +2715,8 @@ namespace grab::drivers::desktop::x11
                                 .value( "damage_rects", frame->damage.size() )
                                 .value( "damage_px", sample.damaged_pixels )
                                 .value( "route", shm_.attached ? "shm" : "put_image" )
+                                .value( "policy",
+                                        probe_.full_present ? "full" : "incremental" )
                                 .value( "memcpy_fast_path", native_memcpy_eligible_ )
                                 .value( "revision", accepted_revision_.value );
                         }

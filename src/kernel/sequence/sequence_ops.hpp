@@ -145,4 +145,14 @@ namespace grab::kernel::sequence
     grab::Result<void>
     validate( const Sequence& program );
 
+    // The same document under different pacing. Ids are positional, so
+    // rebuilding preserves every StepId: the same document produces the same
+    // identities in all three modes, which is what the round-trip test
+    // depends on. Answers a copy of `program` unchanged when the pacing
+    // already matches.
+    [[nodiscard]]
+    grab::Result<Sequence>
+    with_pacing( const Sequence&               program,
+                 grab::sequence::PacingOptions pacing );
+
 }    // namespace grab::kernel::sequence
