@@ -448,4 +448,21 @@ namespace grab::kernel::sequence
         return {};
     }
 
+    grab::Result<Sequence>
+    with_pacing( const Sequence&               program,
+                 grab::sequence::PacingOptions pacing )
+    {
+        if( program.pacing().mode ==
+            pacing.mode &&
+            program.pacing().grace == pacing.grace )
+        {
+            return program;
+        }
+        std::vector<grab::sequence::Step> steps( program.steps().begin(),
+                                                 program.steps().end() );
+        return Sequence::build( std::move( steps ),
+                                pacing,
+                                std::string{ program.name() } );
+    }
+
 }    // namespace grab::kernel::sequence

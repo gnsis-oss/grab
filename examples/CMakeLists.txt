@@ -144,3 +144,11 @@ target_link_libraries(stage_form PRIVATE
     grab_codec)
 target_include_directories(stage_form PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(stage_form PRIVATE cxx_std_23)
+
+# The consumer side of display provisioning, whole: one call for a display
+# grab can honestly drive, and a report of which preconditions are live.
+add_executable(provision_display provision_display.cpp)
+target_link_libraries(provision_display PRIVATE
+    grab_core
+    grab_session)
+target_compile_features(provision_display PRIVATE cxx_std_23)

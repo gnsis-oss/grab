@@ -43,6 +43,30 @@ namespace grab
         constexpr std::size_t  pipeReadEnd           = 0U;
         constexpr std::size_t  pipeWriteEnd          = 1U;
         constexpr int          execFailureExitStatus = 127;
+        constexpr const char*  nullDevicePath        = "/dev/null";
+
+        // Runs in the freshly cloned child, between clone3 and exec, so it
+        // does only async-signal-safe work and reports nothing: a child that
+        // cannot open /dev/null still execs, keeping the inherited streams,
+        // which is strictly better than failing the spawn over the quietness
+        // of a service.
+        void
+        redirect_standard_streams_to_null() noexcept
+        {
+            const int null_fd = ::open( nullDevicePath, O_RDWR | O_CLOEXEC );
+            if( null_fd == posixFailure )
+            {
+                return;
+            }
+            for( const int stream : { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO } )
+            {
+                static_cast<void>( ::dup2( null_fd, stream ) );
+            }
+            if( null_fd > STDERR_FILENO )
+            {
+                static_cast<void>( ::close( null_fd ) );
+            }
+        }
 
         struct ProcessIdentity
         {
@@ -501,6 +525,10 @@ namespace grab
         if( clone_result == 0 )
         {
             exec_read_end.close();
+            if( options.discard_output )
+            {
+                redirect_standard_streams_to_null();
+            }
             const int exec_result = options.search_path
                                       ? ::execvpe( argument_pointers.front(),
                                                    argument_pointers.data(),

@@ -93,6 +93,55 @@ namespace grab
             std::unique_ptr<Impl> impl_;
     };
 
+    // A comet trail that follows the cursor: fading Band::Trail segments laid
+    // down along the pointer's motion, drawn and animated by grab. Physical and
+    // injected (synthetic, e.g. XTEST) motion get distinct colours so a driven
+    // cursor's trail is distinguishable from a hand-moved one.
+    struct CursorTrailStyle
+    {
+            overlay::Color            physical{ overlay::defaultOverlayColor };
+            overlay::Color            injected{ overlay::defaultOverlayColor };
+            std::chrono::milliseconds fade{ 1'200 };
+            float                     width_px = 3.0F;
+    };
+
+    struct CursorTrailConfig
+    {
+            CursorTrailStyle style{};
+    };
+
+    // RAII handle for a running cursor trail. Destroying it stops the trail;
+    // grab tears down its subscription and stops laying new segments. It shares
+    // the session's observation with any cursor_feedback, so both a ripple and
+    // a trail can be live at once.
+    class CursorTrail
+    {
+        public:
+
+            ~CursorTrail();
+
+            CursorTrail( const CursorTrail& ) = delete;
+            CursorTrail&
+            operator=( const CursorTrail& ) = delete;
+            CursorTrail( CursorTrail&& ) noexcept;
+            CursorTrail&
+            operator=( CursorTrail&& ) noexcept;
+
+            [[nodiscard]]
+            Result<void>
+            status() const;
+
+        private:
+
+            friend class Session;
+
+            class Impl;
+
+            explicit CursorTrail( std::unique_ptr<Impl> impl ) noexcept;
+
+            std::unique_ptr<Impl> impl_;
+    };
+
     struct SessionOptions
     {
             std::optional<std::string> display;
@@ -129,6 +178,16 @@ namespace grab
             bool
             is_open() const noexcept;
 
+            // The display option this session was opened with. nullopt means
+            // the environment's default (DISPLAY) — and is all a session
+            // composed by open_owning_runtime() can answer, since no display
+            // was ever named. This is what lets a consumer holding a Session
+            // aim display-bound facades (input injection, capture) at the
+            // same display the session is on.
+            [[nodiscard]]
+            const std::optional<std::string>&
+            display() const noexcept;
+
             [[nodiscard]]
             grab::core::Reactor&
             reactor() noexcept;
@@ -152,6 +211,13 @@ namespace grab
             [[nodiscard]]
             Result<CursorFeedback>
             cursor_feedback( CursorFeedbackConfig config );
+
+            // Start a comet trail that follows the cursor for this session's
+            // lifetime (or the returned handle's, whichever is shorter). Shares
+            // observation with cursor_feedback, so a ripple and a trail coexist.
+            [[nodiscard]]
+            Result<CursorTrail>
+            cursor_trail( CursorTrailConfig config );
 
             // Start/stop continuous observation over the composed runtime's
             // event source and tree deltas. No-op when no runtime is composed.

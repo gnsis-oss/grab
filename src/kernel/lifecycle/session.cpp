@@ -15,6 +15,7 @@
 #include "kernel/lifecycle/session_impl.hpp"
 #include "kernel/lifecycle/startup_signal.hpp"
 #include "kernel/presentation/cursor_feedback.hpp"
+#include "kernel/presentation/cursor_trail.hpp"
 #include "kernel/presentation/overlay_edit_session.hpp"
 #include "kernel/presentation/overlay_service.hpp"
 #include "kernel/scheduling/reactor.hpp"
@@ -583,6 +584,67 @@ namespace grab
         return impl_->observer_->status();
     }
 
+    // ── Cursor trail ─────────────────────────────────────────────────────────
+
+    class CursorTrail::Impl
+    {
+        public:
+
+            explicit Impl(
+                std::shared_ptr<kernel::presentation::CursorTrailObserver> observer
+            ) :
+                observer_{ std::move( observer ) }
+            {
+            }
+
+            ~Impl() noexcept
+            {
+                if( observer_ != nullptr )
+                {
+                    try
+                    {
+                        observer_->stop();
+                    }
+                    catch( ... )    // NOLINT(bugprone-empty-catch)
+                    {
+                    }
+                }
+            }
+
+            Impl( const Impl& ) = delete;
+            Impl&
+            operator=( const Impl& ) = delete;
+            Impl( Impl&& )           = delete;
+            Impl&
+            operator=( Impl&& ) = delete;
+
+            std::shared_ptr<kernel::presentation::CursorTrailObserver> observer_;
+    };
+
+    CursorTrail::CursorTrail( std::unique_ptr<Impl> impl ) noexcept :
+        impl_{ std::move( impl ) }
+    {
+    }
+
+    CursorTrail::~CursorTrail()                        = default;
+    CursorTrail::CursorTrail( CursorTrail&& ) noexcept = default;
+    CursorTrail&
+    CursorTrail::operator=( CursorTrail&& ) noexcept = default;
+
+    Result<void>
+    CursorTrail::status() const
+    {
+        if( impl_ == nullptr || impl_->observer_ == nullptr )
+        {
+            return {};
+        }
+        if( auto error = impl_->observer_->error(); error.has_value() )
+        {
+            return std::unexpected( std::move( *error ) );
+        }
+        return {};
+    }
+
     class Session::Impl
     {
         public:
@@ -607,6 +669,13 @@ namespace grab
             [[nodiscard]]
             bool
             is_open() const noexcept;
+
+            [[nodiscard]]
+            const std::optional<std::string>&
+            display() const noexcept
+            {
+                return options_.display;
+            }
 
             [[nodiscard]]
             grab::core::Reactor&
@@ -1397,6 +1466,12 @@ namespace grab
         return impl_->is_open();
     }
 
+    const std::optional<std::string>&
+    Session::display() const noexcept
+    {
+        return impl_->display();
+    }
+
     grab::core::Reactor&
     Session::reactor() noexcept
     {
@@ -1507,6 +1582,51 @@ namespace grab
             stop_cursor_feedback_noexcept( *observer );
             return std::unexpected(
                 kernel::lifecycle::unknown_exception_error( cursorFeedbackStartupStep )
+            );
+        }
+    }
+
+    Result<CursorTrail>
+    Session::cursor_trail( CursorTrailConfig config )
+    {
+        auto overlay_result = overlay();
+        if( !overlay_result.has_value() )
+        {
+            return std::unexpected( std::move( overlay_result.error() ) );
+        }
+
+        const kernel::presentation::TrailStyle style{
+            .physical = config.style.physical,
+            .injected = config.style.injected,
+            .fade     = config.style.fade,
+            .width_px = config.style.width_px,
+        };
+
+        auto observer =
+            kernel::presentation::start_cursor_trail( *this, **overlay_result, style );
+        if( !observer.has_value() )
+        {
+            return std::unexpected( std::move( observer.error() ) );
+        }
+
+        try
+        {
+            return CursorTrail{
+                std::make_unique<CursorTrail::Impl>( std::move( *observer ) )
+            };
+        }
+        catch( const std::exception& exception )
+        {
+            ( *observer )->stop();
+            return std::unexpected(
+                kernel::lifecycle::exception_error( "start cursor trail", exception )
+            );
+        }
+        catch( ... )
+        {
+            ( *observer )->stop();
+            return std::unexpected(
+                kernel::lifecycle::unknown_exception_error( "start cursor trail" )
             );
         }
     }

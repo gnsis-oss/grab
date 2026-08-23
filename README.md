@@ -41,6 +41,50 @@ Its very useful if you want to :
 
 
 
+## Provisioning a display
+
+grab can drive an application on a display — and it can give you a display it
+can drive. `provision_display()` starts one and satisfies the preconditions
+grab itself imposes, so a consumer no longer hand-rolls them:
+
+```cpp
+#include <grab/provisioning.hpp>
+
+auto display = grab::provision_display( { .backend = grab::DisplayBackend::Headless } );
+if( !display ) { /* the reason names what to install */ }
+
+for( const auto& [key, value] : display->child_environment() )
+{
+    // launch your own application with these set: DISPLAY, the session bus,
+    // and the AT-SPI bridge switches
+}
+
+auto session = grab::open_session( *display );
+```
+
+Two of those preconditions fail *silently* when they are missing, which is why
+they are grab's business rather than the caller's:
+
+| Precondition | Started as | What its absence looks like |
+| --- | --- | --- |
+| X display | Xvfb, or Xephyr for `Nested` | nothing to drive |
+| window manager | first installed of openbox, fluxbox, … | `Input::click` succeeds; the link never activates |
+| compositing manager | first installed of picom, xcompmgr, … | `Session::overlay()` draws no pixels |
+| session bus | `dbus-daemon --session` | the accessibility bus has nowhere to sit |
+| accessibility bus | `at-spi-bus-launcher` | `resolve`/`describe` see no tree |
+
+`window_manager()`, `compositor()` and `accessibility()` report which are live,
+each failure carrying the usual `CapabilityUnavailable` reason. They are probed
+on every call, so the same query answers for a display grab started
+(`Headless`, `Nested`) and for one it attached to (`Existing`, which spawns
+nothing — a second window manager on a desktop somebody is using would be
+destructive). Destruction tears down exactly what was started, by recorded
+pidfd, SIGTERM before SIGKILL, never by process name.
+
+```sh
+build/dev/examples/provision_display          # headless, then print the report
+```
+
 ## Build
 
 ```sh

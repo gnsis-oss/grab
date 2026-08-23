@@ -33,6 +33,7 @@ add_executable(grab_core_tests
     kernel/test_interpreter.cpp
     kernel/test_execute.cpp
     kernel/test_player.cpp
+    sequence/test_sequence_api.cpp
     config/test_batch_manifest.cpp
     config/test_environment.cpp
     config/test_load.cpp
@@ -91,7 +92,7 @@ add_executable(grab_core_tests
     transport/test_service.cpp
     transport/test_service_hardening.cpp
 )
-target_link_libraries(grab_core_tests PRIVATE grab_core grab_kernel grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
+target_link_libraries(grab_core_tests PRIVATE grab_core grab_kernel grab_codec grab_screen grab_image grab_input grab_notify grab_proto grab_sequence grab_transport grab_storage grab_service ${GRAB_LIBAV_TARGETS} GTest::gtest_main)
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(grab_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/compat/x11_relocation_shim)
 target_compile_definitions(grab_core_tests PRIVATE
@@ -333,6 +334,8 @@ endif()
 add_executable(grab_session_tests
     session/fake_session_provider_test.cpp
     session/manager_test.cpp
+    session/poll_wait_test.cpp
+    session/provisioning_test.cpp
     session/registry_test.cpp
     session/record_test.cpp
     session/selection_test.cpp

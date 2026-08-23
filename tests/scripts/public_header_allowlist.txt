@@ -30,11 +30,13 @@ pid.hpp
 pointer_button.hpp
 presentation.hpp
 process_ref.hpp
+provisioning.hpp
 query.hpp
 relation.hpp
 result.hpp
 role.hpp
 screen.hpp
+sequence.hpp
 sequence_types.hpp
 session.hpp
 space.hpp
