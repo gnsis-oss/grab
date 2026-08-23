@@ -357,6 +357,10 @@ namespace ladder::host
                                   std::string>>
                                   child_env() const;
 
+            // Set at browser selection: Chromium and Gecko need different
+            // child environments (see child_env).
+            bool                  chromium_{};
+
             std::string           display_;
             std::filesystem::path run_dir_;
             // "WIDTHxHEIGHT" — the nested screen size, shared by the X server
@@ -400,14 +404,23 @@ namespace ladder::host
                           std::string>>
     Host::child_env() const
     {
-        return {
-            {                    "DISPLAY",          display_},
-            {   "DBUS_SESSION_BUS_ADDRESS",      bus_address_},
-            {        "GNOME_ACCESSIBILITY",               "1"},
-            {                "GTK_MODULES", "gail:atk-bridge"},
-            {"MOZ_DISABLE_CONTENT_SANDBOX",               "1"},
-            {                       "HOME", run_dir_.string()},
+        // GTK_MODULES=gail:atk-bridge is for GECKO only: Chromium speaks
+        // AT-SPI natively, and loading the GTK bridge on top deadlocks its
+        // startup against the registry — the browser stays alive for the
+        // whole window wait and never maps anything. Measured, not theory:
+        // the same binary with the same flags maps instantly without it.
+        std::vector<std::pair<std::string, std::string>> env{
+            {                 "DISPLAY",          display_},
+            {"DBUS_SESSION_BUS_ADDRESS",      bus_address_},
+            {     "GNOME_ACCESSIBILITY",               "1"},
+            {                    "HOME", run_dir_.string()},
         };
+        if( !chromium_ )
+        {
+            env.emplace_back( "GTK_MODULES", "gail:atk-bridge" );
+            env.emplace_back( "MOZ_DISABLE_CONTENT_SANDBOX", "1" );
+        }
+        return env;
     }
 
     bool
@@ -622,9 +635,52 @@ namespace ladder::host
         }
         std::cout << "  at-spi     accessibility bus up\n";
 
+        // ── browser selection ───────────────────────────────────────────────
+        //
+        // The browser is whatever this machine actually has, in flavor-aware
+        // launch grammar: Gecko and Chromium spell profile, window size and
+        // remoting-suppression differently, and grab's AT-SPI role table
+        // already speaks both engines' role names ("document frame" and
+        // "document web", "push button" and "button"). GRAB_STAGE_BROWSER
+        // overrides; SPIDER_FIREFOX is honoured for compatibility with the
+        // spider harnesses. This exists because the suite went red overnight
+        // when the operator's Firefox snap was removed — a hard-coded binary
+        // is a dependency on someone else's install decisions.
+        // NOLINTNEXTLINE(concurrency-mt-unsafe)
+        const char* const browser_override = std::getenv( "GRAB_STAGE_BROWSER" );
+        // NOLINTNEXTLINE(concurrency-mt-unsafe)
+        const char* const firefox_override = std::getenv( "SPIDER_FIREFOX" );
+        std::string       browser_binary;
+        for( const char* const candidate :
+             { browser_override,
+               firefox_override,
+               "/snap/firefox/current/usr/lib/firefox/firefox",
+               "/usr/bin/firefox",
+               "/usr/bin/brave-browser",
+               "/usr/bin/chromium",
+               "/usr/bin/chromium-browser",
+               "/usr/bin/google-chrome" } )
+        {
+            if( candidate != nullptr &&
+                std::filesystem::exists( candidate ) )
+            {
+                browser_binary = candidate;
+                break;
+            }
+        }
+        if( browser_binary.empty() )
+        {
+            std::cerr << "no browser found — install firefox or brave-browser, "
+                         "or set GRAB_STAGE_BROWSER\n";
+            return false;
+        }
+        const bool gecko = browser_binary.find( "firefox" ) != std::string::npos;
+        chromium_        = !gecko;
+
         // ── browser profile ─────────────────────────────────────────────────
-        const auto profile = run_dir_ / "ffprofile";
+        const auto profile = run_dir_ / ( gecko ? "ffprofile" : "profile" );
         std::filesystem::create_directories( profile, failure );
+        if( gecko )
         {
             std::ofstream prefs{ profile / "user.js", std::ios::binary };
             prefs << R"(user_pref("accessibility.force_disabled", 0);
@@ -649,32 +705,48 @@ user_pref("signon.rememberSignons", false);
 )";
         }
 
-        // NOLINTNEXTLINE(concurrency-mt-unsafe)
-        const char* const firefox_override = std::getenv( "SPIDER_FIREFOX" );
-        const std::string firefox_binary =
-            firefox_override != nullptr
-                ? std::string{ firefox_override }
-                : std::string{ "/snap/firefox/current/usr/lib/firefox/firefox" };
-
-        // --new-instance is what stops an already-running Firefox from
-        // swallowing this launch: without it the URL is handed to the
-        // operator's existing browser over remoting, our child exits at once,
-        // and nothing we can drive ever appears.
-        if( !firefox_.start( "firefox",
-                             { firefox_binary,
-                               "--new-instance",
-                               "--profile",
-                               profile.string(),
-                               "--window-size",
-                               window_size_arg(),
-                               "--new-window",
-                               url },
+        // Gecko: --new-instance stops an already-running Firefox from
+        // swallowing this launch over remoting. Chromium: a private
+        // --user-data-dir is the same guarantee — remoting is per profile.
+        // --no-sandbox because Chromium's sandbox needs unprivileged user
+        // namespaces, which a jailed or hardened host may deny — the same
+        // environments the Firefox snap ran in with its "sandbox disabled"
+        // banner. --force-renderer-accessibility, because Chromium builds
+        // the AT-SPI tree only when asked.
+        std::vector<std::string> argv;
+        if( gecko )
+        {
+            argv = { browser_binary,
+                     "--new-instance",
+                     "--profile",
+                     profile.string(),
+                     "--window-size",
+                     window_size_arg(),
+                     "--new-window",
+                     url };
+        }
+        else
+        {
+            argv = { browser_binary,
+                     "--user-data-dir=" + profile.string(),
+                     "--window-size=" + window_size_arg(),
+                     "--no-first-run",
+                     "--no-default-browser-check",
+                     "--disable-smooth-scrolling",
+                     "--disable-session-crashed-bubble",
+                     "--password-store=basic",
+                     "--no-sandbox",
+                     "--new-window",
+                     url };
+        }
+        if( !firefox_.start( gecko ? "firefox" : "browser",
+                             argv,
                              child_env(),
                              nullptr,
                              browser_log_path().string() ) )
         {
-            std::cerr << "cannot start " << firefox_binary
-                      << " (override with SPIDER_FIREFOX)\n";
+            std::cerr << "cannot start " << browser_binary
+                      << " (override with GRAB_STAGE_BROWSER)\n";
             return false;
         }
 
