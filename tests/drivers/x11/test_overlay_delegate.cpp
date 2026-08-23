@@ -273,15 +273,14 @@ TEST( X11OverlayDelegate,
                      grab::CoordinateSpaceId{ 1U }
     )
                      .has_value() );
-    const auto window =
-        x11_detail::X11OverlayDelegateTestAccess::window( **delegate );
+    const auto window = x11_detail::X11OverlayDelegateTestAccess::window( **delegate );
     ASSERT_NE( window, XCB_WINDOW_NONE );
 
     auto connection = grab::platform::x11::XcbConnection::open( "" );
     ASSERT_TRUE( connection.has_value() );
-    auto* const raw = connection->get();
+    auto* const                raw = connection->get();
 
-    xcb_generic_error_t* raw_intern_error{};
+    xcb_generic_error_t*       raw_intern_error{};
     constexpr std::string_view hintName = "_NET_WM_BYPASS_COMPOSITOR";
     std::unique_ptr<xcb_intern_atom_reply_t, decltype( &std::free )> atom{
         xcb_intern_atom_reply(
@@ -301,17 +300,11 @@ TEST( X11OverlayDelegate,
     ASSERT_EQ( intern_error, nullptr );
     ASSERT_NE( atom, nullptr );
 
-    xcb_generic_error_t* raw_prop_error{};
+    xcb_generic_error_t*                                              raw_prop_error{};
     std::unique_ptr<xcb_get_property_reply_t, decltype( &std::free )> reply{
         xcb_get_property_reply(
             raw,
-            xcb_get_property( raw,
-                              0U,
-                              window,
-                              atom->atom,
-                              XCB_ATOM_CARDINAL,
-                              0U,
-                              1U ),
+            xcb_get_property( raw, 0U, window, atom->atom, XCB_ATOM_CARDINAL, 0U, 1U ),
             &raw_prop_error
         ),
         &std::free,
@@ -327,9 +320,7 @@ TEST( X11OverlayDelegate,
     ASSERT_EQ( xcb_get_property_value_length( reply.get() ),
                static_cast<int>( sizeof( std::uint32_t ) ) );
     std::uint32_t value{};
-    std::memcpy( &value,
-                 xcb_get_property_value( reply.get() ),
-                 sizeof( value ) );
+    std::memcpy( &value, xcb_get_property_value( reply.get() ), sizeof( value ) );
     EXPECT_EQ( value, 2U );
 
     ( *delegate )->close();

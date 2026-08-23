@@ -819,8 +819,7 @@ namespace grab
             return std::unexpected( std::move( listed.error() ) );
         }
 
-        const auto match =
-            std::ranges::find( *listed, *active, &WindowSummary::id );
+        const auto match = std::ranges::find( *listed, *active, &WindowSummary::id );
         if( match == listed->end() )
         {
             return grab::fail( grab::ErrorCode::WindowNotFound,

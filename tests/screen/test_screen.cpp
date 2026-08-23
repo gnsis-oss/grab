@@ -63,7 +63,7 @@ namespace
     constexpr std::string_view otherClass           = "GrabScreenOtherClass";
     constexpr std::string_view missingClass         = "class-that-does-not-exist";
     constexpr std::string_view netClientListAtom    = "_NET_CLIENT_LIST";
-    constexpr std::string_view netActiveWindowAtom   = "_NET_ACTIVE_WINDOW";
+    constexpr std::string_view netActiveWindowAtom  = "_NET_ACTIVE_WINDOW";
     constexpr std::string_view netWmWindowTypeAtom  = "_NET_WM_WINDOW_TYPE";
     constexpr std::string_view splashTypeAtom       = "_NET_WM_WINDOW_TYPE_SPLASH";
     constexpr std::string_view normalTypeAtom       = "_NET_WM_WINDOW_TYPE_NORMAL";

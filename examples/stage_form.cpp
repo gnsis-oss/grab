@@ -104,11 +104,11 @@ namespace
     // The landed value is this fraction of the scale give or take the
     // track's end padding — asserted as a RANGE, never an exact number.
     constexpr double         range_drag_fraction = 0.80;
-    constexpr double         range_low            = 70.0;
-    constexpr double         range_high           = 90.0;
+    constexpr double         range_low           = 70.0;
+    constexpr double         range_high          = 90.0;
 
-    constexpr const char*    typed_text           = "grab";
-    constexpr const char*    typed_number         = "42";
+    constexpr const char*    typed_text          = "grab";
+    constexpr const char*    typed_number        = "42";
     // The date's digits in the order Firefox's en-US segments consume them
     // (mm dd yyyy), and the ISO value the page must end up holding.
     constexpr const char*    typed_date   = "08172026";

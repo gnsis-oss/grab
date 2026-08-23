@@ -699,10 +699,8 @@ namespace grab::drivers::desktop::x11
             const auto           error = take_xcb_owned( raw_error );
             if( error != nullptr || reply == nullptr )
             {
-                return std::unexpected(
-                    make_error( ErrorCode::ProtocolError,
-                                "X11 overlay atom lookup failed" )
-                );
+                return std::unexpected( make_error( ErrorCode::ProtocolError,
+                                                    "X11 overlay atom lookup failed" ) );
             }
             return reply->atom;
         }
@@ -726,24 +724,21 @@ namespace grab::drivers::desktop::x11
         apply_never_bypass_compositor( xcb_connection_t* connection,
                                        xcb_window_t      window )
         {
-            auto atom =
-                intern_atom( connection, "_NET_WM_BYPASS_COMPOSITOR" );
+            auto atom = intern_atom( connection, "_NET_WM_BYPASS_COMPOSITOR" );
             if( !atom.has_value() )
             {
                 return std::unexpected( std::move( atom.error() ) );
             }
-            return check_request(
-                connection,
-                xcb_change_property_checked( connection,
-                                             XCB_PROP_MODE_REPLACE,
-                                             window,
-                                             *atom,
-                                             XCB_ATOM_CARDINAL,
-                                             cardinalPropertyFormat,
-                                             1U,
-                                             &bypassCompositorNever ),
-                "set X11 overlay _NET_WM_BYPASS_COMPOSITOR"
-            );
+            return check_request( connection,
+                                  xcb_change_property_checked( connection,
+                                                               XCB_PROP_MODE_REPLACE,
+                                                               window,
+                                                               *atom,
+                                                               XCB_ATOM_CARDINAL,
+                                                               cardinalPropertyFormat,
+                                                               1U,
+                                                               &bypassCompositorNever ),
+                                  "set X11 overlay _NET_WM_BYPASS_COMPOSITOR" );
         }
 
         [[nodiscard]]
@@ -2088,8 +2083,8 @@ namespace grab::drivers::desktop::x11
                     return window_created;
                 }
 
-                auto bypass = apply_never_bypass_compositor( connection_.get(),
-                                                             window_ );
+                auto bypass =
+                    apply_never_bypass_compositor( connection_.get(), window_ );
                 if( !bypass.has_value() )
                 {
                     return bypass;
